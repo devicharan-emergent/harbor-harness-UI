@@ -1,0 +1,35 @@
+/* Agent Configuration Manager - App Styles */
+
+/* Transitions for interactive elements only */
+button, a, input, select, textarea {
+  transition-property: background-color, border-color, color, box-shadow, opacity;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Active state for buttons */
+button:active {
+  transform: scale(0.98);
+}
+
+/* Badge animations */
+.unsaved-dot {
+  transition-property: opacity;
+  transition-duration: 200ms;
+}
+
+/* Drag and drop styles */
+.dragging {
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+  z-index: 50;
+}
+
+.drag-overlay {
+  opacity: 0.9;
+}
+
+/* Remove default focus ring, use border instead */
+*:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px hsl(var(--ring) / 0.35);
+}

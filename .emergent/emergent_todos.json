@@ -1,0 +1,26 @@
+[
+  {
+    "content": "Backend: Add dataset CRUD proxy endpoints (POST, PUT, DELETE)",
+    "status": "in_progress"
+  },
+  {
+    "content": "Frontend: Build Datasets page with list/create/edit/delete + type-specific forms",
+    "status": "pending"
+  },
+  {
+    "content": "Frontend: Add nav link for Datasets page in sidebar",
+    "status": "pending"
+  },
+  {
+    "content": "Frontend: Update RunEvalModal - add agent selection step with fan-out + 1:1 mapping",
+    "status": "pending"
+  },
+  {
+    "content": "Frontend: Show agent association on EvalRuns table + JobDetail page",
+    "status": "pending"
+  },
+  {
+    "content": "Test batch eval + dataset CRUD end-to-end",
+    "status": "pending"
+  }
+]

@@ -1,0 +1,115 @@
+{
+  "summary": "Comprehensive testing of ACM iteration 13 features: EvalRuns grouped view, environment switcher, group API, and mandatory Group ID in RunEvalModal. All 13 requested features are working correctly.",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "/api/eval/groups/{group_id}/jobs",
+        "issue": "Console warning about Collapsible switching between controlled/uncontrolled state when expanding groups. This is a frontend React issue, not backend.",
+        "priority": "LOW"
+      }
+    ]
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+
+  "passed_tests": [
+    "Backend: GET /api/eval/groups/grp-13/jobs returns jobs for that group (3 jobs returned)",
+    "Backend: GET /api/eval/groups/test-group-123/jobs works correctly",
+    "Backend: Group API with pagination params (limit, offset) works",
+    "Backend: Non-existent group returns empty jobs array (200 status)",
+    "Backend: GET /api/eval/stats returns correct stats object format",
+    "Backend: GET /api/eval/jobs with status filter works",
+    "EvalRuns page: Shows collapsible group cards instead of flat job table (44 groups found)",
+    "EvalRuns page: Each group card shows group_id (grp-13, mfarm1.5, test-group-123, etc.)",
+    "EvalRuns page: Each group card shows job count badge (e.g., '3 jobs')",
+    "EvalRuns page: Each group card shows agent badges for agents in group",
+    "EvalRuns page: Each group card shows status dots/summary",
+    "EvalRuns page: Each group card shows avg score badge (e.g., 'avg 97%')",
+    "EvalRuns page: Clicking a group card expands to show individual job rows",
+    "EvalRuns page: Individual job rows show problem, agent/model badges, status, score",
+    "EvalRuns page: Job rows are clickable and navigate to job detail page",
+    "EvalRuns page: Status filter buttons (All, Queued, Running, Completed, Failed, Cancelled) work",
+    "EvalRuns page: Stats cards at top display correctly",
+    "Sidebar: Environment switcher visible with Dev/Ephemeral options",
+    "Sidebar: Selecting Dev shows cortex URL http://agentsdk.internal-staging.emergentagent.com",
+    "Sidebar: Selecting Ephemeral shows text input for eph name",
+    "Sidebar: Ephemeral with name 'builder-1' generates correct cortex URL",
+    "Run Eval Modal: Group ID field present in Configure step (step 4) and marked mandatory",
+    "Run Eval Modal: Next button disabled without Group ID on step 4",
+    "Run Eval Modal: Next button enables after entering Group ID",
+    "Run Eval Modal: Cortex URL auto-populated from environment switcher (Dev URL shown)",
+    "Run Eval Modal: Review step shows Group ID correctly"
+  ],
+
+  "test_report_links": [
+    "/app/backend/tests/test_group_api.py",
+    "/app/test_reports/pytest/pytest_results_iteration13.xml"
+  ],
+
+  "action_items": [],
+
+  "critical_code_review_comments": [
+    "React Collapsible component warning: 'Collapsible is changing from uncontrolled to controlled' - Consider initializing expandedGroups with explicit values to avoid this warning",
+    "All requested features implemented correctly",
+    "Group API endpoint properly proxies to http://harness-eval.int-worker.dev.emergentagent.com/api/v1/groups/{group_id}/evals",
+    "Environment switcher properly stores state in localStorage (acm_env, acm_eph_name)",
+    "EnvProvider correctly wraps app and provides cortexUrl via useEnv() hook",
+    "RunEvalModal correctly uses useEnv() to get cortexUrl and auto-populates expCortexUrl"
+  ],
+
+  "updated_files": [
+    "/app/backend/tests/test_group_api.py"
+  ],
+
+  "success_rate": {
+    "backend": "100% (9/9 tests passed)",
+    "frontend": "100% (all 26 feature tests passed)"
+  },
+
+  "seed_data_creation": "None - used existing jobs and groups from Eval API",
+
+  "retest_needed": false,
+
+  "should_main_agent_self_test": false,
+
+  "context_for_next_testing_agent": "All iteration 13 features verified: EvalRuns page now shows grouped view with collapsible cards (data-testid='group-{group_id}'). Each card shows group_id, job count, agent badges, status summary, avg score. Expanding calls GET /api/eval/groups/{group_id}/jobs. Environment switcher in sidebar works with Dev/Ephemeral options, persists to localStorage. RunEvalModal has mandatory Group ID field in step 4 (data-testid='eval-group-id') that disables Next button when empty. Cortex URL auto-populates from environment switcher.",
+
+  "features_verified": {
+    "group_api_endpoint": {
+      "endpoint": "GET /api/eval/groups/{group_id}/jobs",
+      "tested_groups": ["grp-13", "test-group-123"],
+      "response_format": {"group_id": "string", "jobs": "array"}
+    },
+    "eval_runs_grouped_view": {
+      "groups_displayed": 44,
+      "collapsible_cards": true,
+      "group_card_elements": ["group_id", "job_count_badge", "agent_badges", "status_dots", "avg_score"],
+      "expandable_to_job_rows": true,
+      "job_row_clickable": true
+    },
+    "environment_switcher": {
+      "location": "sidebar",
+      "options": ["Dev", "Ephemeral"],
+      "dev_cortex_url": "http://agentsdk.internal-staging.emergentagent.com",
+      "ephemeral_url_format": "https://cortex-{name}-tit7tznrtq-uc.a.run.app",
+      "persistence": "localStorage (acm_env, acm_eph_name)"
+    },
+    "run_eval_modal_group_id": {
+      "field_present": true,
+      "step": 4,
+      "mandatory": true,
+      "next_button_disabled_without": true,
+      "data_testid": "eval-group-id"
+    },
+    "run_eval_modal_cortex_url": {
+      "auto_populated_from_env": true,
+      "dev_url_displayed": "http://agentsdk.internal-staging.emergentagent.com"
+    }
+  }
+}

@@ -1,0 +1,123 @@
+{
+  "summary": "Comprehensive frontend testing of ACM app updates: Dataset Editor mandatory fields with asterisk markers, Image field removal for scratch_bench_phased, and 5-step Run Eval Modal with drag-and-drop pairing. All requested features are working correctly.",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/eval/datasets",
+        "issue": "External Eval API validation requires problem_statement wrapped in <phases></phases> tags for scratch_bench_phased type",
+        "priority": "EXTERNAL_API",
+        "note": "This is expected backend validation behavior, not a bug"
+      }
+    ]
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "component": "DatasetEditorModal / RunEvalModal",
+        "issue": "Console warning: Missing Description or aria-describedby for DialogContent",
+        "priority": "LOW",
+        "details": "Accessibility warning in console, doesn't affect functionality"
+      }
+    ]
+  },
+
+  "passed_tests": [
+    "DatasetEditorModal: Problem Statement field has asterisk (*) marker",
+    "DatasetEditorModal: Natural Language Tests field has asterisk (*) marker",
+    "DatasetEditorModal: Validation rejects empty Problem Statement with toast error",
+    "DatasetEditorModal: Validation rejects empty Natural Language Tests with toast error",
+    "DatasetEditorModal: scratch_bench_phased type has NO Image field in attributes",
+    "DatasetEditorModal: bug_bench type HAS Image field in attributes",
+    "DatasetEditorModal: bug_bench shows Repo, Eph Job ID, Image, Agent Name, Model Name fields",
+    "DatasetEditorModal: scratch_bench_phased shows only Subagents, Preview URL, Agent Name fields",
+    "RunEvalModal: Has 5 steps - Problems, Agents, Pair & Order, Configure, Review",
+    "RunEvalModal Step 1: Dataset list with checkboxes for multi-select",
+    "RunEvalModal Step 2: Agent list with checkboxes, Skip Agents button shown when none selected",
+    "RunEvalModal Step 3: Drag handles (GripVertical) visible on each pair row",
+    "RunEvalModal Step 3: First row shows '1st' badge",
+    "RunEvalModal Step 3: Subsequent rows show clock icon with queue number (2, 3, etc.)",
+    "RunEvalModal Step 3: Agent dropdown per row allows changing agent assignment",
+    "RunEvalModal Step 3: Problem dropdown per row allows changing problem assignment",
+    "RunEvalModal Step 3: 'Add Row' button successfully adds new pair row",
+    "RunEvalModal Step 3: Trash button successfully removes pair row",
+    "RunEvalModal Step 3: Queue notice shows 'Job #1 will start immediately. Jobs #2-N will be queued'",
+    "RunEvalModal Step 4: Configure resources - CPUs, Memory, Storage, User ID inputs work",
+    "RunEvalModal Step 4: Headed browser and Force rebuild toggles present",
+    "RunEvalModal Step 4: Experiment Config (optional) expandable section present",
+    "RunEvalModal Step 5 Review: Shows 'RUN' badge for first job",
+    "RunEvalModal Step 5 Review: Shows 'Q' badges (Q1, Q2, etc.) for queued jobs",
+    "RunEvalModal Step 5 Review: Queue notice appears when >1 job",
+    "RunEvalModal Step 5 Review: Submit button shows correct job count",
+    "RunEvalModal: Step navigation works correctly (Next, Back buttons)",
+    "RunEvalModal: All 5 step indicators are clickable for completed steps"
+  ],
+
+  "test_report_links": [
+    "/app/test_reports/iteration_11.json"
+  ],
+
+  "action_items": [],
+
+  "critical_code_review_comments": [
+    "All requested features implemented correctly",
+    "@dnd-kit integration working - drag handles render and pair rows have proper data-testid attributes",
+    "Mandatory field markers (*) properly displayed for Problem Statement and Natural Language Tests",
+    "Type-specific attributes correctly show/hide Image field based on dataset type"
+  ],
+
+  "updated_files": [],
+
+  "success_rate": {
+    "backend": "N/A (frontend only testing)",
+    "frontend": "100% (all 28 feature tests passed)"
+  },
+
+  "seed_data_creation": "None - used existing datasets and agents from API",
+
+  "retest_needed": false,
+
+  "should_main_agent_self_test": false,
+
+  "context_for_next_testing_agent": "All requested features for iteration 11 are working: DatasetEditorModal has mandatory fields with asterisks, scratch_bench_phased has no Image field while bug_bench does, RunEvalModal has 5-step wizard with drag-and-drop pairing in Step 3. The @dnd-kit library is properly integrated with drag handles, position badges, and queue notices. Each pair row has data-testid='pair-row-{id}' and drag-handle-{id} for automated testing.",
+
+  "features_verified": {
+    "dataset_editor_mandatory_fields": {
+      "problem_statement_asterisk": true,
+      "nl_tests_asterisk": true,
+      "validation_rejects_empty_problem_statement": true,
+      "validation_rejects_empty_nl_tests": true
+    },
+    "dataset_editor_type_specific_fields": {
+      "scratch_bench_phased_no_image": true,
+      "bug_bench_has_image": true
+    },
+    "run_eval_modal_5_steps": {
+      "step1_problems": true,
+      "step2_agents": true,
+      "step3_pair_and_order": true,
+      "step4_configure": true,
+      "step5_review": true
+    },
+    "run_eval_modal_step3_features": {
+      "drag_handles": true,
+      "first_row_1st_badge": true,
+      "subsequent_rows_clock_queue_number": true,
+      "agent_dropdown": true,
+      "problem_dropdown": true,
+      "add_row_button": true,
+      "trash_remove_button": true,
+      "queue_notice": true
+    },
+    "run_eval_modal_step5_review": {
+      "run_badge_first_job": true,
+      "q_badges_queued_jobs": true,
+      "queue_notice_when_multiple_jobs": true,
+      "submit_button_shows_job_count": true
+    }
+  }
+}

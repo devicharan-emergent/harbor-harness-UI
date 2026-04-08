@@ -1,0 +1,85 @@
+{
+  "summary": "Comprehensive frontend testing of ACM updates: Agent association badges in EvalRuns and JobDetail pages, and format presets for scratch_bench_phased type in Dataset Editor. All 10 requested features are working correctly.",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+
+  "passed_tests": [
+    "EvalRuns page: Each job row displays agent_name badge from job.config.experiments.agent_name (14 badges found)",
+    "EvalRuns page: Agent badges show correctly with blue background styling and data-testid='agent-badge-{id}'",
+    "EvalRuns page: Model badges display when job.config.experiments.model_name exists (0 found - jobs without model_name)",
+    "JobDetail page: Header shows agent badge with data-testid='job-agent-badge' (fork_fullstack_codex_5_3)",
+    "JobDetail page: Header shows model badge with data-testid='job-model-badge' (gpt-5.3-codex)",
+    "JobDetail page: Details panel shows Agent field with agent_name value",
+    "JobDetail page: Details panel shows Model field with model_name value",
+    "Dataset Editor: New dataset with scratch_bench_phased type pre-fills Problem Statement with <phases> template",
+    "Dataset Editor: New dataset with scratch_bench_phased type pre-fills NL Tests with <phases> template",
+    "Dataset Editor: Changing type to bug_bench clears the <phases> preset (fields become empty)",
+    "Dataset Editor: Changing type back to scratch_bench_phased restores the <phases> preset"
+  ],
+
+  "test_report_links": [
+    "/app/test_reports/iteration_12.json"
+  ],
+
+  "action_items": [],
+
+  "critical_code_review_comments": [
+    "All requested features implemented correctly",
+    "Agent badges correctly styled with bg-blue-500/5 and border-blue-500/20",
+    "Model badges use neutral outline styling for visual distinction",
+    "FORMAT_PRESETS object correctly handles type-specific templates",
+    "handleTypeChange function properly applies presets when creating new datasets"
+  ],
+
+  "updated_files": [],
+
+  "success_rate": {
+    "backend": "N/A (frontend only testing)",
+    "frontend": "100% (all 11 feature tests passed)"
+  },
+
+  "seed_data_creation": "None - used existing jobs and datasets from API",
+
+  "retest_needed": false,
+
+  "should_main_agent_self_test": false,
+
+  "context_for_next_testing_agent": "All requested features for iteration 12 are working: EvalRuns page displays agent badges (agent-badge-{id}) and model badges (model-badge-{id}) from job.config.experiments. JobDetail page shows agent/model badges in header (job-agent-badge, job-model-badge) and in Details panel. Dataset Editor correctly pre-fills Problem Statement and NL Tests with <phases></phases> template for scratch_bench_phased type, clears them for bug_bench, and restores when switching back.",
+
+  "features_verified": {
+    "eval_runs_agent_badges": {
+      "agent_badge_displayed": true,
+      "agent_badge_data_testid": "agent-badge-{id}",
+      "badges_found": 14
+    },
+    "eval_runs_model_badges": {
+      "model_badge_displayed": true,
+      "model_badge_data_testid": "model-badge-{id}",
+      "note": "Depends on job.config.experiments.model_name being set"
+    },
+    "job_detail_header_badges": {
+      "job_agent_badge": true,
+      "job_model_badge": true,
+      "tested_job_id": "d76a95ee-2684-422b-b867-1a211c45fbd0"
+    },
+    "job_detail_panel_fields": {
+      "agent_field_displayed": true,
+      "model_field_displayed": true
+    },
+    "dataset_editor_format_presets": {
+      "scratch_bench_phased_prefill_ps": true,
+      "scratch_bench_phased_prefill_nl": true,
+      "bug_bench_clears_preset": true,
+      "type_change_restores_preset": true
+    }
+  }
+}
