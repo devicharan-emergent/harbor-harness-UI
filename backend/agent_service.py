@@ -178,7 +178,7 @@ class MongoDBAgentService(AgentService):
             query["tags"] = {"$in": tag_list}
 
         cursor = self.agents_collection.find(query).sort("created_at", -1)
-        agents = await cursor.to_list(length=None)
+        agents = await cursor.to_list(length=1000)
         return [serialize_doc(agent) for agent in agents]
 
     async def get_agent(self, agent_id: str) -> Dict:
