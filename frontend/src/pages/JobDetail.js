@@ -124,8 +124,9 @@ export default function JobDetail() {
   // Scores at top level per API docs
   const browserReward = job.browser_reward;
   const lintiqScore = job.lintiq_score;
+  const lintScore = job.lint_score;
   const combinedReward = job.combined_reward;
-  const hasScores = browserReward !== undefined || lintiqScore !== undefined || combinedReward !== undefined;
+  const hasScores = browserReward !== undefined || lintiqScore !== undefined || lintScore !== undefined || combinedReward !== undefined;
   const phaseResults = job.phase_results || [];
 
   return (
@@ -438,6 +439,15 @@ export default function JobDetail() {
                       <span className="text-xs font-mono">{Number(lintiqScore).toFixed(3)}</span>
                     </div>
                     <Progress value={Number(lintiqScore) * 100} className="h-2" />
+                  </div>
+                )}
+                {lintScore !== undefined && lintScore !== null && (
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-medium">Lint Score</span>
+                      <span className="text-xs font-mono">{Number(lintScore).toFixed(3)}</span>
+                    </div>
+                    <Progress value={Number(lintScore) * 100} className="h-2" />
                   </div>
                 )}
                 {combinedReward !== undefined && combinedReward !== null && (
