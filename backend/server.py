@@ -78,7 +78,7 @@ async def get_config():
     caps = service.get_capabilities()
     return {
         "data_source": caps.get("data_source", "mongodb"),
-        "builder_api_url": "https://cortex-eph-builder-1035522277200.us-central1.run.app",
+        "builder_api_url": BUILDER_PROXY_BASE.replace("/api/v1/builder", ""),
         "eval_api_url": EVAL_API_BASE
     }
 
@@ -209,7 +209,7 @@ async def restore_version(agent_id: str, version: int):
 # ── Eval API Proxy ──────────────────────────────────────────────────────
 
 EVAL_API_BASE = os.environ.get("EVAL_API_BASE", "http://harness-eval.int-worker.dev.emergentagent.com")
-BUILDER_API_BASE = "http://agentsdk.internal-staging.emergentagent.com/api/v1/builder"
+BUILDER_PROXY_BASE = os.environ.get("BUILDER_API_BASE", "https://cortex-eph-builder-1035522277200.us-central1.run.app/api/v1/builder")
 
 @api_router.post("/eval/jobs")
 async def proxy_submit_eval(body: dict):
@@ -549,7 +549,7 @@ async def proxy_builder_health():
     """Proxy: Check Builder API health"""
     try:
         async with httpx.AsyncClient(timeout=5.0) as hclient:
-            response = await hclient.get("https://cortex-eph-builder-1035522277200.us-central1.run.app/api/v1/builder/agents?source=all")
+            response = await hclient.get(f"{BUILDER_PROXY_BASE}/agents?source=all")
             return {"healthy": response.status_code == 200}
     except Exception:
         return {"healthy": False}
@@ -559,7 +559,7 @@ async def proxy_builder_models():
     """Proxy: Get available models from Builder API"""
     try:
         async with httpx.AsyncClient(timeout=10.0) as hclient:
-            response = await hclient.get("https://cortex-eph-builder-1035522277200.us-central1.run.app/api/v1/builder/models")
+            response = await hclient.get(f"{BUILDER_PROXY_BASE}/models")
             response.raise_for_status()
             return response.json()
     except Exception as e:
@@ -570,7 +570,7 @@ async def proxy_builder_tools():
     """Proxy: Get available tools from Builder API"""
     try:
         async with httpx.AsyncClient(timeout=10.0) as hclient:
-            response = await hclient.get("https://cortex-eph-builder-1035522277200.us-central1.run.app/api/v1/builder/tools")
+            response = await hclient.get(f"{BUILDER_PROXY_BASE}/tools")
             response.raise_for_status()
             return response.json()
     except Exception as e:
@@ -581,7 +581,7 @@ async def proxy_builder_prompts():
     """Proxy: Get available prompts from Builder API"""
     try:
         async with httpx.AsyncClient(timeout=10.0) as hclient:
-            response = await hclient.get("https://cortex-eph-builder-1035522277200.us-central1.run.app/api/v1/builder/prompts")
+            response = await hclient.get(f"{BUILDER_PROXY_BASE}/prompts")
             response.raise_for_status()
             return response.json()
     except Exception as e:
