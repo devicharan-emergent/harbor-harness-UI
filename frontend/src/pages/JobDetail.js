@@ -768,6 +768,76 @@ export default function JobDetail() {
                         );
                       })}
 
+                      {/* Phase Lint Report */}
+                      {phase.lint_report && phase.lint_report.raw_output?.files?.some(f => f.error_count > 0) && (
+                        <div className="mt-2 rounded-lg border border-red-400/20 bg-red-50/40 dark:bg-red-950/20 p-3 space-y-3">
+                          {/* Header */}
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-semibold text-red-700 dark:text-red-400">Lint Issues</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-mono text-muted-foreground">
+                                {phase.lint_report.summary?.files_with_errors} file{phase.lint_report.summary?.files_with_errors !== 1 ? 's' : ''} · {phase.lint_report.summary?.total_errors} error{phase.lint_report.summary?.total_errors !== 1 ? 's' : ''}
+                              </span>
+                              <span className={`text-[10px] font-mono font-medium ${phase.lint_report.overall_score >= 80 ? 'text-amber-500' : 'text-red-500'}`}>
+                                {phase.lint_report.overall_score}/100
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Error breakdown badges */}
+                          {phase.lint_report.summary?.error_breakdown && Object.keys(phase.lint_report.summary.error_breakdown).length > 0 && (
+                            <div className="flex flex-wrap gap-1.5">
+                              {Object.entries(phase.lint_report.summary.error_breakdown).map(([code, count]) => (
+                                <Badge key={code} variant="outline" className="text-[9px] font-mono border-red-400/40 text-red-600 dark:text-red-400 py-0">
+                                  {code} &times; {count}
+                                </Badge>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Recommendations */}
+                          {phase.lint_report.recommendations?.length > 0 && (
+                            <div className="space-y-1">
+                              {phase.lint_report.recommendations.map((rec, rIdx) => (
+                                <div key={rIdx} className="flex items-start gap-1.5 text-[11px]">
+                                  <span className="mt-1 w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" />
+                                  <span className="text-foreground/70 leading-relaxed">{rec}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Files with errors */}
+                          <div className="space-y-2">
+                            {phase.lint_report.raw_output.files
+                              .filter(f => f.error_count > 0)
+                              .map((file, fIdx) => (
+                                <div key={fIdx} className="space-y-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[10px] font-mono text-muted-foreground truncate flex-1 min-w-0">{file.file}</span>
+                                    <Badge variant="outline" className="text-[9px] font-mono text-red-500 border-red-400/30 flex-shrink-0 py-0">
+                                      {file.error_count} err{file.error_count !== 1 ? 's' : ''}
+                                    </Badge>
+                                  </div>
+                                  <div className="pl-2 space-y-1">
+                                    {file.errors.map((err, eIdx) => (
+                                      <div key={eIdx} className="flex items-start gap-2 text-[10px] font-mono bg-white/60 dark:bg-black/20 rounded px-2 py-1">
+                                        <span className="text-muted-foreground flex-shrink-0 w-12">L{err.line}:{err.column}</span>
+                                        <Badge variant="outline" className="text-[8px] py-0 h-auto border-red-300 text-red-600 dark:text-red-400 flex-shrink-0">
+                                          {err.code}
+                                        </Badge>
+                                        <span className="text-foreground/70 break-all leading-relaxed">
+                                          {err.message.replace(new RegExp(`^${err.code}\\s*`), '')}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      )}
+
                       {phaseIdx < phaseResults.length - 1 && <Separator />}
                     </div>
                   );
