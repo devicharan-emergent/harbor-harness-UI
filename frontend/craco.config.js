@@ -69,6 +69,12 @@ let webpackConfig = {
 };
 
 webpackConfig.devServer = (devServerConfig) => {
+  // Allow requests from any host — required for Kubernetes/cloud deployments
+  // where the health checker uses an internal hostname different from localhost.
+  // Without this, webpack-dev-server returns 400 "Invalid Host header" for
+  // any request whose Host header is not localhost.
+  devServerConfig.allowedHosts = 'all';
+
   // Add health check endpoints if enabled
   if (config.enableHealthCheck && setupHealthEndpoints && healthPluginInstance) {
     const originalSetupMiddlewares = devServerConfig.setupMiddlewares;
