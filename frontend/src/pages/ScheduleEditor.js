@@ -51,6 +51,31 @@ const CRON_PRESETS = [
   { label: 'Weekdays at 3 AM IST', value: '0 3 * * 1-5' },
 ];
 
+// Validate cron: only hour-level schedules allowed (minute field MUST be "0")
+// Returns { valid: boolean, error: string | null }
+function validateCron(expr) {
+  if (!expr || !expr.trim()) {
+    return { valid: false, error: 'Cron expression is required' };
+  }
+  const parts = expr.trim().split(/\s+/);
+  if (parts.length !== 5) {
+    return {
+      valid: false,
+      error: 'Cron must have exactly 5 fields: minute hour day month weekday',
+    };
+  }
+  const [min] = parts;
+  // Minute must be exactly "0" — no 30, no *, no */15, no ranges, no lists
+  if (min !== '0') {
+    return {
+      valid: false,
+      error:
+        'Only hour-level schedules are allowed. The minute field must be 0 (e.g. "0 3 * * *"). You cannot set times like 2:30 or 3:50.',
+    };
+  }
+  return { valid: true, error: null };
+}
+
 // Get problem_id for a dataset row: "{dataset_type}/{instance_id}"
 function datasetToProblemId(ds) {
   if (ds.name && ds.name.includes('/')) return ds.name;
@@ -140,8 +165,10 @@ export default function ScheduleEditor() {
     setProblemIds((prev) => prev.filter((x) => x !== pid));
   };
 
+  const cronValidation = validateCron(cronExpression);
+
   const canProceedFromStep = (s) => {
-    if (s === 1) return name.trim().length > 0 && cronExpression.trim().length > 0;
+    if (s === 1) return name.trim().length > 0 && cronValidation.valid;
     if (s === 2) return problemIds.length > 0;
     return true;
   };
@@ -151,8 +178,8 @@ export default function ScheduleEditor() {
       toast.error('Name is required');
       return;
     }
-    if (!cronExpression.trim()) {
-      toast.error('Cron expression is required');
+    if (!cronValidation.valid) {
+      toast.error(cronValidation.error || 'Invalid cron expression');
       return;
     }
     if (problemIds.length === 0) {
@@ -271,7 +298,8 @@ export default function ScheduleEditor() {
                 Cron Expression *
               </Label>
               <p className="text-[11px] text-muted-foreground mt-0.5 mb-2">
-                Standard 5-field cron in Asia/Kolkata (IST) timezone
+                Standard 5-field cron in Asia/Kolkata (IST). Only whole-hour schedules allowed (minute
+                must be 0).
               </p>
 
               <div className="flex items-center gap-2">
@@ -280,8 +308,13 @@ export default function ScheduleEditor() {
                   value={cronExpression}
                   onChange={(e) => setCronExpression(e.target.value)}
                   placeholder="0 3 * * *"
-                  className="font-mono text-sm flex-1"
+                  className={`font-mono text-sm flex-1 ${
+                    !cronValidation.valid && cronExpression.trim()
+                      ? 'border-destructive focus-visible:ring-destructive'
+                      : ''
+                  }`}
                   data-testid="schedule-cron-input"
+                  aria-invalid={!cronValidation.valid}
                 />
                 <Select
                   value=""
@@ -298,21 +331,34 @@ export default function ScheduleEditor() {
                         {p.label}
                       </SelectItem>
                     ))}
-                    <SelectItem value="_custom">Custom (advanced)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
-              <div className="mt-2 rounded-md border bg-accent/30 px-3 py-2 flex items-center gap-2">
-                <Clock className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-                <span className="text-xs text-muted-foreground">This will run:</span>
-                <span className="text-xs font-semibold" data-testid="cron-humanized">
-                  {humanizeCron(cronExpression)}
-                </span>
-              </div>
+              {/* Validation error (minutes not allowed) */}
+              {!cronValidation.valid && cronExpression.trim() && (
+                <p
+                  className="mt-2 text-xs text-destructive font-medium flex items-start gap-1.5"
+                  data-testid="cron-validation-error"
+                >
+                  <span aria-hidden="true">⚠</span>
+                  <span>{cronValidation.error}</span>
+                </p>
+              )}
+
+              {cronValidation.valid && (
+                <div className="mt-2 rounded-md border bg-accent/30 px-3 py-2 flex items-center gap-2">
+                  <Clock className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                  <span className="text-xs text-muted-foreground">This will run:</span>
+                  <span className="text-xs font-semibold" data-testid="cron-humanized">
+                    {humanizeCron(cronExpression)}
+                  </span>
+                </div>
+              )}
 
               <p className="text-[11px] text-muted-foreground mt-2">
-                Batches are checked hourly. Schedules with minute ≠ 0 may drift up to 59 minutes.
+                Only whole-hour schedules are supported (e.g. 3:00, 9:00, 23:00 IST). Times with minutes
+                like 2:30 or 3:50 are not allowed. Batches are checked hourly.
               </p>
             </div>
           </CardContent>
