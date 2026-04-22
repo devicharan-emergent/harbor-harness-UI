@@ -534,6 +534,100 @@ async def proxy_delete_dataset(dataset_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Eval API error: {str(e)}")
 
+# ── Scheduled Batches ───────────────────────────────────────────────────
+
+@api_router.post("/eval/scheduled-batches")
+async def proxy_create_scheduled_batch(body: dict):
+    """Proxy: Create a new scheduled batch."""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as hclient:
+            response = await hclient.post(f"{EVAL_API_BASE}/api/v1/scheduled-batches", json=body)
+            if response.status_code >= 400:
+                try:
+                    err = response.json()
+                except Exception:
+                    err = {"message": response.text}
+                raise HTTPException(status_code=response.status_code,
+                                    detail=err.get("message", err.get("error", str(err))))
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Eval API error: {str(e)}")
+
+
+@api_router.get("/eval/scheduled-batches")
+async def proxy_list_scheduled_batches(enabled: Optional[str] = None):
+    """Proxy: List scheduled batches. Pass ?enabled=true to filter."""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as hclient:
+            params = {}
+            if enabled is not None:
+                params["enabled"] = enabled
+            response = await hclient.get(f"{EVAL_API_BASE}/api/v1/scheduled-batches", params=params)
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Eval API error: {str(e)}")
+
+
+@api_router.get("/eval/scheduled-batches/{batch_id}")
+async def proxy_get_scheduled_batch(batch_id: str):
+    """Proxy: Get a scheduled batch by ID."""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as hclient:
+            response = await hclient.get(f"{EVAL_API_BASE}/api/v1/scheduled-batches/{batch_id}")
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPError as e:
+        status = getattr(getattr(e, 'response', None), 'status_code', 500)
+        raise HTTPException(status_code=status, detail=f"Eval API error: {str(e)}")
+
+
+@api_router.put("/eval/scheduled-batches/{batch_id}")
+async def proxy_update_scheduled_batch(batch_id: str, body: dict):
+    """Proxy: Update a scheduled batch."""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as hclient:
+            response = await hclient.put(f"{EVAL_API_BASE}/api/v1/scheduled-batches/{batch_id}", json=body)
+            if response.status_code >= 400:
+                try:
+                    err = response.json()
+                except Exception:
+                    err = {"message": response.text}
+                raise HTTPException(status_code=response.status_code,
+                                    detail=err.get("message", err.get("error", str(err))))
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Eval API error: {str(e)}")
+
+
+@api_router.delete("/eval/scheduled-batches/{batch_id}")
+async def proxy_delete_scheduled_batch(batch_id: str):
+    """Proxy: Delete a scheduled batch."""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as hclient:
+            response = await hclient.delete(f"{EVAL_API_BASE}/api/v1/scheduled-batches/{batch_id}")
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Eval API error: {str(e)}")
+
+
+@api_router.post("/eval/scheduled-batches/{batch_id}/trigger")
+async def proxy_trigger_scheduled_batch(batch_id: str):
+    """Proxy: Manually trigger a scheduled batch to fire now."""
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as hclient:
+            response = await hclient.post(f"{EVAL_API_BASE}/api/v1/scheduled-batches/{batch_id}/trigger")
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Eval API error: {str(e)}")
+
+
 @api_router.get("/eval/health")
 async def proxy_eval_health():
     """Proxy: Check Eval API health"""

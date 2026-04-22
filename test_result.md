@@ -101,3 +101,132 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: |
+  Add a new Scheduled Eval Batches feature to ACM. The backend (harbor-harness) now supports named
+  bundles of problems that run automatically on a cron schedule. ACM must expose this feature in its UI:
+  list/create/edit/enable-disable/delete/manually-trigger scheduled batches, and display the eval jobs
+  each batch has fired. Add 6 new proxy routes to server.py plus new /schedules pages (List, Editor,
+  Detail). Do not modify unrelated existing components.
+
+backend:
+  - task: "Scheduled Batches proxy endpoints"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Added 6 new proxy endpoints under /api/eval/scheduled-batches that forward to
+            harbor-harness /api/v1/scheduled-batches:
+              POST   /api/eval/scheduled-batches               → create
+              GET    /api/eval/scheduled-batches?enabled=true  → list (optional enabled filter)
+              GET    /api/eval/scheduled-batches/{id}          → get
+              PUT    /api/eval/scheduled-batches/{id}          → update (partial allowed)
+              DELETE /api/eval/scheduled-batches/{id}          → delete
+              POST   /api/eval/scheduled-batches/{id}/trigger  → trigger now
+            Pattern mirrors the existing proxy_list_eval_jobs / proxy_create_dataset routes.
+            Local sanity: `curl http://localhost:8001/api/eval/scheduled-batches` returned 200.
+        - working: true
+          agent: "testing"
+          comment: |
+            ✅ ALL 6 SCHEDULED BATCHES PROXY ENDPOINTS WORKING CORRECTLY
+            Comprehensive testing completed with 9/9 tests passed:
+            
+            Core CRUD Operations:
+            ✅ GET /api/eval/scheduled-batches → 200 with {batches: []} structure
+            ✅ GET /api/eval/scheduled-batches?enabled=true → 200, query param forwarded correctly
+            ✅ POST /api/eval/scheduled-batches → 201, created batch with proper ID/fields
+            ✅ GET /api/eval/scheduled-batches/{id} → 200, retrieved specific batch
+            ✅ PUT /api/eval/scheduled-batches/{id} → 200, updated enabled field correctly
+            ✅ POST /api/eval/scheduled-batches/{id}/trigger → 202, triggered with eval_job_ids
+            ✅ DELETE /api/eval/scheduled-batches/{id} → 200, successfully deleted
+            
+            Error Handling:
+            ✅ POST with invalid body → 400 with proper validation error message
+            ✅ GET non-existent ID → 404 as expected
+            
+            All endpoints properly proxy to harbor-harness service and handle responses correctly.
+            Backend logs show clean HTTP communication with upstream service.
+            No critical issues found.
+
+frontend:
+  - task: "Schedules UI (List / Editor / Detail + nav entry + routes)"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/pages/SchedulesList.js, ScheduleEditor.js, ScheduleDetail.js, services/schedulesApi.js, App.js, components/layout/AppShell.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Added new /schedules section:
+              - SchedulesList: table of batches (Name, Schedule humanized, Problems count, Last/Next
+                run relative, Jobs fired, Enabled Switch, Actions dropdown with Edit/Trigger Now/Delete),
+                + "Show enabled only" filter, Refresh + New Schedule buttons, empty state.
+              - ScheduleEditor: 4-step wizard (Name+Schedule with cron preset dropdown and live
+                humanized preview, Problems multi-select reusing listDatasets/listDatasetsByType,
+                Enabled toggle, Review), handles both /schedules/new and /schedules/:id/edit.
+              - ScheduleDetail: two-column (Problems + Fired Jobs list linking to /evals/{id}) +
+                sidebar (Details card with copyable ID, schedule, relative & absolute timestamps,
+                Stats card). Polls every 30s for new fired jobs.
+              - App.js: added imports + 4 routes (/schedules, /schedules/new, /schedules/:id,
+                /schedules/:id/edit).
+              - AppShell.js: added "Schedules" nav item with CalendarClock icon between Evals & Datasets.
+            No existing pages/components modified beyond the minimal 3 files called out in the spec.
+
+metadata:
+  created_by: "main_agent"
+  version: "1.0"
+  test_sequence: 1
+  run_ui: false
+
+test_plan:
+  current_focus: []
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+    - agent: "main"
+      message: |
+        Please test the 6 new backend proxy endpoints under /api/eval/scheduled-batches. They are pure
+        pass-throughs to the external harbor-harness service
+        (http://harness-eval.int-worker.dev.emergentagent.com/api/v1/scheduled-batches). Focus on:
+          1. GET /api/eval/scheduled-batches returns 200 with {batches: [...]} shape (may be empty).
+          2. GET /api/eval/scheduled-batches?enabled=true forwards the query param.
+          3. POST /api/eval/scheduled-batches with a body like
+               {"name":"acm-test-NNN", "cron_expression":"0 3 * * *",
+                "problem_ids":["scratch_bench_phased/do_it_app"], "enabled":true}
+             returns the created batch with an `id`. Save the id for subsequent tests and delete it at the end.
+          4. GET /api/eval/scheduled-batches/{id} returns the same object.
+          5. PUT /api/eval/scheduled-batches/{id} with {"enabled":false} returns updated object.
+          6. POST /api/eval/scheduled-batches/{id}/trigger returns {batch_id, eval_job_ids:[...]}.
+          7. DELETE /api/eval/scheduled-batches/{id} returns {status:"deleted"} (or similar 2xx).
+          8. Validation: POST with {"name":"", "cron_expression":"not a cron", "problem_ids":[]}
+             should surface a 4xx error from upstream.
+        If the upstream service doesn't yet have scheduled-batches endpoints live, any 404/5xx error
+        that comes back as a clean HTTPException with a readable message is acceptable — flag it so
+        I can inform the user. Do NOT retest frontend; that will happen after user approval.
+    - agent: "testing"
+      message: |
+        ✅ SCHEDULED BATCHES PROXY ENDPOINTS TESTING COMPLETE - ALL WORKING
+        
+        Successfully tested all 6 scheduled batches proxy endpoints with comprehensive test suite.
+        All 9 test cases passed including CRUD operations and error handling.
+        
+        Key findings:
+        • All endpoints properly proxy to harbor-harness service
+        • Correct HTTP status codes and response structures
+        • Query parameters forwarded correctly (?enabled=true)
+        • Proper error handling for validation and non-existent resources
+        • Clean backend logs with no errors
+        • Upstream harbor-harness service is fully operational
+        
+        The implementation is production-ready. No issues found.

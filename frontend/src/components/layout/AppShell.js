@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
-import { Menu, Cpu, Home, GitCompare, MessageSquare, ActivitySquare, Database } from 'lucide-react';
+import { Menu, Cpu, Home, GitCompare, MessageSquare, ActivitySquare, Database, CalendarClock } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
 import { EnvSwitcher } from './EnvSwitcher';
 import { ApiHealthIndicator } from '@/components/evals/ApiHealthIndicator';
@@ -12,6 +12,7 @@ const navItems = [
   { label: 'Agents', href: '/', icon: Home },
   { label: 'Wizard', href: '/wizard', icon: MessageSquare },
   { label: 'Evals', href: '/evals', icon: ActivitySquare },
+  { label: 'Schedules', href: '/schedules', icon: CalendarClock },
   { label: 'Datasets', href: '/datasets', icon: Database },
   { label: 'Compare', href: '/compare', icon: GitCompare },
 ];
