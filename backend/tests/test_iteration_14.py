@@ -10,7 +10,7 @@ import requests
 import os
 
 # Use environment variable for base URL
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://infallible-babbage.stage-preview.emergentagent.com')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://youthful-haibt-1.stage-preview.emergentagent.com')
 
 
 class TestCapabilitiesAPI:
