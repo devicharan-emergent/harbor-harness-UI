@@ -628,6 +628,30 @@ async def proxy_trigger_scheduled_batch(batch_id: str):
         raise HTTPException(status_code=500, detail=f"Eval API error: {str(e)}")
 
 
+@api_router.get("/eval/scheduled-batches/{batch_id}/runs")
+async def proxy_list_scheduled_batch_runs(
+    batch_id: str,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    """Proxy: List eval job runs fired by a scheduled batch.
+    Each job has a group_run_id formatted as '{batch_id}-{YYYY-MM-DD}'
+    representing one fire of the batch. Group client-side by group_run_id.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as hclient:
+            params = {"limit": limit, "offset": offset}
+            response = await hclient.get(
+                f"{EVAL_API_BASE}/api/v1/scheduled-batches/{batch_id}/runs",
+                params=params,
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPError as e:
+        status = getattr(getattr(e, 'response', None), 'status_code', 500)
+        raise HTTPException(status_code=status, detail=f"Eval API error: {str(e)}")
+
+
 @api_router.get("/eval/health")
 async def proxy_eval_health():
     """Proxy: Check Eval API health"""

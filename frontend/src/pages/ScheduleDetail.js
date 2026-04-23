@@ -1,10 +1,16 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -32,7 +38,10 @@ import {
   ExternalLink,
   Clock,
   FileText,
-  Rocket,
+  History,
+  CheckCircle2,
+  XCircle,
+  RefreshCw,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatDistanceToNow } from 'date-fns';
@@ -41,6 +50,7 @@ import {
   updateScheduledBatch,
   deleteScheduledBatch,
   triggerScheduledBatch,
+  listScheduledBatchRuns,
 } from '@/services/schedulesApi';
 import { parseApiError } from '@/lib/errorUtils';
 import { humanizeCron } from './SchedulesList';
@@ -67,6 +77,47 @@ function formatAbsoluteOrDash(value) {
   }
 }
 
+// Parse "YYYY-MM-DD" from a group_run_id like "{batch_id}-YYYY-MM-DD".
+// Safer than split("-") because batch_id itself contains hyphens (UUID).
+function extractDateFromGroupRunId(groupRunId) {
+  if (!groupRunId || typeof groupRunId !== 'string') return null;
+  const m = groupRunId.match(/(\d{4}-\d{2}-\d{2})$/);
+  return m ? m[1] : null;
+}
+
+// Normalise status for counting — harness may return varied casing
+function normaliseStatus(s) {
+  return (s || '').toString().toLowerCase().trim();
+}
+
+const DONE_STATUSES = new Set(['done', 'completed', 'success', 'succeeded']);
+const FAILED_STATUSES = new Set(['failed', 'error', 'errored']);
+const ACTIVE_STATUSES = new Set(['queued', 'running', 'pending', 'in_progress']);
+
+function classifyStatus(s) {
+  const n = normaliseStatus(s);
+  if (DONE_STATUSES.has(n)) return 'done';
+  if (FAILED_STATUSES.has(n)) return 'failed';
+  if (ACTIVE_STATUSES.has(n)) return 'running';
+  return 'other';
+}
+
+function statusBadge(status) {
+  const kind = classifyStatus(status);
+  const labelMap = {
+    done: { text: status || 'done', cls: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20' },
+    failed: { text: status || 'failed', cls: 'bg-rose-500/10 text-rose-600 border-rose-500/20' },
+    running: { text: status || 'running', cls: 'bg-blue-500/10 text-blue-600 border-blue-500/20' },
+    other: { text: status || 'unknown', cls: 'bg-muted text-muted-foreground' },
+  };
+  const { text, cls } = labelMap[kind];
+  return (
+    <Badge variant="outline" className={`text-[10px] font-mono ${cls}`}>
+      {text}
+    </Badge>
+  );
+}
+
 export default function ScheduleDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -76,6 +127,12 @@ export default function ScheduleDetail() {
   const [triggering, setTriggering] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  // Run history
+  const [runs, setRuns] = useState([]);
+  const [runsLoading, setRunsLoading] = useState(true);
+  const [runsRefreshing, setRunsRefreshing] = useState(false);
+  const pollRef = useRef(null);
 
   const fetchBatch = useCallback(
     async ({ silent = false } = {}) => {
@@ -94,17 +151,94 @@ export default function ScheduleDetail() {
     [id]
   );
 
+  const fetchRuns = useCallback(
+    async ({ silent = false } = {}) => {
+      if (!silent) setRunsLoading(true);
+      else setRunsRefreshing(true);
+      try {
+        const data = await listScheduledBatchRuns(id, { limit: 200, offset: 0 });
+        setRuns(data?.jobs || []);
+      } catch (error) {
+        if (!silent) {
+          toast.error(parseApiError(error, 'Failed to load run history'));
+          setRuns([]);
+        }
+      } finally {
+        if (!silent) setRunsLoading(false);
+        else setRunsRefreshing(false);
+      }
+    },
+    [id]
+  );
+
   useEffect(() => {
     fetchBatch();
-  }, [fetchBatch]);
+    fetchRuns();
+  }, [fetchBatch, fetchRuns]);
 
-  // Poll every 30 seconds for new fired jobs
+  // Group jobs by group_run_id, sort runs by date DESC
+  const groupedRuns = useMemo(() => {
+    const map = new Map();
+    for (const job of runs) {
+      const gid = job.group_run_id || 'ungrouped';
+      if (!map.has(gid)) map.set(gid, []);
+      map.get(gid).push(job);
+    }
+    const arr = Array.from(map.entries()).map(([groupRunId, jobs]) => {
+      let done = 0;
+      let failed = 0;
+      let running = 0;
+      for (const j of jobs) {
+        const c = classifyStatus(j.status);
+        if (c === 'done') done += 1;
+        else if (c === 'failed') failed += 1;
+        else if (c === 'running') running += 1;
+      }
+      return {
+        groupRunId,
+        date: extractDateFromGroupRunId(groupRunId),
+        jobs,
+        total: jobs.length,
+        done,
+        failed,
+        running,
+      };
+    });
+    // Sort: most recent date first. Unparseable dates fall to the end.
+    arr.sort((a, b) => {
+      if (!a.date && !b.date) return 0;
+      if (!a.date) return 1;
+      if (!b.date) return -1;
+      return b.date.localeCompare(a.date);
+    });
+    return arr;
+  }, [runs]);
+
+  const hasActiveJobs = useMemo(
+    () => runs.some((j) => classifyStatus(j.status) === 'running'),
+    [runs]
+  );
+
+  // Poll every 10s while any job is queued/running
   useEffect(() => {
-    const interval = setInterval(() => {
-      fetchBatch({ silent: true });
-    }, 30000);
-    return () => clearInterval(interval);
-  }, [fetchBatch]);
+    // Clear previous interval whenever dependencies change
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    if (hasActiveJobs) {
+      pollRef.current = setInterval(() => {
+        fetchRuns({ silent: true });
+        fetchBatch({ silent: true });
+      }, 10000);
+    }
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    };
+  }, [hasActiveJobs, fetchRuns, fetchBatch]);
 
   const handleToggleEnabled = async (next) => {
     if (!batch) return;
@@ -130,6 +264,7 @@ export default function ScheduleDetail() {
       const count = result?.eval_job_ids?.length || 0;
       toast.success(`Triggered: ${count} eval job${count === 1 ? '' : 's'} fired`);
       fetchBatch({ silent: true });
+      fetchRuns({ silent: true });
     } catch (error) {
       toast.error(parseApiError(error, 'Failed to trigger schedule'));
     } finally {
@@ -142,7 +277,7 @@ export default function ScheduleDetail() {
     setDeleting(true);
     try {
       await deleteScheduledBatch(batch.id);
-      toast.success(`Deleted schedule: ${batch.name}`);
+      toast.success(`Deleted schedule: ${batch.schedule_tag}`);
       navigate('/schedules');
     } catch (error) {
       toast.error(parseApiError(error, 'Failed to delete schedule'));
@@ -177,8 +312,6 @@ export default function ScheduleDetail() {
     );
   }
 
-  const jobIdsReversed = [...(batch.eval_job_ids || [])].reverse();
-
   return (
     <div className="space-y-6" data-testid="schedule-detail-page">
       {/* Header */}
@@ -188,8 +321,8 @@ export default function ScheduleDetail() {
         </Button>
         <div className="flex-1">
           <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-2xl font-bold font-mono" data-testid="detail-name">
-              {batch.name}
+            <h1 className="text-2xl font-bold font-mono" data-testid="detail-tag">
+              {batch.schedule_tag}
             </h1>
             <div className="flex items-center gap-2">
               <Switch
@@ -294,42 +427,137 @@ export default function ScheduleDetail() {
             </CardContent>
           </Card>
 
-          {/* Fired Jobs */}
+          {/* Run History */}
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <Rocket className="w-4 h-4" />
-                Fired Jobs
-                <Badge variant="secondary" className="ml-1 text-[10px]">
-                  {jobIdsReversed.length}
-                </Badge>
-              </CardTitle>
+              <div className="flex items-center justify-between gap-2">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <History className="w-4 h-4" />
+                  Run History
+                  <Badge variant="secondary" className="ml-1 text-[10px]">
+                    {groupedRuns.length} fire{groupedRuns.length === 1 ? '' : 's'}
+                  </Badge>
+                  {hasActiveJobs && (
+                    <Badge
+                      variant="outline"
+                      className="ml-1 text-[10px] bg-blue-500/10 text-blue-600 border-blue-500/20 flex items-center gap-1"
+                      data-testid="polling-indicator"
+                    >
+                      <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                      live
+                    </Badge>
+                  )}
+                </CardTitle>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => fetchRuns()}
+                  disabled={runsLoading}
+                  className="h-7"
+                  data-testid="refresh-runs-btn"
+                >
+                  <RefreshCw
+                    className={`w-3.5 h-3.5 ${runsRefreshing || runsLoading ? 'animate-spin' : ''}`}
+                  />
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
-              {jobIdsReversed.length === 0 ? (
-                <p className="text-xs text-muted-foreground italic py-4 text-center">
+              {runsLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                </div>
+              ) : groupedRuns.length === 0 ? (
+                <p className="text-xs text-muted-foreground italic py-6 text-center">
                   This batch hasn't fired yet.
                 </p>
               ) : (
-                <div className="space-y-1.5" data-testid="detail-fired-jobs-list">
-                  {jobIdsReversed.map((jid, idx) => (
-                    <div
-                      key={jid}
-                      onClick={() => navigate(`/evals/${jid}`)}
-                      className="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-accent cursor-pointer transition-colors border"
-                      data-testid={`fired-job-${jid}`}
+                <Accordion type="multiple" className="w-full" data-testid="run-history-accordion">
+                  {groupedRuns.map((run) => (
+                    <AccordionItem
+                      key={run.groupRunId}
+                      value={run.groupRunId}
+                      data-testid={`run-${run.groupRunId}`}
                     >
-                      <span className="flex-shrink-0 font-mono text-[10px] text-muted-foreground w-8 text-center">
-                        #{jobIdsReversed.length - idx}
-                      </span>
-                      <span className="font-mono text-xs flex-1 truncate">
-                        {jid.substring(0, 8)}
-                        <span className="text-muted-foreground">...{jid.substring(Math.max(8, jid.length - 4))}</span>
-                      </span>
-                      <ExternalLink className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-                    </div>
+                      <AccordionTrigger className="text-xs hover:no-underline py-3">
+                        <div className="flex items-center gap-3 flex-1 pr-2">
+                          <div className="flex flex-col items-start min-w-[110px]">
+                            <span
+                              className="font-mono font-semibold text-xs"
+                              data-testid={`run-date-${run.groupRunId}`}
+                            >
+                              {run.date || run.groupRunId}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground font-mono">
+                              {run.total} job{run.total === 1 ? '' : 's'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {run.done > 0 && (
+                              <Badge
+                                variant="outline"
+                                className="bg-emerald-500/10 text-emerald-600 border-emerald-500/20 text-[10px]"
+                                data-testid={`run-done-${run.groupRunId}`}
+                              >
+                                <CheckCircle2 className="w-3 h-3 mr-1" />
+                                {run.done}
+                              </Badge>
+                            )}
+                            {run.failed > 0 && (
+                              <Badge
+                                variant="outline"
+                                className="bg-rose-500/10 text-rose-600 border-rose-500/20 text-[10px]"
+                                data-testid={`run-failed-${run.groupRunId}`}
+                              >
+                                <XCircle className="w-3 h-3 mr-1" />
+                                {run.failed}
+                              </Badge>
+                            )}
+                            {run.running > 0 && (
+                              <Badge
+                                variant="outline"
+                                className="bg-blue-500/10 text-blue-600 border-blue-500/20 text-[10px]"
+                                data-testid={`run-running-${run.groupRunId}`}
+                              >
+                                <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                {run.running}
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent>
+                        <div className="space-y-1.5 pb-2">
+                          {run.jobs.map((job) => (
+                            <div
+                              key={job.id || job.job_id}
+                              onClick={() => navigate(`/evals/${job.id || job.job_id}`)}
+                              className="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-accent cursor-pointer transition-colors border"
+                              data-testid={`run-job-${job.id || job.job_id}`}
+                            >
+                              <span className="font-mono text-xs flex-1 truncate">
+                                {(job.id || job.job_id || '').substring(0, 8)}
+                                <span className="text-muted-foreground">
+                                  ...
+                                  {(job.id || job.job_id || '').substring(
+                                    Math.max(8, (job.id || job.job_id || '').length - 4)
+                                  )}
+                                </span>
+                              </span>
+                              {job.problem_id && (
+                                <Badge variant="outline" className="font-mono text-[10px] truncate max-w-[260px]">
+                                  {job.problem_id}
+                                </Badge>
+                              )}
+                              {statusBadge(job.status)}
+                              <ExternalLink className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                            </div>
+                          ))}
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
                   ))}
-                </div>
+                </Accordion>
               )}
             </CardContent>
           </Card>
@@ -384,7 +612,7 @@ export default function ScheduleDetail() {
               <Separator />
               <div>
                 <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">
-                  Last Run
+                  Last Run (IST)
                 </p>
                 <p className="text-xs mt-0.5" data-testid="detail-last-run">
                   {formatRelativeOrDash(batch.last_run_at)}
@@ -396,7 +624,7 @@ export default function ScheduleDetail() {
               <Separator />
               <div>
                 <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">
-                  Next Run
+                  Next Run (IST)
                 </p>
                 <p className="text-xs mt-0.5" data-testid="detail-next-run">
                   {formatRelativeOrDash(batch.next_run_at)}
@@ -428,9 +656,15 @@ export default function ScheduleDetail() {
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">Total jobs fired</span>
-                <span className="text-sm font-mono font-semibold" data-testid="stats-jobs-fired">
-                  {(batch.eval_job_ids || []).length}
+                <span className="text-xs text-muted-foreground">Total fires</span>
+                <span className="text-sm font-mono font-semibold" data-testid="stats-total-fires">
+                  {groupedRuns.length}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">Total jobs</span>
+                <span className="text-sm font-mono font-semibold" data-testid="stats-total-jobs">
+                  {runs.length}
                 </span>
               </div>
               <div className="flex items-center justify-between">
@@ -451,8 +685,8 @@ export default function ScheduleDetail() {
             <AlertDialogTitle>Delete Schedule</AlertDialogTitle>
             <AlertDialogDescription>
               Are you sure you want to delete{' '}
-              <span className="font-mono font-medium">{batch.name}</span>? This will permanently remove
-              the schedule. Previously fired eval jobs remain unchanged.
+              <span className="font-mono font-medium">{batch.schedule_tag}</span>? This will permanently
+              remove the schedule. Previously fired eval jobs remain unchanged.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

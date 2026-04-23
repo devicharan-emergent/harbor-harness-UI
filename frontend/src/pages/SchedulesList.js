@@ -138,7 +138,7 @@ export default function SchedulesList() {
     setDeleting(true);
     try {
       await deleteScheduledBatch(deleteTarget.id);
-      toast.success(`Deleted schedule: ${deleteTarget.name}`);
+      toast.success(`Deleted schedule: ${deleteTarget.schedule_tag}`);
       setDeleteTarget(null);
       fetchBatches();
     } catch (error) {
@@ -209,12 +209,11 @@ export default function SchedulesList() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="text-xs">Name</TableHead>
-                  <TableHead className="text-xs">Schedule</TableHead>
+                  <TableHead className="text-xs">Tag</TableHead>
+                  <TableHead className="text-xs">Cron</TableHead>
                   <TableHead className="text-xs">Problems</TableHead>
-                  <TableHead className="text-xs">Last Run</TableHead>
-                  <TableHead className="text-xs">Next Run</TableHead>
-                  <TableHead className="text-xs">Jobs Fired</TableHead>
+                  <TableHead className="text-xs">Next Run (IST)</TableHead>
+                  <TableHead className="text-xs">Last Run (IST)</TableHead>
                   <TableHead className="text-xs">Enabled</TableHead>
                   <TableHead className="text-xs w-[60px]">Actions</TableHead>
                 </TableRow>
@@ -228,15 +227,20 @@ export default function SchedulesList() {
                     data-testid={`schedule-row-${batch.id}`}
                   >
                     <TableCell className="max-w-[240px]">
-                      <div className="font-mono text-xs font-medium truncate" data-testid={`schedule-name-${batch.id}`}>
-                        {batch.name}
+                      <div className="font-mono text-xs font-medium truncate" data-testid={`schedule-tag-${batch.id}`}>
+                        {batch.schedule_tag}
                       </div>
                       <div className="text-[10px] text-muted-foreground/60 font-mono mt-0.5 truncate">
                         {batch.id}
                       </div>
                     </TableCell>
                     <TableCell>
-                      <span className="text-xs">{humanizeCron(batch.cron_expression)}</span>
+                      <div className="flex flex-col">
+                        <span className="text-xs">{humanizeCron(batch.cron_expression)}</span>
+                        <code className="text-[10px] text-muted-foreground/70 font-mono">
+                          {batch.cron_expression}
+                        </code>
+                      </div>
                     </TableCell>
                     <TableCell>
                       <Badge variant="outline" className="text-[10px]">
@@ -246,16 +250,13 @@ export default function SchedulesList() {
                     </TableCell>
                     <TableCell>
                       <span className="text-xs text-muted-foreground">
-                        {formatRelativeOrDash(batch.last_run_at)}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <span className="text-xs text-muted-foreground">
                         {formatRelativeOrDash(batch.next_run_at)}
                       </span>
                     </TableCell>
                     <TableCell>
-                      <span className="text-xs font-mono">{(batch.eval_job_ids || []).length}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {formatRelativeOrDash(batch.last_run_at)}
+                      </span>
                     </TableCell>
                     <TableCell onClick={(e) => e.stopPropagation()}>
                       <Switch
@@ -324,7 +325,7 @@ export default function SchedulesList() {
             <AlertDialogTitle>Delete Schedule</AlertDialogTitle>
             <AlertDialogDescription>
               Are you sure you want to delete{' '}
-              <span className="font-mono font-medium">{deleteTarget?.name}</span>? This will permanently
+              <span className="font-mono font-medium">{deleteTarget?.schedule_tag}</span>? This will permanently
               remove the schedule. Previously fired eval jobs remain unchanged.
             </AlertDialogDescription>
           </AlertDialogHeader>

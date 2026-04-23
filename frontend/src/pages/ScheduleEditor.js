@@ -93,7 +93,7 @@ export default function ScheduleEditor() {
   const [submitting, setSubmitting] = useState(false);
 
   // Form fields
-  const [name, setName] = useState('');
+  const [scheduleTag, setScheduleTag] = useState('');
   const [cronExpression, setCronExpression] = useState('0 3 * * *');
   const [problemIds, setProblemIds] = useState([]);
   const [enabled, setEnabled] = useState(true);
@@ -110,7 +110,7 @@ export default function ScheduleEditor() {
     (async () => {
       try {
         const data = await getScheduledBatch(id);
-        setName(data.name || '');
+        setScheduleTag(data.schedule_tag || '');
         setCronExpression(data.cron_expression || '0 3 * * *');
         setProblemIds(data.problem_ids || []);
         setEnabled(data.enabled ?? true);
@@ -167,15 +167,27 @@ export default function ScheduleEditor() {
 
   const cronValidation = validateCron(cronExpression);
 
+  // schedule_tag validation — non-empty and no spaces
+  const tagValid = scheduleTag.trim().length > 0 && !/\s/.test(scheduleTag);
+  const tagError = !scheduleTag.trim()
+    ? null // don't show error until user types something
+    : /\s/.test(scheduleTag)
+    ? 'Schedule tag cannot contain spaces.'
+    : null;
+
   const canProceedFromStep = (s) => {
-    if (s === 1) return name.trim().length > 0 && cronValidation.valid;
+    if (s === 1) return tagValid && cronValidation.valid;
     if (s === 2) return problemIds.length > 0;
     return true;
   };
 
   const handleSubmit = async () => {
-    if (!name.trim()) {
-      toast.error('Name is required');
+    if (!scheduleTag.trim()) {
+      toast.error('Schedule tag is required');
+      return;
+    }
+    if (/\s/.test(scheduleTag)) {
+      toast.error('Schedule tag cannot contain spaces');
       return;
     }
     if (!cronValidation.valid) {
@@ -191,7 +203,7 @@ export default function ScheduleEditor() {
     try {
       if (isEdit) {
         await updateScheduledBatch(id, {
-          name: name.trim(),
+          schedule_tag: scheduleTag.trim(),
           cron_expression: cronExpression.trim(),
           problem_ids: problemIds,
           enabled,
@@ -200,7 +212,7 @@ export default function ScheduleEditor() {
         navigate(`/schedules/${id}`);
       } else {
         const created = await createScheduledBatch({
-          name: name.trim(),
+          schedule_tag: scheduleTag.trim(),
           cron_expression: cronExpression.trim(),
           problem_ids: problemIds,
           enabled,
@@ -223,7 +235,7 @@ export default function ScheduleEditor() {
     );
   }
 
-  const stepLabels = ['Name & Schedule', 'Problems', 'Enabled', 'Review'];
+  const stepLabels = ['Tag & Schedule', 'Problems', 'Enabled', 'Review'];
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto" data-testid="schedule-editor-page">
@@ -272,25 +284,37 @@ export default function ScheduleEditor() {
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
               <CalendarClock className="w-4 h-4" />
-              Name & Schedule
+              Tag & Schedule
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
             <div>
-              <Label htmlFor="schedule-name" className="text-sm font-semibold">
-                Name *
+              <Label htmlFor="schedule-tag" className="text-sm font-semibold">
+                Schedule Tag *
               </Label>
               <p className="text-[11px] text-muted-foreground mt-0.5 mb-2">
-                A short, descriptive identifier for this batch
+                A short, unique label for this batch. No spaces allowed.
               </p>
               <Input
-                id="schedule-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. daily-notes-regression"
-                className="font-mono text-sm"
-                data-testid="schedule-name-input"
+                id="schedule-tag"
+                value={scheduleTag}
+                onChange={(e) => setScheduleTag(e.target.value)}
+                placeholder="e.g. nightly-regression"
+                className={`font-mono text-sm ${
+                  tagError ? 'border-destructive focus-visible:ring-destructive' : ''
+                }`}
+                data-testid="schedule-tag-input"
+                aria-invalid={!!tagError}
               />
+              {tagError && (
+                <p
+                  className="mt-1.5 text-xs text-destructive font-medium flex items-start gap-1.5"
+                  data-testid="schedule-tag-error"
+                >
+                  <span aria-hidden="true">⚠</span>
+                  <span>{tagError}</span>
+                </p>
+              )}
             </div>
 
             <div>
@@ -504,10 +528,10 @@ export default function ScheduleEditor() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
               <div>
                 <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">
-                  Name
+                  Schedule Tag
                 </p>
-                <p className="font-mono font-medium mt-0.5" data-testid="review-name">
-                  {name}
+                <p className="font-mono font-medium mt-0.5" data-testid="review-tag">
+                  {scheduleTag}
                 </p>
               </div>
               <div>
@@ -596,7 +620,7 @@ export default function ScheduleEditor() {
         ) : (
           <Button
             onClick={handleSubmit}
-            disabled={submitting || !name.trim() || problemIds.length === 0}
+            disabled={submitting || !tagValid || !cronValidation.valid || problemIds.length === 0}
             data-testid="schedule-submit-btn"
           >
             {submitting ? (

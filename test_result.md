@@ -153,6 +153,33 @@ backend:
             All endpoints properly proxy to harbor-harness service and handle responses correctly.
             Backend logs show clean HTTP communication with upstream service.
             No critical issues found.
+        - working: true
+          agent: "testing"
+          comment: |
+            ✅ CONTRACT UPDATE TESTING COMPLETE - ALL 11 TESTS PASSED
+            
+            Successfully tested updated Scheduled Batches proxy with new contract requirements:
+            
+            NEW 7th Endpoint:
+            ✅ GET /api/eval/scheduled-batches/{batch_id}/runs → 200 with {jobs: [...]} structure
+            ✅ Runs endpoint returns jobs with proper group_run_id format: "{batch_id}-YYYY-MM-DD"
+            ✅ Pagination parameters (limit/offset) forwarded correctly
+            ✅ Error handling for non-existent batch IDs → 404 with proper HTTPException
+            
+            Field Contract Changes:
+            ✅ CREATE accepts 'schedule_tag' field (not 'name')
+            ✅ Batch responses contain 'schedule_tag' field (no 'name' field)
+            ✅ Batch responses NO LONGER contain 'eval_job_ids' field (per new contract)
+            ✅ UPDATE supports partial updates with 'schedule_tag' field
+            ✅ TRIGGER response still contains 'eval_job_ids' (trigger response, not Batch object)
+            
+            Full End-to-End Flow:
+            ✅ Create → Get → List → Update (enabled) → Update (schedule_tag) → Trigger → Runs → Cleanup
+            ✅ Validation properly rejects invalid payloads
+            ✅ All endpoints proxy correctly to harbor-harness service
+            
+            Backend logs show clean HTTP communication with upstream service.
+            The updated contract is fully implemented and working correctly.
 
 frontend:
   - task: "Schedules UI (List / Editor / Detail + nav entry + routes)"
@@ -230,3 +257,62 @@ agent_communication:
         • Upstream harbor-harness service is fully operational
         
         The implementation is production-ready. No issues found.
+    - agent: "main"
+      message: |
+        CONTRACT UPDATE — please re-test the scheduled-batches proxy endpoints with two changes:
+
+        1) NEW ENDPOINT (#7):
+             GET /api/eval/scheduled-batches/{batch_id}/runs?limit=50&offset=0
+             → forwards to {EVAL_API_BASE}/api/v1/scheduled-batches/{batch_id}/runs
+             → returns {jobs: [EvalJob, ...]} — each job has a `group_run_id`
+               string formatted as "{batch_id}-YYYY-MM-DD"
+             Please verify:
+               a. 200 with {jobs: [...]} (may be empty) for a valid batch id
+               b. 4xx (likely 404) for a non-existent id, wrapped cleanly as HTTPException
+               c. limit and offset query params are forwarded
+
+        2) CREATE PAYLOAD FIELD RENAME:
+             POST /api/eval/scheduled-batches body now uses `schedule_tag` (not `name`).
+             Example body:
+               {"schedule_tag":"acm-test-<ts>", "cron_expression":"0 3 * * *",
+                "problem_ids":["scratch_bench_phased/do_it_app"], "enabled":true}
+             The proxy is a dict pass-through so no server.py change is needed for field renaming,
+             but please verify the upstream harness accepts `schedule_tag` and returns a Batch that
+             contains `schedule_tag` (not `name`). Also confirm PUT accepts partial updates with
+             `schedule_tag`.
+
+             Also: the Batch response no longer contains an `eval_job_ids` field — fire history is
+             now read from /runs. Confirm this in the GET response body.
+
+        Re-run the full create/get/update/delete/trigger/runs flow. Clean up any test batches at the
+        end (DELETE on the id you created). Do NOT test frontend.
+    - agent: "testing"
+      message: |
+        ✅ CONTRACT UPDATE TESTING COMPLETE - ALL REQUIREMENTS VERIFIED
+        
+        Successfully tested the updated Scheduled Batches proxy with new contract requirements.
+        All 11 comprehensive tests passed including the new 7th endpoint and field contract changes.
+        
+        Key Findings:
+        
+        NEW 7th Endpoint (/runs):
+        • GET /api/eval/scheduled-batches/{batch_id}/runs working correctly
+        • Returns {jobs: [...]} structure with proper group_run_id format
+        • group_run_id follows "{batch_id}-YYYY-MM-DD" pattern as specified
+        • Pagination parameters (limit/offset) forwarded correctly
+        • Proper 404 error handling for non-existent batch IDs
+        
+        Field Contract Changes:
+        • CREATE now accepts 'schedule_tag' field (not 'name') ✅
+        • All Batch responses contain 'schedule_tag' field ✅
+        • Batch responses NO LONGER contain 'eval_job_ids' field ✅
+        • UPDATE supports partial updates with 'schedule_tag' ✅
+        • TRIGGER response still contains 'eval_job_ids' (correct - it's trigger response) ✅
+        
+        Full End-to-End Flow Verified:
+        • Create with schedule_tag → Get → List → Update (enabled) → Update (schedule_tag) → Trigger → Runs → Cleanup
+        • All endpoints proxy correctly to harbor-harness service
+        • Validation properly rejects invalid payloads
+        • Clean backend logs with no errors
+        
+        The contract update is fully implemented and working correctly. Ready for production use.

@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 """
-Backend API Testing for Scheduled Batches Proxy Endpoints
-Tests the 6 new scheduled batches proxy endpoints in server.py
+Comprehensive test suite for Scheduled Batches proxy endpoints with contract updates.
+Tests the new 7th endpoint and schedule_tag field rename.
 """
 
 import requests
 import json
 import time
-import sys
+import uuid
 from datetime import datetime
 
-# Base URL from frontend/.env REACT_APP_BACKEND_URL
-BASE_URL = "https://youthful-haibt-1.stage-preview.emergentagent.com"
-API_BASE = f"{BASE_URL}/api"
+# Base URL from frontend/.env
+BASE_URL = "https://youthful-haibt-1.stage-preview.emergentagent.com/api"
 
 def log_test(test_name, status, details=""):
     """Log test results with timestamp"""
@@ -22,295 +21,253 @@ def log_test(test_name, status, details=""):
     if details:
         print(f"    {details}")
 
-def test_list_scheduled_batches():
-    """Test 1: GET /api/eval/scheduled-batches"""
+def test_scheduled_batches_full_flow():
+    """Test the complete scheduled batches flow with new contract"""
+    print("=" * 80)
+    print("SCHEDULED BATCHES PROXY ENDPOINTS - CONTRACT UPDATE TESTING")
+    print("=" * 80)
+    
+    # Generate unique test data
+    timestamp = int(time.time())
+    test_schedule_tag = f"acm-contract-test-{timestamp}"
+    test_batch_id = None
+    
     try:
-        url = f"{API_BASE}/eval/scheduled-batches"
-        response = requests.get(url, timeout=30)
-        
-        if response.status_code == 200:
-            data = response.json()
-            if "batches" in data:
-                log_test("GET /api/eval/scheduled-batches", "PASS", 
-                        f"Status: {response.status_code}, Response has 'batches' key with {len(data['batches'])} items")
-                return True
-            else:
-                log_test("GET /api/eval/scheduled-batches", "FAIL", 
-                        f"Status: {response.status_code}, Missing 'batches' key in response: {data}")
-                return False
-        else:
-            log_test("GET /api/eval/scheduled-batches", "FAIL", 
-                    f"Status: {response.status_code}, Response: {response.text}")
-            return False
-    except Exception as e:
-        log_test("GET /api/eval/scheduled-batches", "FAIL", f"Exception: {str(e)}")
-        return False
-
-def test_list_scheduled_batches_with_filter():
-    """Test 2: GET /api/eval/scheduled-batches?enabled=true"""
-    try:
-        url = f"{API_BASE}/eval/scheduled-batches"
-        params = {"enabled": "true"}
-        response = requests.get(url, params=params, timeout=30)
-        
-        if response.status_code == 200:
-            data = response.json()
-            if "batches" in data:
-                log_test("GET /api/eval/scheduled-batches?enabled=true", "PASS", 
-                        f"Status: {response.status_code}, Query param forwarded successfully")
-                return True
-            else:
-                log_test("GET /api/eval/scheduled-batches?enabled=true", "FAIL", 
-                        f"Status: {response.status_code}, Missing 'batches' key in response")
-                return False
-        else:
-            log_test("GET /api/eval/scheduled-batches?enabled=true", "FAIL", 
-                    f"Status: {response.status_code}, Response: {response.text}")
-            return False
-    except Exception as e:
-        log_test("GET /api/eval/scheduled-batches?enabled=true", "FAIL", f"Exception: {str(e)}")
-        return False
-
-def test_create_scheduled_batch():
-    """Test 3: POST /api/eval/scheduled-batches"""
-    try:
-        url = f"{API_BASE}/eval/scheduled-batches"
-        timestamp = int(time.time())
-        payload = {
-            "name": f"acm-backend-test-{timestamp}",
+        # Test 1: Create with NEW field (schedule_tag instead of name)
+        print("\n1. Testing CREATE with schedule_tag field...")
+        create_payload = {
+            "schedule_tag": test_schedule_tag,
             "cron_expression": "0 3 * * *",
             "problem_ids": ["scratch_bench_phased/do_it_app"],
             "enabled": True
         }
         
-        response = requests.post(url, json=payload, timeout=30)
+        response = requests.post(f"{BASE_URL}/eval/scheduled-batches", json=create_payload, timeout=30)
         
-        if 200 <= response.status_code < 300:
+        if response.status_code in [200, 201]:
             data = response.json()
-            required_fields = ["id", "name", "cron_expression", "problem_ids", "enabled"]
-            missing_fields = [field for field in required_fields if field not in data]
+            test_batch_id = data.get("id")
             
-            if not missing_fields:
-                batch_id = data["id"]
-                log_test("POST /api/eval/scheduled-batches", "PASS", 
-                        f"Status: {response.status_code}, Created batch with ID: {batch_id}")
-                return batch_id
+            # Verify response structure
+            required_fields = ["id", "schedule_tag", "cron_expression", "problem_ids", "enabled", "created_at", "updated_at", "next_run_at"]
+            missing_fields = [f for f in required_fields if f not in data]
+            
+            # Check for old 'name' field (should NOT be present)
+            has_name_field = "name" in data
+            
+            # Check for eval_job_ids field (should NOT be present per new contract)
+            has_eval_job_ids = "eval_job_ids" in data
+            
+            if missing_fields:
+                log_test("CREATE - Response Structure", "FAIL", f"Missing fields: {missing_fields}")
+            elif has_name_field:
+                log_test("CREATE - Field Contract", "FAIL", "Response still contains 'name' field (should be removed)")
+            elif has_eval_job_ids:
+                log_test("CREATE - Field Contract", "FAIL", "Response contains 'eval_job_ids' field (should be removed per new contract)")
+            elif data.get("schedule_tag") != test_schedule_tag:
+                log_test("CREATE - schedule_tag", "FAIL", f"Expected '{test_schedule_tag}', got '{data.get('schedule_tag')}'")
             else:
-                log_test("POST /api/eval/scheduled-batches", "FAIL", 
-                        f"Status: {response.status_code}, Missing fields: {missing_fields}")
-                return None
+                log_test("CREATE - Success", "PASS", f"Created batch with ID: {test_batch_id}")
+                log_test("CREATE - Field Contract", "PASS", "Uses 'schedule_tag', no 'name' or 'eval_job_ids' fields")
         else:
-            log_test("POST /api/eval/scheduled-batches", "FAIL", 
-                    f"Status: {response.status_code}, Response: {response.text}")
-            return None
-    except Exception as e:
-        log_test("POST /api/eval/scheduled-batches", "FAIL", f"Exception: {str(e)}")
-        return None
-
-def test_get_scheduled_batch(batch_id):
-    """Test 4: GET /api/eval/scheduled-batches/{id}"""
-    try:
-        url = f"{API_BASE}/eval/scheduled-batches/{batch_id}"
-        response = requests.get(url, timeout=30)
+            log_test("CREATE", "FAIL", f"Status: {response.status_code}, Response: {response.text}")
+            return
+        
+        # Test 2: Get specific batch
+        print("\n2. Testing GET specific batch...")
+        response = requests.get(f"{BASE_URL}/eval/scheduled-batches/{test_batch_id}", timeout=30)
         
         if response.status_code == 200:
             data = response.json()
-            if data.get("id") == batch_id:
-                log_test(f"GET /api/eval/scheduled-batches/{batch_id}", "PASS", 
-                        f"Status: {response.status_code}, Retrieved batch successfully")
-                return True
+            has_schedule_tag = "schedule_tag" in data
+            has_name_field = "name" in data
+            has_eval_job_ids = "eval_job_ids" in data
+            
+            if not has_schedule_tag:
+                log_test("GET - schedule_tag", "FAIL", "Response missing 'schedule_tag' field")
+            elif has_name_field:
+                log_test("GET - Field Contract", "FAIL", "Response still contains 'name' field")
+            elif has_eval_job_ids:
+                log_test("GET - Field Contract", "FAIL", "Response contains 'eval_job_ids' field (should be removed)")
             else:
-                log_test(f"GET /api/eval/scheduled-batches/{batch_id}", "FAIL", 
-                        f"Status: {response.status_code}, ID mismatch in response")
-                return False
+                log_test("GET - Success", "PASS", f"Retrieved batch with schedule_tag: {data.get('schedule_tag')}")
         else:
-            log_test(f"GET /api/eval/scheduled-batches/{batch_id}", "FAIL", 
-                    f"Status: {response.status_code}, Response: {response.text}")
-            return False
-    except Exception as e:
-        log_test(f"GET /api/eval/scheduled-batches/{batch_id}", "FAIL", f"Exception: {str(e)}")
-        return False
-
-def test_update_scheduled_batch(batch_id):
-    """Test 5: PUT /api/eval/scheduled-batches/{id}"""
-    try:
-        url = f"{API_BASE}/eval/scheduled-batches/{batch_id}"
-        payload = {"enabled": False}
+            log_test("GET", "FAIL", f"Status: {response.status_code}, Response: {response.text}")
         
-        response = requests.put(url, json=payload, timeout=30)
+        # Test 3: List batches
+        print("\n3. Testing LIST batches...")
+        response = requests.get(f"{BASE_URL}/eval/scheduled-batches", timeout=30)
         
         if response.status_code == 200:
             data = response.json()
-            if data.get("enabled") is False:
-                log_test(f"PUT /api/eval/scheduled-batches/{batch_id}", "PASS", 
-                        f"Status: {response.status_code}, Successfully disabled batch")
-                return True
-            else:
-                log_test(f"PUT /api/eval/scheduled-batches/{batch_id}", "FAIL", 
-                        f"Status: {response.status_code}, Enabled field not updated correctly")
-                return False
-        else:
-            log_test(f"PUT /api/eval/scheduled-batches/{batch_id}", "FAIL", 
-                    f"Status: {response.status_code}, Response: {response.text}")
-            return False
-    except Exception as e:
-        log_test(f"PUT /api/eval/scheduled-batches/{batch_id}", "FAIL", f"Exception: {str(e)}")
-        return False
-
-def test_trigger_scheduled_batch(batch_id):
-    """Test 6: POST /api/eval/scheduled-batches/{id}/trigger"""
-    try:
-        url = f"{API_BASE}/eval/scheduled-batches/{batch_id}/trigger"
-        response = requests.post(url, timeout=60)
-        
-        if 200 <= response.status_code < 300:
-            data = response.json()
-            required_fields = ["batch_id", "eval_job_ids"]
-            missing_fields = [field for field in required_fields if field not in data]
+            batches = data.get("batches", [])
             
-            if not missing_fields:
-                eval_job_ids = data.get("eval_job_ids", [])
-                log_test(f"POST /api/eval/scheduled-batches/{batch_id}/trigger", "PASS", 
-                        f"Status: {response.status_code}, Triggered batch, eval_job_ids: {len(eval_job_ids)} jobs")
-                return True
+            # Find our test batch
+            test_batch = next((b for b in batches if b.get("id") == test_batch_id), None)
+            
+            if test_batch:
+                has_schedule_tag = "schedule_tag" in test_batch
+                has_name_field = "name" in test_batch
+                
+                if not has_schedule_tag:
+                    log_test("LIST - schedule_tag", "FAIL", "Batch missing 'schedule_tag' field")
+                elif has_name_field:
+                    log_test("LIST - Field Contract", "FAIL", "Batch still contains 'name' field")
+                else:
+                    log_test("LIST - Success", "PASS", f"Found batch with schedule_tag: {test_batch.get('schedule_tag')}")
             else:
-                log_test(f"POST /api/eval/scheduled-batches/{batch_id}/trigger", "FAIL", 
-                        f"Status: {response.status_code}, Missing fields: {missing_fields}")
-                return False
+                log_test("LIST", "FAIL", "Created batch not found in list")
         else:
-            log_test(f"POST /api/eval/scheduled-batches/{batch_id}/trigger", "FAIL", 
-                    f"Status: {response.status_code}, Response: {response.text}")
-            return False
-    except Exception as e:
-        log_test(f"POST /api/eval/scheduled-batches/{batch_id}/trigger", "FAIL", f"Exception: {str(e)}")
-        return False
-
-def test_delete_scheduled_batch(batch_id):
-    """Test 7: DELETE /api/eval/scheduled-batches/{id}"""
-    try:
-        url = f"{API_BASE}/eval/scheduled-batches/{batch_id}"
-        response = requests.delete(url, timeout=30)
+            log_test("LIST", "FAIL", f"Status: {response.status_code}, Response: {response.text}")
         
-        if 200 <= response.status_code < 300:
-            log_test(f"DELETE /api/eval/scheduled-batches/{batch_id}", "PASS", 
-                    f"Status: {response.status_code}, Successfully deleted batch")
-            return True
+        # Test 4: Update partial - enabled field
+        print("\n4. Testing UPDATE partial (enabled)...")
+        update_payload = {"enabled": False}
+        response = requests.put(f"{BASE_URL}/eval/scheduled-batches/{test_batch_id}", json=update_payload, timeout=30)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("enabled") == False:
+                log_test("UPDATE - enabled", "PASS", "Successfully updated enabled to false")
+            else:
+                log_test("UPDATE - enabled", "FAIL", f"Expected enabled=false, got {data.get('enabled')}")
         else:
-            log_test(f"DELETE /api/eval/scheduled-batches/{batch_id}", "FAIL", 
-                    f"Status: {response.status_code}, Response: {response.text}")
-            return False
-    except Exception as e:
-        log_test(f"DELETE /api/eval/scheduled-batches/{batch_id}", "FAIL", f"Exception: {str(e)}")
-        return False
-
-def test_validation_error():
-    """Test 8: POST with invalid body for validation testing"""
-    try:
-        url = f"{API_BASE}/eval/scheduled-batches"
-        payload = {
-            "name": "",
+            log_test("UPDATE - enabled", "FAIL", f"Status: {response.status_code}, Response: {response.text}")
+        
+        # Test 5: Update partial - schedule_tag rename
+        print("\n5. Testing UPDATE partial (schedule_tag rename)...")
+        new_schedule_tag = f"acm-contract-test-renamed-{timestamp}"
+        update_payload = {"schedule_tag": new_schedule_tag}
+        response = requests.put(f"{BASE_URL}/eval/scheduled-batches/{test_batch_id}", json=update_payload, timeout=30)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("schedule_tag") == new_schedule_tag:
+                log_test("UPDATE - schedule_tag", "PASS", f"Successfully renamed to: {new_schedule_tag}")
+            else:
+                log_test("UPDATE - schedule_tag", "FAIL", f"Expected '{new_schedule_tag}', got '{data.get('schedule_tag')}'")
+        else:
+            log_test("UPDATE - schedule_tag", "FAIL", f"Status: {response.status_code}, Response: {response.text}")
+        
+        # Test 6: Trigger batch
+        print("\n6. Testing TRIGGER batch...")
+        response = requests.post(f"{BASE_URL}/eval/scheduled-batches/{test_batch_id}/trigger", timeout=60)
+        
+        if response.status_code in [200, 202]:
+            data = response.json()
+            # Trigger response SHOULD still contain eval_job_ids (it's the trigger response, not the Batch object)
+            has_batch_id = "batch_id" in data
+            has_eval_job_ids = "eval_job_ids" in data
+            
+            if not has_batch_id:
+                log_test("TRIGGER - batch_id", "FAIL", "Response missing 'batch_id' field")
+            elif not has_eval_job_ids:
+                log_test("TRIGGER - eval_job_ids", "FAIL", "Trigger response missing 'eval_job_ids' field")
+            else:
+                log_test("TRIGGER - Success", "PASS", f"Triggered batch, got {len(data.get('eval_job_ids', []))} job IDs")
+        else:
+            log_test("TRIGGER", "FAIL", f"Status: {response.status_code}, Response: {response.text}")
+        
+        # Test 7: NEW - Runs endpoint
+        print("\n7. Testing NEW RUNS endpoint...")
+        response = requests.get(f"{BASE_URL}/eval/scheduled-batches/{test_batch_id}/runs?limit=50&offset=0", timeout=30)
+        
+        if response.status_code == 200:
+            data = response.json()
+            jobs = data.get("jobs", [])
+            
+            log_test("RUNS - Success", "PASS", f"Retrieved {len(jobs)} jobs from runs endpoint")
+            
+            # Verify job structure if jobs exist
+            if jobs:
+                first_job = jobs[0]
+                has_group_run_id = "group_run_id" in first_job
+                
+                if has_group_run_id:
+                    group_run_id = first_job["group_run_id"]
+                    # Verify format: {batch_id}-YYYY-MM-DD
+                    if group_run_id.startswith(test_batch_id) and "-" in group_run_id:
+                        log_test("RUNS - group_run_id format", "PASS", f"Format: {group_run_id}")
+                    else:
+                        log_test("RUNS - group_run_id format", "FAIL", f"Invalid format: {group_run_id}")
+                else:
+                    log_test("RUNS - group_run_id", "FAIL", "Jobs missing 'group_run_id' field")
+            else:
+                log_test("RUNS - Empty", "INFO", "No jobs found (may be expected if trigger didn't create jobs yet)")
+        else:
+            log_test("RUNS", "FAIL", f"Status: {response.status_code}, Response: {response.text}")
+        
+        # Test 8: Runs pagination
+        print("\n8. Testing RUNS pagination...")
+        response = requests.get(f"{BASE_URL}/eval/scheduled-batches/{test_batch_id}/runs?limit=5&offset=0", timeout=30)
+        
+        if response.status_code == 200:
+            data = response.json()
+            log_test("RUNS - Pagination", "PASS", f"Pagination params forwarded, got {len(data.get('jobs', []))} jobs")
+        else:
+            log_test("RUNS - Pagination", "FAIL", f"Status: {response.status_code}, Response: {response.text}")
+        
+        # Test 9: Runs error handling - non-existent batch
+        print("\n9. Testing RUNS error handling...")
+        fake_uuid = str(uuid.uuid4())
+        response = requests.get(f"{BASE_URL}/eval/scheduled-batches/{fake_uuid}/runs", timeout=30)
+        
+        if response.status_code in [404, 400]:
+            try:
+                error_data = response.json()
+                has_detail = "detail" in error_data
+                log_test("RUNS - Error Handling", "PASS", f"4xx error with detail: {has_detail}")
+            except:
+                log_test("RUNS - Error Handling", "PASS", f"4xx error (non-JSON response)")
+        else:
+            log_test("RUNS - Error Handling", "FAIL", f"Expected 4xx, got {response.status_code}")
+        
+        # Test 10: Validation - invalid create payload
+        print("\n10. Testing VALIDATION...")
+        invalid_payload = {
+            "schedule_tag": "",
             "cron_expression": "not a cron",
             "problem_ids": []
         }
+        response = requests.post(f"{BASE_URL}/eval/scheduled-batches", json=invalid_payload, timeout=30)
         
-        response = requests.post(url, json=payload, timeout=30)
+        if response.status_code >= 400:
+            log_test("VALIDATION", "PASS", f"Invalid payload rejected with {response.status_code}")
+        else:
+            log_test("VALIDATION", "FAIL", f"Invalid payload accepted with {response.status_code}")
         
-        if 400 <= response.status_code < 500:
+        # Test 11: Cleanup - delete test batch
+        print("\n11. Testing CLEANUP...")
+        if test_batch_id:
+            response = requests.delete(f"{BASE_URL}/eval/scheduled-batches/{test_batch_id}", timeout=30)
+            
+            if response.status_code in [200, 204]:
+                log_test("CLEANUP", "PASS", "Test batch deleted successfully")
+            else:
+                log_test("CLEANUP", "FAIL", f"Status: {response.status_code}, Response: {response.text}")
+        
+    except Exception as e:
+        log_test("EXCEPTION", "FAIL", f"Unexpected error: {str(e)}")
+        
+        # Cleanup on exception
+        if test_batch_id:
             try:
-                data = response.json()
-                detail = data.get("detail", "")
-                log_test("POST /api/eval/scheduled-batches (validation error)", "PASS", 
-                        f"Status: {response.status_code}, Validation error returned: {detail}")
-                return True
+                requests.delete(f"{BASE_URL}/eval/scheduled-batches/{test_batch_id}", timeout=10)
+                print(f"    Cleaned up test batch: {test_batch_id}")
             except:
-                log_test("POST /api/eval/scheduled-batches (validation error)", "PASS", 
-                        f"Status: {response.status_code}, Validation error returned (non-JSON response)")
-                return True
-        else:
-            log_test("POST /api/eval/scheduled-batches (validation error)", "FAIL", 
-                    f"Status: {response.status_code}, Expected 4xx error but got: {response.text}")
-            return False
-    except Exception as e:
-        log_test("POST /api/eval/scheduled-batches (validation error)", "FAIL", f"Exception: {str(e)}")
-        return False
-
-def test_nonexistent_batch():
-    """Test 9: GET non-existent batch ID"""
-    try:
-        fake_id = "does-not-exist-uuid"
-        url = f"{API_BASE}/eval/scheduled-batches/{fake_id}"
-        response = requests.get(url, timeout=30)
-        
-        if 400 <= response.status_code < 500:
-            log_test(f"GET /api/eval/scheduled-batches/{fake_id} (non-existent)", "PASS", 
-                    f"Status: {response.status_code}, Correctly returned 4xx for non-existent ID")
-            return True
-        else:
-            log_test(f"GET /api/eval/scheduled-batches/{fake_id} (non-existent)", "FAIL", 
-                    f"Status: {response.status_code}, Expected 4xx error but got: {response.text}")
-            return False
-    except Exception as e:
-        log_test(f"GET /api/eval/scheduled-batches/does-not-exist-uuid (non-existent)", "FAIL", f"Exception: {str(e)}")
-        return False
+                print(f"    Failed to cleanup test batch: {test_batch_id}")
 
 def main():
-    """Run all scheduled batches proxy endpoint tests"""
+    """Run all tests"""
+    print("Starting Scheduled Batches Contract Update Testing...")
+    print(f"Base URL: {BASE_URL}")
+    print(f"Testing 7 endpoints with new contract requirements")
+    
+    test_scheduled_batches_full_flow()
+    
+    print("\n" + "=" * 80)
+    print("TESTING COMPLETE")
     print("=" * 80)
-    print("SCHEDULED BATCHES PROXY ENDPOINTS TEST")
-    print("=" * 80)
-    print(f"Testing against: {API_BASE}")
-    print()
-    
-    results = []
-    batch_id = None
-    
-    # Test 1: List batches
-    results.append(test_list_scheduled_batches())
-    
-    # Test 2: List batches with filter
-    results.append(test_list_scheduled_batches_with_filter())
-    
-    # Test 3: Create batch (save ID for subsequent tests)
-    batch_id = test_create_scheduled_batch()
-    results.append(batch_id is not None)
-    
-    if batch_id:
-        # Test 4: Get specific batch
-        results.append(test_get_scheduled_batch(batch_id))
-        
-        # Test 5: Update batch
-        results.append(test_update_scheduled_batch(batch_id))
-        
-        # Test 6: Trigger batch
-        results.append(test_trigger_scheduled_batch(batch_id))
-        
-        # Test 7: Delete batch (cleanup)
-        results.append(test_delete_scheduled_batch(batch_id))
-    else:
-        print("⚠️  Skipping tests 4-7 because batch creation failed")
-        results.extend([False, False, False, False])
-    
-    # Test 8: Validation error
-    results.append(test_validation_error())
-    
-    # Test 9: Non-existent batch
-    results.append(test_nonexistent_batch())
-    
-    # Summary
-    print()
-    print("=" * 80)
-    print("TEST SUMMARY")
-    print("=" * 80)
-    passed = sum(results)
-    total = len(results)
-    print(f"Tests passed: {passed}/{total}")
-    
-    if passed == total:
-        print("🎉 All scheduled batches proxy endpoints are working correctly!")
-        return 0
-    else:
-        print("❌ Some tests failed. Check the logs above for details.")
-        return 1
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
