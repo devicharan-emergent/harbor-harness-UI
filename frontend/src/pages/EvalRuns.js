@@ -175,11 +175,16 @@ export default function EvalRuns() {
   useEffect(() => { fetchStats(); }, []);
   useEffect(() => { fetchJobs(); }, [fetchJobs]);
 
-  // Group jobs by group_id
+  // Group jobs by group_run_id (falling back to legacy group_id for compatibility)
   const groups = useMemo(() => {
     const map = {};
     for (const job of jobs) {
-      const gid = job.group_id || job.config?.group_id || '_ungrouped';
+      const gid =
+        job.group_run_id ||
+        job.group_id ||
+        job.config?.group_run_id ||
+        job.config?.group_id ||
+        '_ungrouped';
       if (!map[gid]) {
         map[gid] = { groupId: gid, jobs: [], latestCreated: job.created_at };
       }

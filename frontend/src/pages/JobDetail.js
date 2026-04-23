@@ -1151,11 +1151,11 @@ export default function JobDetail() {
                     <Separator />
                   </>
                 )}
-                {job.group_id && (
+                {(job.group_run_id || job.group_id) && (
                   <>
                     <div>
                       <dt className="text-muted-foreground">Group ID</dt>
-                      <dd className="font-mono mt-0.5 text-[10px] break-all">{job.group_id}</dd>
+                      <dd className="font-mono mt-0.5 text-[10px] break-all">{job.group_run_id || job.group_id}</dd>
                     </div>
                     <Separator />
                   </>
