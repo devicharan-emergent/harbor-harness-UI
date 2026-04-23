@@ -487,15 +487,30 @@ export function RunEvalModal({ open, onClose }) {
                         return (
                           <div
                             key={ds.name || ds.id}
-                            className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs transition-colors cursor-pointer ${isSelected ? 'bg-primary/10' : 'hover:bg-accent'}`}
+                            onClick={() => toggleProblem(ds)}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                toggleProblem(ds);
+                              }
+                            }}
+                            className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs transition-colors cursor-pointer select-none ${isSelected ? 'bg-primary/10' : 'hover:bg-accent'}`}
                             data-testid={`dataset-item-${ds.name}`}
                           >
-                            <Checkbox checked={isSelected} onCheckedChange={() => toggleProblem(ds)} className="flex-shrink-0" />
-                            <div className="flex-1 min-w-0" onClick={() => handlePreview(ds)}>
+                            <Checkbox checked={isSelected} tabIndex={-1} className="flex-shrink-0 pointer-events-none" />
+                            <div className="flex-1 min-w-0">
                               <div className="font-mono font-medium truncate">{ds.name}</div>
                               <div className="text-muted-foreground text-[10px] mt-0.5">{ds.dataset_type || ds.name?.split('/')[0]}</div>
                             </div>
-                            <button onClick={() => handlePreview(ds)} className="flex-shrink-0 text-muted-foreground hover:text-foreground transition-colors" data-testid={`preview-${ds.name}`}>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handlePreview(ds); }}
+                              className="flex-shrink-0 text-muted-foreground hover:text-foreground transition-colors p-1 rounded hover:bg-background"
+                              data-testid={`preview-${ds.name}`}
+                              title="Preview problem"
+                              type="button"
+                            >
                               <FileText className="w-3.5 h-3.5" />
                             </button>
                           </div>

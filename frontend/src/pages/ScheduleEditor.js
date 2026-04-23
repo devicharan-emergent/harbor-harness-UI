@@ -467,15 +467,23 @@ export default function ScheduleEditor() {
                       <div
                         key={pid || ds.id}
                         onClick={() => toggleProblem(ds)}
-                        className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs transition-colors cursor-pointer ${
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            toggleProblem(ds);
+                          }
+                        }}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs transition-colors cursor-pointer select-none ${
                           isSelected ? 'bg-primary/10' : 'hover:bg-accent'
                         }`}
                         data-testid={`problem-item-${pid}`}
                       >
                         <Checkbox
                           checked={isSelected}
-                          onCheckedChange={() => toggleProblem(ds)}
-                          className="flex-shrink-0"
+                          tabIndex={-1}
+                          className="flex-shrink-0 pointer-events-none"
                         />
                         <div className="flex-1 min-w-0">
                           <div className="font-mono font-medium truncate">{pid}</div>
