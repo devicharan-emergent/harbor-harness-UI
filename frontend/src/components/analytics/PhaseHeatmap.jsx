@@ -65,7 +65,6 @@ export default function PhaseHeatmap({ heatmap }) {
                     const cell = cells[key] || {
                       mean: null,
                       sample: 0,
-                      topErrors: [],
                     };
                     const bg = colorForScore(cell.mean);
                     return (
@@ -98,24 +97,6 @@ export default function PhaseHeatmap({ heatmap }) {
                               <span>Samples</span>
                               <span>{cell.sample}</span>
                             </div>
-                            {cell.topErrors.length > 0 && (
-                              <>
-                                <div className="mt-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-                                  Top errors
-                                </div>
-                                {cell.topErrors.map((e) => (
-                                  <div
-                                    key={e.code}
-                                    className="flex items-center justify-between gap-4 font-mono"
-                                  >
-                                    <span className="truncate max-w-[180px]">
-                                      {e.code}
-                                    </span>
-                                    <span>{e.count}</span>
-                                  </div>
-                                ))}
-                              </>
-                            )}
                           </TooltipContent>
                         </Tooltip>
                       </td>

@@ -43,6 +43,7 @@ import {
   XCircle,
   RefreshCw,
   BarChart3,
+  ChevronDown,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatDistanceToNow } from 'date-fns';
@@ -138,6 +139,7 @@ export default function ScheduleDetail() {
   const [runs, setRuns] = useState([]);
   const [runsLoading, setRunsLoading] = useState(true);
   const [runsRefreshing, setRunsRefreshing] = useState(false);
+  const [runHistoryOpen, setRunHistoryOpen] = useState(true);
   const pollRef = useRef(null);
 
   const fetchBatch = useCallback(
@@ -402,7 +404,7 @@ export default function ScheduleDetail() {
       </div>
 
       {/* Two-column layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-4">
         {/* Left: main content */}
         <div className="space-y-4">
           {/* Problems */}
@@ -432,141 +434,6 @@ export default function ScheduleDetail() {
                     </Badge>
                   ))}
                 </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Run History */}
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between gap-2">
-                <CardTitle className="text-sm flex items-center gap-2">
-                  <History className="w-4 h-4" />
-                  Run History
-                  <Badge variant="secondary" className="ml-1 text-[10px]">
-                    {groupedRuns.length} fire{groupedRuns.length === 1 ? '' : 's'}
-                  </Badge>
-                  {hasActiveJobs && (
-                    <Badge
-                      variant="outline"
-                      className="ml-1 text-[10px] bg-blue-500/10 text-blue-600 border-blue-500/20 flex items-center gap-1"
-                      data-testid="polling-indicator"
-                    >
-                      <Loader2 className="w-2.5 h-2.5 animate-spin" />
-                      live
-                    </Badge>
-                  )}
-                </CardTitle>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => fetchRuns()}
-                  disabled={runsLoading}
-                  className="h-7"
-                  data-testid="refresh-runs-btn"
-                >
-                  <RefreshCw
-                    className={`w-3.5 h-3.5 ${runsRefreshing || runsLoading ? 'animate-spin' : ''}`}
-                  />
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {runsLoading ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-                </div>
-              ) : groupedRuns.length === 0 ? (
-                <p className="text-xs text-muted-foreground italic py-6 text-center">
-                  This batch hasn't fired yet.
-                </p>
-              ) : (
-                <Accordion type="multiple" className="w-full" data-testid="run-history-accordion">
-                  {groupedRuns.map((run) => (
-                    <AccordionItem
-                      key={run.groupRunId}
-                      value={run.groupRunId}
-                      data-testid={`run-${run.groupRunId}`}
-                    >
-                      <AccordionTrigger className="text-xs hover:no-underline py-3">
-                        <div className="flex items-center gap-3 flex-1 pr-2">
-                          <div className="flex flex-col items-start min-w-[110px]">
-                            <span
-                              className="font-mono font-semibold text-xs"
-                              data-testid={`run-date-${run.groupRunId}`}
-                            >
-                              {run.date || run.groupRunId}
-                            </span>
-                            <span className="text-[10px] text-muted-foreground font-mono">
-                              {run.total} job{run.total === 1 ? '' : 's'}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            {run.done > 0 && (
-                              <Badge
-                                variant="outline"
-                                className="bg-emerald-500/10 text-emerald-600 border-emerald-500/20 text-[10px]"
-                                data-testid={`run-done-${run.groupRunId}`}
-                              >
-                                <CheckCircle2 className="w-3 h-3 mr-1" />
-                                {run.done}
-                              </Badge>
-                            )}
-                            {run.failed > 0 && (
-                              <Badge
-                                variant="outline"
-                                className="bg-rose-500/10 text-rose-600 border-rose-500/20 text-[10px]"
-                                data-testid={`run-failed-${run.groupRunId}`}
-                              >
-                                <XCircle className="w-3 h-3 mr-1" />
-                                {run.failed}
-                              </Badge>
-                            )}
-                            {run.running > 0 && (
-                              <Badge
-                                variant="outline"
-                                className="bg-blue-500/10 text-blue-600 border-blue-500/20 text-[10px]"
-                                data-testid={`run-running-${run.groupRunId}`}
-                              >
-                                <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                                {run.running}
-                              </Badge>
-                            )}
-                          </div>
-                        </div>
-                      </AccordionTrigger>
-                      <AccordionContent>
-                        <div className="space-y-1.5 pb-2">
-                          {run.jobs.map((job) => (
-                            <div
-                              key={job.id || job.job_id}
-                              onClick={() => navigate(`/evals/${job.id || job.job_id}`)}
-                              className="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-accent cursor-pointer transition-colors border"
-                              data-testid={`run-job-${job.id || job.job_id}`}
-                            >
-                              <span className="font-mono text-xs flex-1 truncate">
-                                {(job.id || job.job_id || '').substring(0, 8)}
-                                <span className="text-muted-foreground">
-                                  ...
-                                  {(job.id || job.job_id || '').substring(
-                                    Math.max(8, (job.id || job.job_id || '').length - 4)
-                                  )}
-                                </span>
-                              </span>
-                              {job.problem_id && (
-                                <Badge variant="outline" className="font-mono text-[10px] truncate max-w-[260px]">
-                                  {job.problem_id}
-                                </Badge>
-                              )}
-                              {statusBadge(job.status)}
-                              <ExternalLink className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-                            </div>
-                          ))}
-                        </div>
-                      </AccordionContent>
-                    </AccordionItem>
-                  ))}
-                </Accordion>
               )}
             </CardContent>
           </Card>
@@ -726,6 +593,153 @@ export default function ScheduleDetail() {
                 <p className="text-xs mt-0.5">{formatRelativeOrDash(batch.updated_at)}</p>
               </div>
             </CardContent>
+          </Card>
+
+          {/* Run History (collapsible) */}
+          <Card data-testid="run-history-card">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => setRunHistoryOpen((v) => !v)}
+                  className="flex items-center gap-2 text-left group flex-1 min-w-0"
+                  aria-expanded={runHistoryOpen}
+                  data-testid="run-history-toggle"
+                >
+                  <ChevronDown
+                    className={`w-4 h-4 text-muted-foreground transition-transform flex-shrink-0 ${
+                      runHistoryOpen ? '' : '-rotate-90'
+                    }`}
+                  />
+                  <CardTitle className="text-sm flex items-center gap-2 min-w-0">
+                    <History className="w-4 h-4 flex-shrink-0" />
+                    <span>Run History</span>
+                    <Badge variant="secondary" className="ml-1 text-[10px] flex-shrink-0">
+                      {groupedRuns.length} fire{groupedRuns.length === 1 ? '' : 's'}
+                    </Badge>
+                    {hasActiveJobs && (
+                      <Badge
+                        variant="outline"
+                        className="ml-1 text-[10px] bg-blue-500/10 text-blue-600 border-blue-500/20 flex items-center gap-1 flex-shrink-0"
+                        data-testid="polling-indicator"
+                      >
+                        <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                        live
+                      </Badge>
+                    )}
+                  </CardTitle>
+                </button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    fetchRuns();
+                  }}
+                  disabled={runsLoading}
+                  className="h-7 flex-shrink-0"
+                  data-testid="refresh-runs-btn"
+                >
+                  <RefreshCw
+                    className={`w-3.5 h-3.5 ${runsRefreshing || runsLoading ? 'animate-spin' : ''}`}
+                  />
+                </Button>
+              </div>
+            </CardHeader>
+            {runHistoryOpen && (
+              <CardContent className="pt-0">
+                {runsLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                  </div>
+                ) : groupedRuns.length === 0 ? (
+                  <p className="text-xs text-muted-foreground italic py-6 text-center">
+                    This batch hasn't fired yet.
+                  </p>
+                ) : (
+                  <Accordion
+                    type="multiple"
+                    className="w-full"
+                    data-testid="run-history-accordion"
+                  >
+                    {groupedRuns.map((run) => (
+                      <AccordionItem
+                        key={run.groupRunId}
+                        value={run.groupRunId}
+                        data-testid={`run-${run.groupRunId}`}
+                      >
+                        <AccordionTrigger className="text-xs hover:no-underline py-2.5">
+                          <div className="flex items-center gap-2 flex-1 pr-2 min-w-0">
+                            <div className="flex flex-col items-start min-w-0 flex-1">
+                              <span
+                                className="font-mono font-semibold text-xs"
+                                data-testid={`run-date-${run.groupRunId}`}
+                              >
+                                {run.date || run.groupRunId}
+                              </span>
+                              <span className="text-[10px] text-muted-foreground font-mono">
+                                {run.total} job{run.total === 1 ? '' : 's'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1 flex-shrink-0">
+                              {run.done > 0 && (
+                                <Badge
+                                  variant="outline"
+                                  className="bg-emerald-500/10 text-emerald-600 border-emerald-500/20 text-[10px] px-1.5"
+                                  data-testid={`run-done-${run.groupRunId}`}
+                                >
+                                  <CheckCircle2 className="w-3 h-3 mr-0.5" />
+                                  {run.done}
+                                </Badge>
+                              )}
+                              {run.failed > 0 && (
+                                <Badge
+                                  variant="outline"
+                                  className="bg-rose-500/10 text-rose-600 border-rose-500/20 text-[10px] px-1.5"
+                                  data-testid={`run-failed-${run.groupRunId}`}
+                                >
+                                  <XCircle className="w-3 h-3 mr-0.5" />
+                                  {run.failed}
+                                </Badge>
+                              )}
+                              {run.running > 0 && (
+                                <Badge
+                                  variant="outline"
+                                  className="bg-blue-500/10 text-blue-600 border-blue-500/20 text-[10px] px-1.5"
+                                  data-testid={`run-running-${run.groupRunId}`}
+                                >
+                                  <Loader2 className="w-3 h-3 mr-0.5 animate-spin" />
+                                  {run.running}
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                        </AccordionTrigger>
+                        <AccordionContent>
+                          <div className="space-y-1.5 pb-2">
+                            {run.jobs.map((job) => (
+                              <div
+                                key={job.id || job.job_id}
+                                onClick={() => navigate(`/evals/${job.id || job.job_id}`)}
+                                className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent cursor-pointer transition-colors border"
+                                data-testid={`run-job-${job.id || job.job_id}`}
+                              >
+                                <span className="font-mono text-[11px] flex-1 truncate">
+                                  {(job.id || job.job_id || '').substring(0, 6)}
+                                  <span className="text-muted-foreground">…</span>
+                                </span>
+                                {statusBadge(job.status)}
+                                <ExternalLink className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+                              </div>
+                            ))}
+                          </div>
+                        </AccordionContent>
+                      </AccordionItem>
+                    ))}
+                  </Accordion>
+                )}
+              </CardContent>
+            )}
           </Card>
 
           {/* Stats */}
