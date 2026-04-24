@@ -1,5 +1,4 @@
 import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import {
   Activity,
   TrendingUp,
@@ -7,12 +6,12 @@ import {
   Minus,
   CheckCircle2,
   Clock,
-  DollarSign,
   Gauge,
   Target,
   Globe,
+  DollarSign,
 } from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
+import Sparkline from './Sparkline';
 
 function formatPct(v, digits = 1) {
   if (v === null || v === undefined || Number.isNaN(v)) return '—';
@@ -36,56 +35,39 @@ function formatDurationMs(ms) {
   return `${h}h ${remM}m`;
 }
 
-function formatRelativeOrDash(value) {
-  if (!value) return '—';
-  try {
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return '—';
-    return formatDistanceToNow(d, { addSuffix: true });
-  } catch {
-    return '—';
-  }
+function valueColor(v) {
+  if (v === null || v === undefined) return '';
+  if (v >= 0.8) return 'text-emerald-600 dark:text-emerald-400';
+  if (v >= 0.5) return 'text-amber-600 dark:text-amber-400';
+  return 'text-rose-600 dark:text-rose-400';
 }
 
 function TrendArrow({ direction }) {
   if (!direction) return null;
   if (direction === 'up')
-    return (
-      <TrendingUp
-        className="w-3 h-3 text-emerald-500"
-        aria-label="trending up"
-      />
-    );
+    return <TrendingUp className="w-3 h-3 text-emerald-500" aria-label="trending up" />;
   if (direction === 'down')
-    return (
-      <TrendingDown
-        className="w-3 h-3 text-rose-500"
-        aria-label="trending down"
-      />
-    );
-  return (
-    <Minus className="w-3 h-3 text-muted-foreground" aria-label="flat" />
-  );
+    return <TrendingDown className="w-3 h-3 text-rose-500" aria-label="trending down" />;
+  return <Minus className="w-3 h-3 text-muted-foreground" aria-label="flat" />;
 }
 
-function KpiTile({ label, value, sub, icon: Icon, testId, accent }) {
+function KpiTile({ label, value, sub, icon: Icon, testId, accent, children, valueClass }) {
   return (
-    <Card className="flex-1 min-w-[140px]" data-testid={testId}>
+    <Card className="flex-1 min-w-[160px]" data-testid={testId}>
       <CardContent className="pt-3 pb-3 px-3">
         <div className="flex items-center justify-between gap-2 mb-1">
           <span className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground truncate">
             {label}
           </span>
-          {Icon && (
-            <Icon className={`w-3.5 h-3.5 ${accent || 'text-muted-foreground'}`} />
-          )}
+          {Icon && <Icon className={`w-3.5 h-3.5 ${accent || 'text-muted-foreground'}`} />}
         </div>
-        <div className="text-base font-mono font-semibold">{value}</div>
+        <div className={`text-base font-mono font-semibold ${valueClass || ''}`}>{value}</div>
         {sub && (
           <div className="text-[10px] text-muted-foreground font-mono mt-0.5 flex items-center gap-1 truncate">
             {sub}
           </div>
         )}
+        {children}
       </CardContent>
     </Card>
   );
@@ -103,16 +85,20 @@ export default function SummaryKPIs({ summary }) {
     meanLint,
     meanBrowser,
     avgDurationMs,
-    lastRunAt,
     lastRunCombined,
     trendDirection,
     totalCostUsd,
     hasCostData,
+    combinedSeries,
+    lintSeries,
+    browserSeries,
   } = summary;
+
+  const hasMultiplePoints = Array.isArray(combinedSeries) && combinedSeries.filter((v) => v !== null).length >= 2;
 
   return (
     <div
-      className="flex flex-wrap gap-2"
+      className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2"
       data-testid="analytics-kpis"
       role="list"
       aria-label="Schedule-wide metrics"
@@ -135,6 +121,7 @@ export default function SummaryKPIs({ summary }) {
       <KpiTile
         label="Mean Combined"
         value={formatScore(meanCombined)}
+        valueClass={valueColor(meanCombined)}
         sub={
           <>
             <TrendArrow direction={trendDirection} />
@@ -143,59 +130,74 @@ export default function SummaryKPIs({ summary }) {
         }
         icon={Target}
         testId="kpi-mean-combined"
-      />
+      >
+        {hasMultiplePoints && (
+          <div className="mt-1.5">
+            <Sparkline
+              values={combinedSeries}
+              width={140}
+              height={22}
+              stroke="hsl(221 83% 53%)"
+              className="w-full"
+              data-testid="kpi-spark-combined"
+            />
+          </div>
+        )}
+      </KpiTile>
       <KpiTile
         label="Mean Lint"
         value={formatScore(meanLint)}
+        valueClass={valueColor(meanLint)}
         icon={Gauge}
         testId="kpi-mean-lint"
-      />
+      >
+        {hasMultiplePoints && lintSeries && (
+          <div className="mt-1.5">
+            <Sparkline
+              values={lintSeries}
+              width={140}
+              height={22}
+              stroke="hsl(142 71% 45%)"
+              className="w-full"
+              data-testid="kpi-spark-lint"
+            />
+          </div>
+        )}
+      </KpiTile>
       <KpiTile
         label="Mean Browser"
         value={formatScore(meanBrowser)}
+        valueClass={valueColor(meanBrowser)}
         icon={Globe}
         testId="kpi-mean-browser"
-      />
+      >
+        {hasMultiplePoints && browserSeries && (
+          <div className="mt-1.5">
+            <Sparkline
+              values={browserSeries}
+              width={140}
+              height={22}
+              stroke="hsl(262 83% 58%)"
+              className="w-full"
+              data-testid="kpi-spark-browser"
+            />
+          </div>
+        )}
+      </KpiTile>
       <KpiTile
         label="Avg Duration"
         value={formatDurationMs(avgDurationMs)}
         icon={Clock}
         testId="kpi-avg-duration"
       />
-      <KpiTile
-        label="Total Cost"
-        value={
-          hasCostData && totalCostUsd !== null
-            ? `$${totalCostUsd.toFixed(4)}`
-            : '—'
-        }
-        sub={
-          hasCostData ? null : (
-            <Badge
-              variant="outline"
-              className="text-[9px] px-1 py-0 h-4"
-              data-testid="kpi-cost-unavailable"
-            >
-              job detail only
-            </Badge>
-          )
-        }
-        icon={DollarSign}
-        testId="kpi-total-cost"
-      />
-      <KpiTile
-        label="Last Fire"
-        value={formatRelativeOrDash(lastRunAt)}
-        sub={
-          lastRunAt ? (
-            <span className="truncate">
-              {new Date(lastRunAt).toLocaleString()}
-            </span>
-          ) : null
-        }
-        icon={Clock}
-        testId="kpi-last-fire"
-      />
+      {hasCostData && totalCostUsd !== null && (
+        <KpiTile
+          label="Total Cost"
+          value={`$${totalCostUsd.toFixed(4)}`}
+          icon={DollarSign}
+          testId="kpi-total-cost"
+        />
+      )}
     </div>
   );
 }

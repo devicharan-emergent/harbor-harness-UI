@@ -59,6 +59,7 @@ import useScheduleAnalytics from '@/hooks/useScheduleAnalytics';
 import SummaryKPIs from '@/components/analytics/SummaryKPIs';
 import ScoreTimeSeries from '@/components/analytics/ScoreTimeSeries';
 import PhaseHeatmap from '@/components/analytics/PhaseHeatmap';
+import ProblemLeaderboard from '@/components/analytics/ProblemLeaderboard';
 
 function formatRelativeOrDash(value) {
   if (!value) return '—';
@@ -616,7 +617,17 @@ export default function ScheduleDetail() {
                     </div>
                   )}
 
-                  {/* 3. Phase heatmap (only if any job has >1 phase) */}
+                  {/* 3. Per-problem leaderboard table */}
+                  {analytics.leaderboard.show && (
+                    <div data-testid="analytics-leaderboard-section">
+                      <h3 className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground mb-2">
+                        Problem performance
+                      </h3>
+                      <ProblemLeaderboard leaderboard={analytics.leaderboard} />
+                    </div>
+                  )}
+
+                  {/* 4. Phase heatmap (only if any job has >1 phase) */}
                   {analytics.heatmap.show && (
                     <div data-testid="analytics-heatmap-section">
                       <h3 className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground mb-2">

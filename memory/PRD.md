@@ -52,9 +52,16 @@ Build an Agent Configuration Manager (ACM) for managing AI agent configurations,
 - [x] Row-clickable problem selection (ScheduleEditor, RunEvalModal)
 - [x] ScheduleDetail Analytics section: SummaryKPIs, PhaseHeatmap
 - [x] **Per-problem time series chart** (Feb 2026): one line per problem across dates with
-      metric selector (combined_reward / lint_score / browser_reward / lintiq_score) so the
-      user can judge how the agent config chosen at each run performs per problem over time.
+      metric selector (combined_reward / lint_score / browser_reward / lintiq_score).
       Replaces the prior error-code breakdown which was removed at user request.
+- [x] **Analytics UI polish** (Feb 2026):
+      - KPI tiles: color-coded values by threshold, inline sparklines under reward means,
+        drop "Total Cost —" / "Last Fire" when redundant, 6-col responsive grid.
+      - Chart: end-of-line value labels, 0.5 reference line, legend hover-to-isolate,
+        tooltip sorted by value.
+      - New `ProblemLeaderboard` table — sortable per-problem rows with runs count,
+        latest/mean scores (color-coded), trend arrow, combined-reward sparkline.
+      - New reusable `Sparkline` SVG component.
 
 ## Testing Status (Iteration 14 - March 14, 2026)
 - Backend: 14/14 pytest tests passed (100%)

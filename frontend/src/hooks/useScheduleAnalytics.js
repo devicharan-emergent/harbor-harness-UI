@@ -129,6 +129,15 @@ export default function useScheduleAnalytics(runs) {
       }
     }
 
+    // Per-date sparkline series for each top-level metric (used by KPI tiles)
+    const combinedSeries = dateMeans.map((d) => d.mean);
+    const lintSeries = sortedDates.map((d) =>
+      avg(byDate.get(d).map((j) => safeNum(j.lint_score)))
+    );
+    const browserSeries = sortedDates.map((d) =>
+      avg(byDate.get(d).map((j) => safeNum(j.browser_reward)))
+    );
+
     const summary = {
       hasData,
       totalRuns,
@@ -145,6 +154,9 @@ export default function useScheduleAnalytics(runs) {
       trendDirection,
       totalCostUsd,
       hasCostData: metricJobs.length > 0,
+      combinedSeries,
+      lintSeries,
+      browserSeries,
     };
 
     // ── TIME SERIES (per-problem, per-metric) ─────────────────────────────
@@ -227,6 +239,87 @@ export default function useScheduleAnalytics(runs) {
       cells: heatmapCells,
     };
 
-    return { summary, timeSeries, heatmap };
+    // ── LEADERBOARD (per-problem ranking) ────────────────────────────────
+    // One row per problem with latest, mean, per-metric means, a trend
+    // direction derived from first-half vs second-half combined_reward
+    // averages, and a combined_reward time series for an inline sparkline.
+    const leaderRows = problems.map((problem) => {
+      const jobsForProblem = jobs.filter((j) => j.problem === problem);
+      // Distinct run dates this problem appeared in
+      const runDates = new Set();
+      for (const j of jobsForProblem) {
+        const d = extractDate(j.group_run_id);
+        if (d) runDates.add(d);
+      }
+
+      const meanCombinedP = avg(
+        jobsForProblem.map((j) => safeNum(j.combined_reward))
+      );
+      const meanLintP = avg(jobsForProblem.map((j) => safeNum(j.lint_score)));
+      const meanBrowserP = avg(
+        jobsForProblem.map((j) => safeNum(j.browser_reward))
+      );
+      const meanLintiqP = avg(
+        jobsForProblem.map((j) => safeNum(j.lintiq_score))
+      );
+
+      // Combined-reward series ordered by date (for the sparkline)
+      const combinedSeriesP = sortedDates.map((date) => {
+        const daily = byDate
+          .get(date)
+          .filter((j) => j.problem === problem);
+        return avg(daily.map((j) => safeNum(j.combined_reward)));
+      });
+
+      // Latest value = last non-null in combinedSeriesP
+      let latestCombined = null;
+      let latestDate = null;
+      for (let i = combinedSeriesP.length - 1; i >= 0; i--) {
+        if (combinedSeriesP[i] !== null) {
+          latestCombined = combinedSeriesP[i];
+          latestDate = sortedDates[i];
+          break;
+        }
+      }
+
+      // Trend: compare the last point vs the mean of everything before it
+      let trend = null;
+      const validIdxs = combinedSeriesP
+        .map((v, i) => (v !== null ? i : -1))
+        .filter((i) => i >= 0);
+      if (validIdxs.length >= 2) {
+        const lastIdx = validIdxs[validIdxs.length - 1];
+        const prior = validIdxs
+          .slice(0, -1)
+          .map((i) => combinedSeriesP[i]);
+        const priorAvg = avg(prior);
+        if (priorAvg !== null) {
+          const delta = combinedSeriesP[lastIdx] - priorAvg;
+          if (Math.abs(delta) < 0.01) trend = 'flat';
+          else trend = delta > 0 ? 'up' : 'down';
+        }
+      }
+
+      return {
+        problem,
+        runs: runDates.size,
+        jobs: jobsForProblem.length,
+        latestCombined,
+        latestDate,
+        meanCombined: meanCombinedP,
+        meanLint: meanLintP,
+        meanBrowser: meanBrowserP,
+        meanLintiq: meanLintiqP,
+        combinedSeries: combinedSeriesP,
+        trend,
+      };
+    });
+
+    const leaderboard = {
+      show: leaderRows.length > 0,
+      rows: leaderRows,
+    };
+
+    return { summary, timeSeries, heatmap, leaderboard };
   }, [runs]);
 }

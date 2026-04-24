@@ -8,6 +8,8 @@ import {
   Tooltip,
   ResponsiveContainer,
   Legend,
+  ReferenceLine,
+  LabelList,
 } from 'recharts';
 import {
   Select,
@@ -48,37 +50,70 @@ function truncateLabel(s, n = 28) {
 
 function CustomTooltip({ active, payload, label }) {
   if (!active || !payload || payload.length === 0) return null;
-  // Filter out problems with null values at this date so tooltip is clean
-  const rows = payload.filter((p) => p.value !== null && p.value !== undefined);
+  const rows = payload
+    .filter((p) => p.value !== null && p.value !== undefined)
+    .sort((a, b) => b.value - a.value);
   if (rows.length === 0) return null;
   return (
-    <div className="rounded-md border bg-popover text-popover-foreground px-3 py-2 shadow-md text-xs max-w-[360px]">
-      <div className="font-mono font-semibold mb-1">{label}</div>
-      {rows.map((p) => (
-        <div
-          key={p.dataKey}
-          className="flex items-center justify-between gap-4 font-mono"
-        >
-          <span className="flex items-center gap-1.5 truncate">
-            <span
-              className="inline-block w-2 h-2 rounded-full flex-shrink-0"
-              style={{ background: p.color }}
-            />
-            <span className="truncate" title={p.name}>
-              {p.name}
+    <div className="rounded-md border bg-popover text-popover-foreground px-3 py-2 shadow-md text-xs max-w-[380px]">
+      <div className="font-mono font-semibold mb-1.5 pb-1 border-b">{label}</div>
+      <div className="space-y-1">
+        {rows.map((p) => (
+          <div
+            key={p.dataKey}
+            className="flex items-center justify-between gap-4 font-mono"
+          >
+            <span className="flex items-center gap-1.5 truncate">
+              <span
+                className="inline-block w-2 h-2 rounded-full flex-shrink-0"
+                style={{ background: p.color }}
+              />
+              <span className="truncate" title={p.name}>
+                {p.name}
+              </span>
             </span>
-          </span>
-          <span className="flex-shrink-0">
-            {typeof p.value === 'number' ? p.value.toFixed(3) : '—'}
-          </span>
-        </div>
-      ))}
+            <span className="flex-shrink-0 font-semibold">
+              {typeof p.value === 'number' ? p.value.toFixed(3) : '—'}
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
+// Render the value only at the last data point per series
+function EndLabel({ rows }) {
+  return function Inner(props) {
+    const { x, y, value, index } = props;
+    if (value === null || value === undefined) return null;
+    // Only draw for the last non-null point of the series.
+    // Recharts calls this for every point; we look ahead in `rows` to see
+    // if there's a later non-null value for this series.
+    const { dataKey } = props;
+    for (let i = index + 1; i < rows.length; i++) {
+      if (rows[i]?.[dataKey] !== null && rows[i]?.[dataKey] !== undefined) {
+        return null;
+      }
+    }
+    return (
+      <text
+        x={x + 6}
+        y={y + 3}
+        fontSize={10}
+        fontFamily="monospace"
+        fill="currentColor"
+        className="fill-foreground"
+      >
+        {typeof value === 'number' ? value.toFixed(2) : ''}
+      </text>
+    );
+  };
+}
+
 export default function ScoreTimeSeries({ timeSeries }) {
   const [metric, setMetric] = useState('combined_reward');
+  const [hoveredProblem, setHoveredProblem] = useState(null);
 
   const rows = useMemo(
     () => timeSeries?.byMetric?.[metric] || [],
@@ -88,6 +123,8 @@ export default function ScoreTimeSeries({ timeSeries }) {
 
   const noData =
     !timeSeries?.show || problems.length === 0 || rows.length === 0;
+
+  const EndLabelComponent = useMemo(() => EndLabel({ rows }), [rows]);
 
   return (
     <div className="space-y-3" data-testid="analytics-time-series">
@@ -114,7 +151,7 @@ export default function ScoreTimeSeries({ timeSeries }) {
           </Select>
         </div>
         <p className="text-[11px] text-muted-foreground ml-auto">
-          One line per problem · higher is better · judge agent config quality
+          Hover a problem in the legend to isolate it · higher is better
         </p>
       </div>
 
@@ -126,8 +163,8 @@ export default function ScoreTimeSeries({ timeSeries }) {
           No data for this metric
         </div>
       ) : (
-        <ResponsiveContainer width="100%" height={320}>
-          <LineChart data={rows} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
+        <ResponsiveContainer width="100%" height={340}>
+          <LineChart data={rows} margin={{ top: 12, right: 48, bottom: 0, left: 0 }}>
             <CartesianGrid
               strokeDasharray="3 3"
               className="stroke-border"
@@ -139,6 +176,7 @@ export default function ScoreTimeSeries({ timeSeries }) {
               className="fill-muted-foreground"
               tickLine={false}
               axisLine={false}
+              padding={{ left: 8, right: 8 }}
             />
             <YAxis
               domain={[0, 1]}
@@ -149,30 +187,56 @@ export default function ScoreTimeSeries({ timeSeries }) {
               axisLine={false}
               width={36}
             />
-            <Tooltip content={<CustomTooltip />} />
+            <ReferenceLine
+              y={0.5}
+              stroke="hsl(var(--muted-foreground))"
+              strokeDasharray="2 4"
+              strokeOpacity={0.4}
+            />
+            <Tooltip
+              content={<CustomTooltip />}
+              cursor={{ stroke: 'hsl(var(--muted-foreground))', strokeOpacity: 0.25 }}
+            />
             <Legend
-              wrapperStyle={{ fontSize: 11 }}
+              wrapperStyle={{ fontSize: 11, cursor: 'pointer' }}
               iconSize={8}
+              onMouseEnter={(o) => setHoveredProblem(o.dataKey)}
+              onMouseLeave={() => setHoveredProblem(null)}
               formatter={(value) => (
-                <span title={value} className="font-mono">
+                <span
+                  title={value}
+                  className="font-mono"
+                  style={{
+                    opacity:
+                      hoveredProblem && hoveredProblem !== value ? 0.35 : 1,
+                  }}
+                >
                   {truncateLabel(value)}
                 </span>
               )}
             />
-            {problems.map((problem, idx) => (
-              <Line
-                key={problem}
-                type="monotone"
-                dataKey={problem}
-                name={problem}
-                stroke={COLORS[idx % COLORS.length]}
-                strokeWidth={2}
-                dot={{ r: 3 }}
-                activeDot={{ r: 5 }}
-                connectNulls
-                isAnimationActive={false}
-              />
-            ))}
+            {problems.map((problem, idx) => {
+              const color = COLORS[idx % COLORS.length];
+              const isDimmed =
+                hoveredProblem && hoveredProblem !== problem;
+              return (
+                <Line
+                  key={problem}
+                  type="monotone"
+                  dataKey={problem}
+                  name={problem}
+                  stroke={color}
+                  strokeWidth={isDimmed ? 1 : 2.25}
+                  strokeOpacity={isDimmed ? 0.3 : 1}
+                  dot={{ r: isDimmed ? 2 : 3 }}
+                  activeDot={{ r: 5 }}
+                  connectNulls
+                  isAnimationActive={false}
+                >
+                  <LabelList dataKey={problem} content={EndLabelComponent} />
+                </Line>
+              );
+            })}
           </LineChart>
         </ResponsiveContainer>
       )}
