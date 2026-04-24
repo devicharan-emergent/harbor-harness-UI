@@ -53,8 +53,8 @@ function TrendArrow({ direction }) {
 
 function KpiTile({ label, value, sub, icon: Icon, testId, accent, children, valueClass }) {
   return (
-    <Card className="flex-1 min-w-[160px]" data-testid={testId}>
-      <CardContent className="pt-3 pb-3 px-3">
+    <Card className="h-full flex flex-col" data-testid={testId}>
+      <CardContent className="pt-3 pb-3 px-3 flex flex-col h-full">
         <div className="flex items-center justify-between gap-2 mb-1">
           <span className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground truncate">
             {label}
@@ -62,12 +62,10 @@ function KpiTile({ label, value, sub, icon: Icon, testId, accent, children, valu
           {Icon && <Icon className={`w-3.5 h-3.5 ${accent || 'text-muted-foreground'}`} />}
         </div>
         <div className={`text-base font-mono font-semibold ${valueClass || ''}`}>{value}</div>
-        {sub && (
-          <div className="text-[10px] text-muted-foreground font-mono mt-0.5 flex items-center gap-1 truncate">
-            {sub}
-          </div>
-        )}
-        {children}
+        <div className="text-[10px] text-muted-foreground font-mono mt-0.5 flex items-center gap-1 truncate min-h-[14px]">
+          {sub || <span>&nbsp;</span>}
+        </div>
+        <div className="mt-auto pt-1.5">{children}</div>
       </CardContent>
     </Card>
   );
@@ -132,16 +130,14 @@ export default function SummaryKPIs({ summary }) {
         testId="kpi-mean-combined"
       >
         {hasMultiplePoints && (
-          <div className="mt-1.5">
-            <Sparkline
-              values={combinedSeries}
-              width={140}
-              height={22}
-              stroke="hsl(221 83% 53%)"
-              className="w-full"
-              data-testid="kpi-spark-combined"
-            />
-          </div>
+          <Sparkline
+            values={combinedSeries}
+            width={140}
+            height={22}
+            stroke="hsl(221 83% 53%)"
+            className="w-full"
+            data-testid="kpi-spark-combined"
+          />
         )}
       </KpiTile>
       <KpiTile
@@ -152,16 +148,14 @@ export default function SummaryKPIs({ summary }) {
         testId="kpi-mean-lint"
       >
         {hasMultiplePoints && lintSeries && (
-          <div className="mt-1.5">
-            <Sparkline
-              values={lintSeries}
-              width={140}
-              height={22}
-              stroke="hsl(142 71% 45%)"
-              className="w-full"
-              data-testid="kpi-spark-lint"
-            />
-          </div>
+          <Sparkline
+            values={lintSeries}
+            width={140}
+            height={22}
+            stroke="hsl(142 71% 45%)"
+            className="w-full"
+            data-testid="kpi-spark-lint"
+          />
         )}
       </KpiTile>
       <KpiTile
@@ -172,16 +166,14 @@ export default function SummaryKPIs({ summary }) {
         testId="kpi-mean-browser"
       >
         {hasMultiplePoints && browserSeries && (
-          <div className="mt-1.5">
-            <Sparkline
-              values={browserSeries}
-              width={140}
-              height={22}
-              stroke="hsl(262 83% 58%)"
-              className="w-full"
-              data-testid="kpi-spark-browser"
-            />
-          </div>
+          <Sparkline
+            values={browserSeries}
+            width={140}
+            height={22}
+            stroke="hsl(262 83% 58%)"
+            className="w-full"
+            data-testid="kpi-spark-browser"
+          />
         )}
       </KpiTile>
       <KpiTile
