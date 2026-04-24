@@ -44,6 +44,18 @@ Build an Agent Configuration Manager (ACM) for managing AI agent configurations,
 - [x] Fixed group_id not being sent to API - moved from eval item level to payload top level
 - [x] Updated sidebar layout with fixed positioning for better stability
 
+## Scheduled Batches + Analytics (Feb 2026)
+- [x] Scheduled Batches CRUD + trigger + runs history (proxy endpoints + UI)
+- [x] Whole-hour cron restriction in ScheduleEditor
+- [x] `schedule_tag` + `/runs` API contract migration
+- [x] `group_id` -> `group_run_id` fix on EvalRuns
+- [x] Row-clickable problem selection (ScheduleEditor, RunEvalModal)
+- [x] ScheduleDetail Analytics section: SummaryKPIs, PhaseHeatmap
+- [x] **Per-problem time series chart** (Feb 2026): one line per problem across dates with
+      metric selector (combined_reward / lint_score / browser_reward / lintiq_score) so the
+      user can judge how the agent config chosen at each run performs per problem over time.
+      Replaces the prior error-code breakdown which was removed at user request.
+
 ## Testing Status (Iteration 14 - March 14, 2026)
 - Backend: 14/14 pytest tests passed (100%)
 - Frontend: 33/33 Playwright tests passed (100%)

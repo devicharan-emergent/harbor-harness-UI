@@ -42,6 +42,7 @@ import {
   CheckCircle2,
   XCircle,
   RefreshCw,
+  BarChart3,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatDistanceToNow } from 'date-fns';
@@ -54,6 +55,10 @@ import {
 } from '@/services/schedulesApi';
 import { parseApiError } from '@/lib/errorUtils';
 import { humanizeCron } from './SchedulesList';
+import useScheduleAnalytics from '@/hooks/useScheduleAnalytics';
+import SummaryKPIs from '@/components/analytics/SummaryKPIs';
+import ScoreTimeSeries from '@/components/analytics/ScoreTimeSeries';
+import PhaseHeatmap from '@/components/analytics/PhaseHeatmap';
 
 function formatRelativeOrDash(value) {
   if (!value) return '—';
@@ -218,6 +223,9 @@ export default function ScheduleDetail() {
     () => runs.some((j) => classifyStatus(j.status) === 'running'),
     [runs]
   );
+
+  // Derive analytics data from runs (pure transform, no fetching)
+  const analytics = useScheduleAnalytics(runs);
 
   // Poll every 10s while any job is queued/running
   useEffect(() => {
@@ -558,6 +566,66 @@ export default function ScheduleDetail() {
                     </AccordionItem>
                   ))}
                 </Accordion>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Analytics */}
+          <Card data-testid="analytics-card">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <BarChart3 className="w-4 h-4" />
+                Analytics
+                {analytics.summary.hasData && (
+                  <Badge variant="secondary" className="ml-1 text-[10px]">
+                    across {analytics.summary.totalRuns} run
+                    {analytics.summary.totalRuns === 1 ? '' : 's'}
+                  </Badge>
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {!analytics.summary.hasData ? (
+                <div
+                  className="flex flex-col items-center justify-center py-10 text-center gap-2"
+                  data-testid="analytics-empty"
+                >
+                  <BarChart3 className="w-8 h-8 text-muted-foreground/50" />
+                  <p className="text-sm font-medium">No analytics yet</p>
+                  <p className="text-xs text-muted-foreground max-w-md">
+                    The first fire will populate this section.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {/* 1. KPI strip */}
+                  <div>
+                    <h3 className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground mb-2">
+                      Summary
+                    </h3>
+                    <SummaryKPIs summary={analytics.summary} />
+                  </div>
+
+                  {/* 2. Per-problem time series across runs */}
+                  {analytics.timeSeries.show && (
+                    <div data-testid="analytics-time-series-section">
+                      <h3 className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground mb-2">
+                        Per-problem metric over time
+                      </h3>
+                      <ScoreTimeSeries timeSeries={analytics.timeSeries} />
+                    </div>
+                  )}
+
+                  {/* 3. Phase heatmap (only if any job has >1 phase) */}
+                  {analytics.heatmap.show && (
+                    <div data-testid="analytics-heatmap-section">
+                      <h3 className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground mb-2">
+                        Per-phase lint score heatmap
+                      </h3>
+                      <PhaseHeatmap heatmap={analytics.heatmap} />
+                    </div>
+                  )}
+                </>
               )}
             </CardContent>
           </Card>
