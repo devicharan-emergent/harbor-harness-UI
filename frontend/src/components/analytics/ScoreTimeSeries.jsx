@@ -7,7 +7,6 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Legend,
   ReferenceLine,
   LabelList,
 } from 'recharts';
@@ -163,82 +162,104 @@ export default function ScoreTimeSeries({ timeSeries }) {
           No data for this metric
         </div>
       ) : (
-        <ResponsiveContainer width="100%" height={340}>
-          <LineChart data={rows} margin={{ top: 12, right: 48, bottom: 0, left: 0 }}>
-            <CartesianGrid
-              strokeDasharray="3 3"
-              className="stroke-border"
-              vertical={false}
-            />
-            <XAxis
-              dataKey="date"
-              tick={{ fontSize: 11 }}
-              className="fill-muted-foreground"
-              tickLine={false}
-              axisLine={false}
-              padding={{ left: 8, right: 8 }}
-            />
-            <YAxis
-              domain={[0, 1]}
-              ticks={[0, 0.25, 0.5, 0.75, 1.0]}
-              tick={{ fontSize: 11 }}
-              className="fill-muted-foreground"
-              tickLine={false}
-              axisLine={false}
-              width={36}
-            />
-            <ReferenceLine
-              y={0.5}
-              stroke="hsl(var(--muted-foreground))"
-              strokeDasharray="2 4"
-              strokeOpacity={0.4}
-            />
-            <Tooltip
-              content={<CustomTooltip />}
-              cursor={{ stroke: 'hsl(var(--muted-foreground))', strokeOpacity: 0.25 }}
-            />
-            <Legend
-              wrapperStyle={{ fontSize: 11, cursor: 'pointer' }}
-              iconSize={8}
-              onMouseEnter={(o) => setHoveredProblem(o.dataKey)}
-              onMouseLeave={() => setHoveredProblem(null)}
-              formatter={(value) => (
-                <span
-                  title={value}
-                  className="font-mono"
-                  style={{
-                    opacity:
-                      hoveredProblem && hoveredProblem !== value ? 0.35 : 1,
-                  }}
-                >
-                  {truncateLabel(value)}
-                </span>
-              )}
-            />
-            {problems.map((problem, idx) => {
-              const color = COLORS[idx % COLORS.length];
-              const isDimmed =
-                hoveredProblem && hoveredProblem !== problem;
-              return (
-                <Line
-                  key={problem}
-                  type="monotone"
-                  dataKey={problem}
-                  name={problem}
-                  stroke={color}
-                  strokeWidth={isDimmed ? 1 : 2.25}
-                  strokeOpacity={isDimmed ? 0.3 : 1}
-                  dot={{ r: isDimmed ? 2 : 3 }}
-                  activeDot={{ r: 5 }}
-                  connectNulls
-                  isAnimationActive={false}
-                >
-                  <LabelList dataKey={problem} content={EndLabelComponent} />
-                </Line>
-              );
-            })}
-          </LineChart>
-        </ResponsiveContainer>
+        <>
+          {/* Custom legend box — sits right above the chart */}
+          <div
+            className="rounded-md border bg-muted/30 px-3 py-2"
+            data-testid="timeseries-legend"
+          >
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground mr-1">
+                Problems
+              </span>
+              {problems.map((problem, idx) => {
+                const color = COLORS[idx % COLORS.length];
+                const dimmed =
+                  hoveredProblem && hoveredProblem !== problem;
+                return (
+                  <button
+                    key={problem}
+                    type="button"
+                    onMouseEnter={() => setHoveredProblem(problem)}
+                    onMouseLeave={() => setHoveredProblem(null)}
+                    className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded border bg-background hover:bg-accent transition-colors cursor-default"
+                    style={{ opacity: dimmed ? 0.4 : 1 }}
+                    title={problem}
+                    data-testid={`legend-chip-${problem}`}
+                  >
+                    <span
+                      className="inline-block w-2.5 h-2.5 rounded-sm flex-shrink-0"
+                      style={{ background: color }}
+                      aria-hidden
+                    />
+                    <span className="font-mono text-[11px]">
+                      {truncateLabel(problem)}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <ResponsiveContainer width="100%" height={320}>
+            <LineChart data={rows} margin={{ top: 12, right: 48, bottom: 0, left: 0 }}>
+              <CartesianGrid
+                strokeDasharray="3 3"
+                className="stroke-border"
+                vertical={false}
+              />
+              <XAxis
+                dataKey="date"
+                tick={{ fontSize: 11 }}
+                className="fill-muted-foreground"
+                tickLine={false}
+                axisLine={false}
+                padding={{ left: 8, right: 8 }}
+              />
+              <YAxis
+                domain={[0, 1]}
+                ticks={[0, 0.25, 0.5, 0.75, 1.0]}
+                tick={{ fontSize: 11 }}
+                className="fill-muted-foreground"
+                tickLine={false}
+                axisLine={false}
+                width={36}
+              />
+              <ReferenceLine
+                y={0.5}
+                stroke="hsl(var(--muted-foreground))"
+                strokeDasharray="2 4"
+                strokeOpacity={0.4}
+              />
+              <Tooltip
+                content={<CustomTooltip />}
+                cursor={{ stroke: 'hsl(var(--muted-foreground))', strokeOpacity: 0.25 }}
+              />
+              {problems.map((problem, idx) => {
+                const color = COLORS[idx % COLORS.length];
+                const isDimmed =
+                  hoveredProblem && hoveredProblem !== problem;
+                return (
+                  <Line
+                    key={problem}
+                    type="monotone"
+                    dataKey={problem}
+                    name={problem}
+                    stroke={color}
+                    strokeWidth={isDimmed ? 1 : 2.25}
+                    strokeOpacity={isDimmed ? 0.3 : 1}
+                    dot={{ r: isDimmed ? 2 : 3 }}
+                    activeDot={{ r: 5 }}
+                    connectNulls
+                    isAnimationActive={false}
+                  >
+                    <LabelList dataKey={problem} content={EndLabelComponent} />
+                  </Line>
+                );
+              })}
+            </LineChart>
+          </ResponsiveContainer>
+        </>
       )}
     </div>
   );
