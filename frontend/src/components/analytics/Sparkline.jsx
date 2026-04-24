@@ -22,7 +22,7 @@ export default function Sparkline({
       <svg
         width={width}
         height={height}
-        className={className}
+        className={`max-w-full h-auto block ${className}`}
         data-testid={dataTestId}
         aria-hidden
       />
@@ -58,7 +58,7 @@ export default function Sparkline({
     <svg
       width={width}
       height={height}
-      className={className}
+      className={`max-w-full h-auto block ${className}`}
       viewBox={`0 0 ${width} ${height}`}
       data-testid={dataTestId}
       aria-hidden
