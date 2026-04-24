@@ -98,7 +98,7 @@ export default function SummaryKPIs({ summary }) {
 
   return (
     <div
-      className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2"
+      className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-4"
       data-testid="analytics-kpis"
       role="list"
       aria-label="Schedule-wide metrics"
