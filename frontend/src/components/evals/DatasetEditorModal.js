@@ -31,6 +31,7 @@ import {
   ArrowLeft,
   Trash2,
   Code2,
+  ChevronDown,
 } from 'lucide-react';
 
 const DATASET_TYPE_OPTIONS = [
@@ -127,7 +128,24 @@ function makeEmptyPhase(index) {
     name: `Phase ${index + 1}`,
     problemText: '',
     testsText: '',
+    collapsed: false,
   };
+}
+
+// Color accents per phase (cycles after 6)
+const PHASE_ACCENTS = [
+  'border-l-blue-500',
+  'border-l-emerald-500',
+  'border-l-violet-500',
+  'border-l-amber-500',
+  'border-l-pink-500',
+  'border-l-teal-500',
+];
+
+function snippet(text, n = 80) {
+  const t = (text || '').trim().replace(/\s+/g, ' ');
+  if (!t) return '';
+  return t.length > n ? `${t.slice(0, n - 1)}…` : t;
 }
 
 // ── Phased editor sub-component ─────────────────────────────────────────
@@ -140,80 +158,178 @@ function PhasedEditor({ phases, setPhases }) {
   const removePhase = (id) => {
     setPhases((prev) => prev.filter((p) => p.id !== id));
   };
+  const togglePhase = (id) => {
+    setPhases((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, collapsed: !p.collapsed } : p))
+    );
+  };
   const addPhase = () => {
-    setPhases((prev) => [...prev, makeEmptyPhase(prev.length)]);
+    setPhases((prev) => [
+      // collapse existing phases so the new one gets focus
+      ...prev.map((p) => ({ ...p, collapsed: true })),
+      makeEmptyPhase(prev.length),
+    ]);
+  };
+  const collapseAll = () => {
+    setPhases((prev) => prev.map((p) => ({ ...p, collapsed: true })));
+  };
+  const expandAll = () => {
+    setPhases((prev) => prev.map((p) => ({ ...p, collapsed: false })));
   };
 
+  const allCollapsed = phases.length > 0 && phases.every((p) => p.collapsed);
+
   return (
-    <div className="space-y-3" data-testid="phased-editor">
-      {phases.map((phase, idx) => (
-        <div
-          key={phase.id}
-          className="rounded-md border bg-muted/20 p-3 space-y-3"
-          data-testid={`phase-card-${idx}`}
-        >
-          <div className="flex items-center gap-2">
-            <Badge variant="secondary" className="text-[10px] font-mono">
-              #{idx + 1}
-            </Badge>
-            <Input
-              value={phase.name}
-              onChange={(e) => updatePhase(phase.id, 'name', e.target.value)}
-              placeholder={`Phase ${idx + 1}`}
-              className="h-8 text-sm font-medium flex-1"
-              data-testid={`phase-name-${idx}`}
-            />
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-muted-foreground hover:text-destructive"
-              onClick={() => removePhase(phase.id)}
-              disabled={phases.length <= 1}
-              title={
-                phases.length <= 1
-                  ? 'At least one phase is required'
-                  : 'Remove phase'
-              }
-              data-testid={`phase-remove-${idx}`}
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-            </Button>
-          </div>
-          <div>
-            <Label className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">
-              Problem statement
-            </Label>
-            <Textarea
-              value={phase.problemText}
-              onChange={(e) =>
-                updatePhase(phase.id, 'problemText', e.target.value)
-              }
-              placeholder="Describe what the agent must do in this phase. Plain text — no XML tags needed."
-              className="mt-1 text-sm min-h-[80px]"
-              data-testid={`phase-problem-${idx}`}
-            />
-          </div>
-          <div>
-            <Label className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">
-              Test cases
-            </Label>
-            <Textarea
-              value={phase.testsText}
-              onChange={(e) =>
-                updatePhase(phase.id, 'testsText', e.target.value)
-              }
-              placeholder="One test per line, e.g. 'When the user clicks Save, the note is persisted.'"
-              className="mt-1 text-sm min-h-[70px]"
-              data-testid={`phase-tests-${idx}`}
-            />
-          </div>
+    <div className="space-y-2" data-testid="phased-editor">
+      {phases.length > 1 && (
+        <div className="flex items-center justify-end -mt-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-6 text-[10px] text-muted-foreground hover:text-foreground"
+            onClick={allCollapsed ? expandAll : collapseAll}
+            data-testid="phased-toggle-all"
+          >
+            {allCollapsed ? 'Expand all' : 'Collapse all'}
+          </Button>
         </div>
-      ))}
+      )}
+
+      {phases.map((phase, idx) => {
+        const accent = PHASE_ACCENTS[idx % PHASE_ACCENTS.length];
+        const isCollapsed = !!phase.collapsed;
+        const preview = snippet(phase.problemText);
+        const filledCount = [phase.problemText, phase.testsText].filter(
+          (v) => v && v.trim()
+        ).length;
+
+        return (
+          <div
+            key={phase.id}
+            className={`rounded-md border border-l-4 bg-card transition-colors ${accent} ${
+              isCollapsed ? '' : 'shadow-sm'
+            }`}
+            data-testid={`phase-card-${idx}`}
+          >
+            {/* Header — always visible */}
+            <div className="flex items-center gap-2 px-2.5 py-2">
+              <button
+                type="button"
+                className="p-1 rounded hover:bg-accent text-muted-foreground"
+                onClick={() => togglePhase(phase.id)}
+                aria-expanded={!isCollapsed}
+                aria-label={isCollapsed ? 'Expand phase' : 'Collapse phase'}
+                data-testid={`phase-toggle-${idx}`}
+              >
+                <ChevronDown
+                  className={`w-3.5 h-3.5 transition-transform ${
+                    isCollapsed ? '-rotate-90' : ''
+                  }`}
+                />
+              </button>
+
+              <Badge
+                variant="secondary"
+                className="text-[10px] font-mono flex-shrink-0"
+              >
+                #{idx + 1}
+              </Badge>
+
+              {isCollapsed ? (
+                <button
+                  type="button"
+                  onClick={() => togglePhase(phase.id)}
+                  className="flex-1 flex items-center gap-2 min-w-0 text-left hover:text-foreground"
+                >
+                  <span className="font-medium text-sm truncate">
+                    {phase.name || `Phase ${idx + 1}`}
+                  </span>
+                  {preview ? (
+                    <span className="text-xs text-muted-foreground truncate flex-1">
+                      · {preview}
+                    </span>
+                  ) : (
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] text-amber-600 border-amber-500/30 bg-amber-500/10"
+                    >
+                      empty
+                    </Badge>
+                  )}
+                  <span className="text-[10px] font-mono text-muted-foreground flex-shrink-0">
+                    {filledCount}/2
+                  </span>
+                </button>
+              ) : (
+                <Input
+                  value={phase.name}
+                  onChange={(e) => updatePhase(phase.id, 'name', e.target.value)}
+                  placeholder={`Phase ${idx + 1}`}
+                  className="h-8 text-sm font-medium flex-1 border-0 shadow-none focus-visible:ring-1 px-2"
+                  data-testid={`phase-name-${idx}`}
+                />
+              )}
+
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 text-muted-foreground hover:text-destructive flex-shrink-0"
+                onClick={() => removePhase(phase.id)}
+                disabled={phases.length <= 1}
+                title={
+                  phases.length <= 1
+                    ? 'At least one phase is required'
+                    : 'Remove phase'
+                }
+                data-testid={`phase-remove-${idx}`}
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </Button>
+            </div>
+
+            {/* Expanded body */}
+            {!isCollapsed && (
+              <div className="px-3 pb-3 pt-1 space-y-3 border-t bg-muted/20">
+                <div>
+                  <Label className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">
+                    Problem statement
+                  </Label>
+                  <Textarea
+                    value={phase.problemText}
+                    onChange={(e) =>
+                      updatePhase(phase.id, 'problemText', e.target.value)
+                    }
+                    placeholder="Describe what the agent must do in this phase. Plain text — no XML tags needed."
+                    className="mt-1 text-sm min-h-[90px] bg-background"
+                    data-testid={`phase-problem-${idx}`}
+                  />
+                </div>
+                <div>
+                  <Label className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">
+                    Test cases
+                  </Label>
+                  <Textarea
+                    value={phase.testsText}
+                    onChange={(e) =>
+                      updatePhase(phase.id, 'testsText', e.target.value)
+                    }
+                    placeholder="One test per line, e.g. 'When the user clicks Save, the note is persisted.'"
+                    className="mt-1 text-sm min-h-[80px] bg-background"
+                    data-testid={`phase-tests-${idx}`}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+
       <Button
         type="button"
         variant="outline"
         size="sm"
-        className="w-full border-dashed"
+        className="w-full border-dashed text-muted-foreground hover:text-foreground"
         onClick={addPhase}
         data-testid="add-phase-btn"
       >
