@@ -8,6 +8,17 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Hide scrollbars but keep scroll behavior */
+.no-scrollbar {
+  scrollbar-width: none;           /* Firefox */
+  -ms-overflow-style: none;        /* IE/Edge */
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;                   /* Chrome/Safari */
+  width: 0;
+  height: 0;
+}
+
 @layer base {
   :root {
     /* macOS Aqua Light Mode */

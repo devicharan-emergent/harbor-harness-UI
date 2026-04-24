@@ -32,6 +32,8 @@ import {
   Trash2,
   Code2,
   ChevronDown,
+  ChevronRight,
+  Check,
 } from 'lucide-react';
 
 const DATASET_TYPE_OPTIONS = [
@@ -146,6 +148,72 @@ function snippet(text, n = 80) {
   const t = (text || '').trim().replace(/\s+/g, ' ');
   if (!t) return '';
   return t.length > n ? `${t.slice(0, n - 1)}…` : t;
+}
+
+// ── Step indicator ──────────────────────────────────────────────────────
+const STEPS = [
+  { n: 1, label: 'Metadata' },
+  { n: 2, label: 'Phases & Tests' },
+  { n: 3, label: 'Tags & Attributes' },
+];
+
+function StepIndicator({ step, setStep }) {
+  return (
+    <div
+      className="flex items-center gap-1.5 py-1"
+      role="tablist"
+      aria-label="Wizard steps"
+      data-testid="wizard-step-indicator"
+    >
+      {STEPS.map((s, idx) => {
+        const isActive = step === s.n;
+        const isDone = step > s.n;
+        const clickable = isDone; // only allow going back via the indicator
+        return (
+          <div key={s.n} className="flex items-center gap-1.5 flex-1">
+            <button
+              type="button"
+              onClick={() => clickable && setStep(s.n)}
+              disabled={!clickable && !isActive}
+              role="tab"
+              aria-selected={isActive}
+              className={[
+                'flex items-center gap-2 px-2.5 py-1.5 rounded-md flex-1 transition-colors text-left',
+                isActive
+                  ? 'bg-primary/10 text-foreground ring-1 ring-primary/30'
+                  : isDone
+                  ? 'text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer'
+                  : 'text-muted-foreground/60 cursor-default',
+              ].join(' ')}
+              data-testid={`wizard-step-${s.n}`}
+            >
+              <span
+                className={[
+                  'flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-semibold font-mono flex-shrink-0',
+                  isActive
+                    ? 'bg-primary text-primary-foreground'
+                    : isDone
+                    ? 'bg-emerald-500 text-white'
+                    : 'bg-muted text-muted-foreground',
+                ].join(' ')}
+              >
+                {isDone ? <Check className="w-3 h-3" /> : s.n}
+              </span>
+              <span className="text-xs font-medium truncate">{s.label}</span>
+            </button>
+            {idx < STEPS.length - 1 && (
+              <div
+                className={`h-px flex-shrink-0 w-4 ${
+                  step > s.n ? 'bg-emerald-500' : 'bg-border'
+                }`}
+                aria-hidden
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 // ── Phased editor sub-component ─────────────────────────────────────────
@@ -373,12 +441,14 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
 
   const [saving, setSaving] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [step, setStep] = useState(1); // 1: metadata, 2: phases, 3: tags + attributes
 
   const isPhasedType = datasetType === 'scratch_bench_phased';
   const usePhasedEditor = isPhasedType && !rawMode;
 
   useEffect(() => {
     if (!open) return;
+    setStep(1);
     if (dataset) {
       const t = dataset.dataset_type || 'scratch_bench_phased';
       setDatasetType(t);
@@ -541,6 +611,58 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
     return true;
   };
 
+  // Step validation helpers
+  const canAdvanceFromStep1 = () => {
+    if (!datasetType) return false;
+    if (!isEditing && !instanceId.trim()) return false;
+    return true;
+  };
+
+  const canAdvanceFromStep2 = () => {
+    if (usePhasedEditor) {
+      if (phases.length === 0) return false;
+      return phases.every(
+        (p) => p.problemText.trim() && p.testsText.trim()
+      );
+    }
+    return problemStatement.trim() && naturalLanguageTests.trim();
+  };
+
+  const handleNext = () => {
+    if (step === 1) {
+      if (!canAdvanceFromStep1()) {
+        toast.error(
+          !isEditing && !instanceId.trim()
+            ? 'Instance ID is required'
+            : 'Dataset type is required'
+        );
+        return;
+      }
+      setStep(2);
+    } else if (step === 2) {
+      if (!canAdvanceFromStep2()) {
+        if (usePhasedEditor) {
+          const missing = phases.findIndex(
+            (p) => !p.problemText.trim() || !p.testsText.trim()
+          );
+          toast.error(
+            `Phase ${missing + 1}: both problem statement and test cases are required`
+          );
+        } else if (!problemStatement.trim()) {
+          toast.error('Problem Statement is required');
+        } else {
+          toast.error('Natural Language Tests is required');
+        }
+        return;
+      }
+      setStep(3);
+    }
+  };
+
+  const handleBack = () => {
+    if (step > 1) setStep(step - 1);
+  };
+
   const handleOpenPreview = () => {
     if (!validateBeforePreview()) return;
     setPreviewOpen(true);
@@ -600,9 +722,13 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
             )}
           </DialogHeader>
 
-          <div className="flex-1 overflow-y-auto pr-2 min-h-0">
+          {/* Step indicator */}
+          <StepIndicator step={step} setStep={setStep} />
+
+          <div className="flex-1 overflow-y-auto no-scrollbar min-h-0">
             <div className="space-y-5 py-2">
-              {/* Core Fields */}
+              {/* ── STEP 1 — Metadata ───────────────────────────────── */}
+              {step === 1 && (
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -650,9 +776,11 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
                   />
                 </div>
               </div>
+              )}
 
-              <Separator />
-
+              {/* ── STEP 2 — Phases / Raw editor ─────────────────────── */}
+              {step === 2 && (
+              <div className="space-y-4">
               {/* Phased OR raw editor */}
               {isPhasedType && (
                 <div className="flex items-center justify-between">
@@ -709,8 +837,12 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
                   </div>
                 </>
               )}
+              </div>
+              )}
 
-              <Separator />
+              {/* ── STEP 3 — Tags + Attributes ───────────────────────── */}
+              {step === 3 && (
+              <div className="space-y-5">
 
               {/* Tags */}
               <div>
@@ -916,22 +1048,54 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
                   </div>
                 )}
               </div>
+              </div>
+              )}
             </div>
           </div>
 
-          <DialogFooter className="gap-2 pt-4 border-t">
-            <Button
-              variant="outline"
-              onClick={onClose}
-              disabled={saving}
-              data-testid="dataset-cancel-btn"
-            >
-              Cancel
-            </Button>
-            <Button onClick={handleOpenPreview} disabled={saving} data-testid="dataset-save-btn">
-              <Eye className="w-4 h-4 mr-2" />
-              {isEditing ? 'Preview & Update' : 'Preview & Create'}
-            </Button>
+          <DialogFooter className="gap-2 pt-4 border-t sm:justify-between">
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                onClick={onClose}
+                disabled={saving}
+                data-testid="dataset-cancel-btn"
+              >
+                Cancel
+              </Button>
+            </div>
+            <div className="flex items-center gap-2">
+              {step > 1 && (
+                <Button
+                  variant="outline"
+                  onClick={handleBack}
+                  disabled={saving}
+                  data-testid="wizard-back-btn"
+                >
+                  <ArrowLeft className="w-4 h-4 mr-2" />
+                  Back
+                </Button>
+              )}
+              {step < 3 ? (
+                <Button
+                  onClick={handleNext}
+                  disabled={saving}
+                  data-testid="wizard-next-btn"
+                >
+                  Next
+                  <ChevronRight className="w-4 h-4 ml-2" />
+                </Button>
+              ) : (
+                <Button
+                  onClick={handleOpenPreview}
+                  disabled={saving}
+                  data-testid="dataset-save-btn"
+                >
+                  <Eye className="w-4 h-4 mr-2" />
+                  {isEditing ? 'Preview & Update' : 'Preview & Create'}
+                </Button>
+              )}
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -955,7 +1119,7 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
               .
             </p>
           </DialogHeader>
-          <div className="flex-1 overflow-y-auto space-y-4 pr-2 min-h-0">
+          <div className="flex-1 overflow-y-auto space-y-4 no-scrollbar min-h-0">
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <Label className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">
