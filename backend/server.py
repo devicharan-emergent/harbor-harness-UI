@@ -211,6 +211,23 @@ async def restore_version(agent_id: str, version: int):
 EVAL_API_BASE = os.environ.get("EVAL_API_BASE", "http://harness-eval.int-worker.dev.emergentagent.com")
 BUILDER_PROXY_BASE = os.environ.get("BUILDER_API_BASE", "https://cortex-eph-builder-1035522277200.us-central1.run.app/api/v1/builder")
 
+
+@api_router.get("/eval/cortex/agents/exists")
+async def proxy_agent_exists(eph_name: str = Query(...), agent_name: str = Query(...)):
+    """Proxy GET /api/v1/cortex/agents/exists?eph_name=&agent_name= on the harness."""
+    async with httpx.AsyncClient(timeout=15.0) as hclient:
+        response = await hclient.get(
+            f"{EVAL_API_BASE}/api/v1/cortex/agents/exists",
+            params={"eph_name": eph_name, "agent_name": agent_name},
+        )
+        if response.status_code >= 400:
+            try:
+                data = response.json()
+            except Exception:
+                data = {"message": response.text}
+            raise HTTPException(status_code=response.status_code, detail=data)
+        return response.json()
+
 @api_router.post("/eval/jobs")
 async def proxy_submit_eval(body: dict):
     """Proxy: Submit eval jobs to external Eval API.

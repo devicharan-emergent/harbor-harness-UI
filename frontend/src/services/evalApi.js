@@ -25,6 +25,18 @@ export const submitEvalJobs = async (payload) => {
 };
 
 /**
+ * Check whether a cortex agent exists in a given ephemeral DB.
+ * GET /api/eval/cortex/agents/exists?eph_name=&agent_name=
+ * Returns: { exists: boolean, eph_name, agent_name }
+ */
+export const checkAgentExists = async (ephName, agentName) => {
+  const response = await evalApiClient.get('/cortex/agents/exists', {
+    params: { eph_name: ephName, agent_name: agentName },
+  });
+  return response.data;
+};
+
+/**
  * Get eval job by ID
  * GET /api/eval/jobs/{id}
  * Returns: { id, problem, status, progress, browser_reward?, lintiq_score?, combined_reward?, error?, ... }

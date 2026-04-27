@@ -10,9 +10,9 @@ import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { listDatasets, listDatasetsByType, getDatasetForProblem, submitEvalJobs } from '@/services/evalApi';
+import { listDatasets, listDatasetsByType, getDatasetForProblem, submitEvalJobs, checkAgentExists } from '@/services/evalApi';
 import { toast } from 'sonner';
-import { Loader2, Rocket, FileText, Search, ChevronRight } from 'lucide-react';
+import { Loader2, Rocket, FileText, Search, ChevronRight, Check, AlertCircle } from 'lucide-react';
 import { parseApiError } from '@/lib/errorUtils';
 import { useEnv } from '@/components/layout/EnvSwitcher';
 
@@ -61,6 +61,14 @@ export function RunEvalModal({ open, onClose }) {
   // Free-text agent_name override — sent at the batch level when set.
   const [agentNameOverride, setAgentNameOverride] = useState('');
 
+  // Eph (ephemeral cortex deployment) name + existence check state.
+  // Only used for the "Check" button beside the agent name input.
+  const [ephName, setEphName] = useState('');
+  const [checking, setChecking] = useState(false);
+  // null = untouched, true = verified exists, false = does not exist
+  const [agentVerified, setAgentVerified] = useState(null);
+  const [agentCheckMsg, setAgentCheckMsg] = useState('');
+
   // Breakpoint
   const [breakpointEnabled, setBreakpointEnabled] = useState(false);
   const [breakpointMins, setBreakpointMins] = useState(10);
@@ -104,8 +112,44 @@ export function RunEvalModal({ open, onClose }) {
       setSelectedPreview(null);
       setSearchQuery('');
       setAgentNameOverride('');
+      setEphName('');
+      setAgentVerified(null);
+      setAgentCheckMsg('');
     }
   }, [open]);
+
+  // Re-set verification status whenever the user edits either input
+  useEffect(() => {
+    setAgentVerified(null);
+    setAgentCheckMsg('');
+  }, [agentNameOverride, ephName]);
+
+  const handleCheckAgent = async () => {
+    const eph = ephName.trim();
+    const agent = agentNameOverride.trim();
+    if (!eph || !agent) {
+      toast.error('Both eph name and agent name are required to check');
+      return;
+    }
+    setChecking(true);
+    setAgentVerified(null);
+    setAgentCheckMsg('');
+    try {
+      const res = await checkAgentExists(eph, agent);
+      if (res?.exists) {
+        setAgentVerified(true);
+        setAgentCheckMsg(`Found in "${eph}"`);
+      } else {
+        setAgentVerified(false);
+        setAgentCheckMsg(`Not found in "${eph}"`);
+      }
+    } catch (err) {
+      setAgentVerified(false);
+      setAgentCheckMsg(parseApiError(err, 'Check failed'));
+    } finally {
+      setChecking(false);
+    }
+  };
 
   const filteredDatasets = datasets.filter(ds => {
     if (!searchQuery) return true;
@@ -385,7 +429,7 @@ export function RunEvalModal({ open, onClose }) {
                 />
               </div>
 
-              {/* Agent name override (free-text) */}
+              {/* Agent name override (free-text) + existence check */}
               <div>
                 <Label className="text-sm font-semibold">Agent name</Label>
                 <p className="text-[11px] text-muted-foreground mt-0.5 mb-2">
@@ -400,6 +444,53 @@ export function RunEvalModal({ open, onClose }) {
                   className="font-mono text-sm"
                   data-testid="eval-agent-name-override"
                 />
+
+                {/* Eph name + verify button */}
+                <div className="mt-2 flex items-center gap-2">
+                  <Input
+                    value={ephName}
+                    onChange={e => setEphName(e.target.value)}
+                    placeholder="eph name (e.g. leadgen1)"
+                    className="font-mono text-xs h-8 flex-1"
+                    data-testid="eval-eph-name"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs"
+                    onClick={handleCheckAgent}
+                    disabled={checking || !ephName.trim() || !agentNameOverride.trim()}
+                    data-testid="check-agent-btn"
+                  >
+                    {checking ? (
+                      <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                    ) : (
+                      <Search className="w-3.5 h-3.5 mr-1" />
+                    )}
+                    Check
+                  </Button>
+                </div>
+
+                {/* Status pill */}
+                {agentVerified === true && (
+                  <div
+                    className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-mono text-emerald-600 dark:text-emerald-400"
+                    data-testid="agent-check-ok"
+                  >
+                    <Check className="w-3 h-3" />
+                    {agentCheckMsg}
+                  </div>
+                )}
+                {agentVerified === false && (
+                  <div
+                    className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-mono text-rose-600 dark:text-rose-400"
+                    data-testid="agent-check-fail"
+                  >
+                    <AlertCircle className="w-3 h-3" />
+                    {agentCheckMsg}
+                  </div>
+                )}
               </div>
 
               <Separator />
