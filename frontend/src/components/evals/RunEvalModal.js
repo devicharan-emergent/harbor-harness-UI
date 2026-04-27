@@ -10,10 +10,9 @@ import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Checkbox } from '@/components/ui/checkbox';
 import { listDatasets, listDatasetsByType, getDatasetForProblem, submitEvalJobs } from '@/services/evalApi';
 import { toast } from 'sonner';
-import { X, Loader2, Rocket, FileText, Search, ChevronRight, Layers, ArrowUp, ArrowDown, Plus, Trash2 } from 'lucide-react';
+import { Loader2, Rocket, FileText, Search, ChevronRight } from 'lucide-react';
 import { parseApiError } from '@/lib/errorUtils';
 import { useEnv } from '@/components/layout/EnvSwitcher';
 
@@ -23,71 +22,6 @@ const DATASET_TYPES = [
   { value: 'bug_bench', label: 'Bug Bench' },
   { value: 'test_report_bench', label: 'Test Report Bench' },
 ];
-
-// ── Pair Row ──────────────────────────────────────────────────────────
-function PairRow({ pair, index, total, problems, onUpdate, onRemove, onMoveUp, onMoveDown }) {
-  return (
-    <div
-      className="flex items-center gap-2 px-3 py-2 rounded-lg border text-xs bg-card/50 border-border/50 hover:border-border transition-colors"
-      data-testid={`pair-row-${pair.id}`}
-    >
-      {/* Move up/down */}
-      <div className="flex flex-col flex-shrink-0">
-        <button
-          onClick={() => onMoveUp(pair.id)}
-          disabled={index === 0}
-          className="text-muted-foreground hover:text-foreground disabled:opacity-20 disabled:cursor-not-allowed p-0.5 transition-colors"
-          data-testid={`move-up-${pair.id}`}
-        >
-          <ArrowUp className="w-3.5 h-3.5" />
-        </button>
-        <button
-          onClick={() => onMoveDown(pair.id)}
-          disabled={index === total - 1}
-          className="text-muted-foreground hover:text-foreground disabled:opacity-20 disabled:cursor-not-allowed p-0.5 transition-colors"
-          data-testid={`move-down-${pair.id}`}
-        >
-          <ArrowDown className="w-3.5 h-3.5" />
-        </button>
-      </div>
-
-      {/* Position indicator */}
-      <div className="flex-shrink-0 w-6 text-center">
-        <Badge variant="outline" className="text-[9px] px-1.5 py-0 text-muted-foreground font-mono">
-          {index + 1}
-        </Badge>
-      </div>
-
-      {/* Problem selector */}
-      <Select
-        value={pair.problemName || ''}
-        onValueChange={(val) => onUpdate(pair.id, 'problemName', val)}
-      >
-        <SelectTrigger className="flex-1 h-8 text-xs font-mono" data-testid={`pair-problem-select-${pair.id}`}>
-          <SelectValue placeholder="Select problem" />
-        </SelectTrigger>
-        <SelectContent>
-          {problems.map(p => (
-            <SelectItem key={p.name} value={p.name}>
-              {p.name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-
-      {/* Remove */}
-      <Button
-        variant="ghost"
-        size="icon"
-        className="flex-shrink-0 h-7 w-7 text-muted-foreground hover:text-destructive"
-        onClick={() => onRemove(pair.id)}
-        data-testid={`remove-pair-${pair.id}`}
-      >
-        <Trash2 className="w-3.5 h-3.5" />
-      </Button>
-    </div>
-  );
-}
 
 // ── Main Modal ────────────────────────────────────────────────────────
 export function RunEvalModal({ open, onClose }) {
@@ -211,7 +145,7 @@ export function RunEvalModal({ open, onClose }) {
       return;
     }
     if (!groupId.trim()) {
-      toast.error('Group ID is required');
+      toast.error('Group Run ID is required');
       return;
     }
     setSubmitting(true);
@@ -241,7 +175,15 @@ export function RunEvalModal({ open, onClose }) {
         return evalItem;
       });
 
-      const payload = { user_id: userId, group_id: groupId.trim(), evals };
+      // Harness requires `group_run_id` to be unique per submission. Append
+      // an ISO timestamp + short random suffix so users can reuse the same
+      // human-friendly label (e.g. "nightly") across runs without
+      // collisions even on rapid double-clicks.
+      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+      const rand = Math.random().toString(36).slice(2, 6);
+      const groupRunId = `${groupId.trim()}-${ts}-${rand}`;
+
+      const payload = { user_id: userId, group_run_id: groupRunId, evals };
       if (trimmedOverride) payload.agent_name = trimmedOverride;
       const result = await submitEvalJobs(payload);
       const jobCount = result.jobs?.length || evals.length;
@@ -414,14 +356,17 @@ export function RunEvalModal({ open, onClose }) {
           {/* ── Step 2: Configure ──────────────────────────────── */}
           {step === 2 && (
             <div className="space-y-4 py-2">
-              {/* Group ID */}
+              {/* Group Run ID */}
               <div>
-                <Label className="text-sm font-semibold">Group ID *</Label>
-                <p className="text-[11px] text-muted-foreground mt-0.5 mb-2">Tag all jobs in this batch for easier analysis</p>
+                <Label className="text-sm font-semibold">Group Run ID *</Label>
+                <p className="text-[11px] text-muted-foreground mt-0.5 mb-2">
+                  Tag all jobs in this batch. We'll auto-suffix a timestamp so it's unique
+                  per submission.
+                </p>
                 <Input
                   value={groupId}
                   onChange={e => setGroupId(e.target.value)}
-                  placeholder="e.g. experiment-2026-03-10, sonnet-vs-opus"
+                  placeholder="e.g. nightly, sonnet-vs-opus"
                   className="font-mono text-sm"
                   data-testid="eval-group-id"
                 />
@@ -597,33 +542,35 @@ export function RunEvalModal({ open, onClose }) {
           )}
         </div>
 
-        <DialogFooter className="gap-2">
-          {step > 1 && (
-            <Button variant="outline" onClick={() => goToStep(step - 1)} disabled={submitting} data-testid="eval-back-btn">
-              Back
-            </Button>
-          )}
-          <Button variant="outline" onClick={onClose} disabled={submitting} data-testid="eval-cancel-btn">
+        <DialogFooter className="gap-2 sm:justify-between">
+          <Button variant="ghost" onClick={onClose} disabled={submitting} data-testid="eval-cancel-btn">
             Cancel
           </Button>
-          {step < 3 ? (
-            <Button
-              onClick={() => goToStep(step + 1)}
-              disabled={(step === 1 && selectedProblems.length === 0) || (step === 2 && !groupId.trim())}
-              data-testid="eval-next-step"
-            >
-              Next <ChevronRight className="w-4 h-4 ml-1" />
-            </Button>
-          ) : (
-            <Button
-              onClick={handleSubmit}
-              disabled={submitting || totalJobs === 0}
-              data-testid="submit-eval-button"
-            >
-              {submitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Rocket className="w-4 h-4 mr-2" />}
-              Submit {totalJobs > 0 && `(${totalJobs} job${totalJobs > 1 ? 's' : ''})`}
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {step > 1 && (
+              <Button variant="outline" onClick={() => goToStep(step - 1)} disabled={submitting} data-testid="eval-back-btn">
+                Back
+              </Button>
+            )}
+            {step < 3 ? (
+              <Button
+                onClick={() => goToStep(step + 1)}
+                disabled={(step === 1 && selectedProblems.length === 0) || (step === 2 && !groupId.trim())}
+                data-testid="eval-next-step"
+              >
+                Next <ChevronRight className="w-4 h-4 ml-1" />
+              </Button>
+            ) : (
+              <Button
+                onClick={handleSubmit}
+                disabled={submitting || totalJobs === 0}
+                data-testid="submit-eval-button"
+              >
+                {submitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Rocket className="w-4 h-4 mr-2" />}
+                Submit {totalJobs > 0 && `(${totalJobs} job${totalJobs > 1 ? 's' : ''})`}
+              </Button>
+            )}
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

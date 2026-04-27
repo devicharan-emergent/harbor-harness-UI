@@ -216,8 +216,8 @@ async def proxy_submit_eval(body: dict):
     """Proxy: Submit eval jobs to external Eval API.
     
     Transforms frontend format to Eval API format:
-    Frontend: { user_id, group_id?, evals: [{ problem, cpus?, memory?, storage?, headed?, force_build?, experiments? }] }
-    API:      { user_id, group_id?, evals: [{ problem, cpus?, memory?, storage?, headed?, force_build?, experiments? }] }
+    Frontend: { user_id, group_id?, agent_name?, evals: [{ problem, cpus?, memory?, storage?, headed?, force_build?, experiments? }] }
+    API:      { user_id, group_run_id?, agent_name?, evals: [...] }
     """
     try:
         # Build the correct payload for the Eval API
@@ -227,9 +227,16 @@ async def proxy_submit_eval(body: dict):
         if "user_id" in body:
             payload["user_id"] = body["user_id"]
 
-        # Handle group_id
-        if "group_id" in body:
-            payload["group_id"] = body["group_id"]
+        # Handle group id — harness now expects `group_run_id`. Accept either
+        # `group_id` or `group_run_id` from the frontend for forward/backward
+        # compatibility, and always forward as `group_run_id`.
+        group_value = body.get("group_run_id") or body.get("group_id")
+        if group_value:
+            payload["group_run_id"] = group_value
+
+        # Batch-level agent override (forwarded as-is)
+        if body.get("agent_name"):
+            payload["agent_name"] = body["agent_name"]
 
         # Handle evals array
         if "evals" in body:
