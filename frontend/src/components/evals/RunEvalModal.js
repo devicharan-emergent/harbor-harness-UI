@@ -654,7 +654,8 @@ export function RunEvalModal({ open, onClose }) {
             ) : (
               <Button
                 onClick={handleSubmit}
-                disabled={submitting || totalJobs === 0}
+                disabled={submitting || totalJobs === 0 || agentVerified === false}
+                title={agentVerified === false ? 'Agent name failed verification — fix it or clear the eph check' : undefined}
                 data-testid="submit-eval-button"
               >
                 {submitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Rocket className="w-4 h-4 mr-2" />}
