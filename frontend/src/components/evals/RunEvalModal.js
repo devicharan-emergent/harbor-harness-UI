@@ -355,6 +355,16 @@ export function RunEvalModal({ open, onClose }) {
     }
     setSubmitting(true);
     try {
+      // If every valid pair targets the same agent, send `agent_name` at
+      // the batch level (new harness contract) and omit it per-eval. This
+      // avoids ever sending both shapes — which the harness silently
+      // resolves in favor of the batch-level value.
+      const agentIds = validPairs.map((p) => p.agentId).filter(Boolean);
+      const uniformAgentId =
+        agentIds.length === validPairs.length && new Set(agentIds).size === 1
+          ? agentIds[0]
+          : null;
+
       const evals = validPairs.map(pair => {
         const evalItem = {
           problem: pair.problemName,
@@ -366,10 +376,11 @@ export function RunEvalModal({ open, onClose }) {
         };
         if (templateName.trim()) evalItem.template_name = templateName.trim();
         const experiments = {};
-        // experiments.agent_name is read by harness as the cortex agent_id
-        // (despite the JSON field being called "agent_name"). We MUST send the
-        // agent's id here, not its display name.
-        if (pair.agentId) experiments.agent_name = pair.agentId;
+        // Per-eval agent override only when pairs target *different* agents.
+        // Otherwise it rides batch-level on the request.
+        if (!uniformAgentId && pair.agentId) {
+          experiments.agent_name = pair.agentId;
+        }
         if (showExpConfig) {
           if (expImage) experiments.image = expImage;
           if (expModelName) experiments.model_name = expModelName;
@@ -384,6 +395,7 @@ export function RunEvalModal({ open, onClose }) {
 
       // group_id goes at the top level of the payload, not inside each eval
       const payload = { user_id: userId, group_id: groupId.trim(), evals };
+      if (uniformAgentId) payload.agent_name = uniformAgentId;
       const result = await submitEvalJobs(payload);
       const jobCount = result.jobs?.length || evals.length;
       toast.success(`Submitted ${jobCount} eval job(s)`);
