@@ -154,6 +154,10 @@ export function RunEvalModal({ open, onClose }) {
   // Template
   const [templateName, setTemplateName] = useState('');
 
+  // Free-text agent_name override. When non-empty this wins over the
+  // agent(s) chosen in Step 2 and is sent at the batch level.
+  const [agentNameOverride, setAgentNameOverride] = useState('');
+
   // Breakpoint
   const [breakpointEnabled, setBreakpointEnabled] = useState(false);
   const [breakpointMins, setBreakpointMins] = useState(10);
@@ -214,6 +218,7 @@ export function RunEvalModal({ open, onClose }) {
       setSelectedPreview(null);
       setSearchQuery('');
       setAgentSearch('');
+      setAgentNameOverride('');
     }
   }, [open]);
 
@@ -355,6 +360,8 @@ export function RunEvalModal({ open, onClose }) {
     }
     setSubmitting(true);
     try {
+      const trimmedOverride = agentNameOverride.trim();
+
       // If every valid pair targets the same agent, send `agent_name` at
       // the batch level (new harness contract) and omit it per-eval. This
       // avoids ever sending both shapes — which the harness silently
@@ -364,6 +371,9 @@ export function RunEvalModal({ open, onClose }) {
         agentIds.length === validPairs.length && new Set(agentIds).size === 1
           ? agentIds[0]
           : null;
+
+      // Free-text override always wins.
+      const batchAgentName = trimmedOverride || uniformAgentId || null;
 
       const evals = validPairs.map(pair => {
         const evalItem = {
@@ -376,9 +386,9 @@ export function RunEvalModal({ open, onClose }) {
         };
         if (templateName.trim()) evalItem.template_name = templateName.trim();
         const experiments = {};
-        // Per-eval agent override only when pairs target *different* agents.
-        // Otherwise it rides batch-level on the request.
-        if (!uniformAgentId && pair.agentId) {
+        // Per-eval agent override only when there's no batch-level winner
+        // and pairs target *different* agents.
+        if (!batchAgentName && pair.agentId) {
           experiments.agent_name = pair.agentId;
         }
         if (showExpConfig) {
@@ -395,7 +405,7 @@ export function RunEvalModal({ open, onClose }) {
 
       // group_id goes at the top level of the payload, not inside each eval
       const payload = { user_id: userId, group_id: groupId.trim(), evals };
-      if (uniformAgentId) payload.agent_name = uniformAgentId;
+      if (batchAgentName) payload.agent_name = batchAgentName;
       const result = await submitEvalJobs(payload);
       const jobCount = result.jobs?.length || evals.length;
       toast.success(`Submitted ${jobCount} eval job(s)`);
@@ -677,6 +687,24 @@ export function RunEvalModal({ open, onClose }) {
           {/* ── Step 4: Configure ──────────────────────────────── */}
           {step === 4 && (
             <div className="space-y-4 py-2">
+              {/* Agent name override (free-text) */}
+              <div>
+                <Label className="text-sm font-semibold">Agent name override</Label>
+                <p className="text-[11px] text-muted-foreground mt-0.5 mb-2">
+                  Optional. Type any agent name the harness/cortex recognizes
+                  (e.g. <code className="font-mono">full_stack_app_builder_cloud_v8_sonnet_4_5</code>).
+                  When set, this is sent as the batch-level <code className="font-mono">agent_name</code> and
+                  overrides any agents picked in Step 2.
+                </p>
+                <Input
+                  value={agentNameOverride}
+                  onChange={e => setAgentNameOverride(e.target.value)}
+                  placeholder="e.g. full_stack_app_builder_cloud_v8_sonnet_4_5"
+                  className="font-mono text-sm"
+                  data-testid="eval-agent-name-override"
+                />
+              </div>
+
               {/* Group ID */}
               <div>
                 <Label className="text-sm font-semibold">Group ID *</Label>
