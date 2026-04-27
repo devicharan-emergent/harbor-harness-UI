@@ -354,7 +354,7 @@ export default function ScheduleDetail() {
               </Badge>
             </div>
           </div>
-          <div className="flex items-center gap-2 mt-2">
+          <div className="flex items-center gap-2 mt-2 flex-wrap">
             <Clock className="w-3.5 h-3.5 text-muted-foreground" />
             <p className="text-sm text-muted-foreground" data-testid="detail-schedule">
               {humanizeCron(batch.cron_expression)}
@@ -362,6 +362,16 @@ export default function ScheduleDetail() {
             <Badge variant="outline" className="font-mono text-[10px]">
               {batch.cron_expression}
             </Badge>
+            {(batch.agent_id || batch.experiments?.agent_name) && (
+              <Badge
+                variant="outline"
+                className="font-mono text-[10px] bg-violet-500/10 text-violet-600 border-violet-500/20"
+                data-testid="detail-agent-badge"
+                title="Cortex agent override sent as experiments.agent_name on every fire"
+              >
+                agent: {batch.agent_id || batch.experiments?.agent_name}
+              </Badge>
+            )}
           </div>
         </div>
       </div>

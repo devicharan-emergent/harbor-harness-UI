@@ -366,7 +366,10 @@ export function RunEvalModal({ open, onClose }) {
         };
         if (templateName.trim()) evalItem.template_name = templateName.trim();
         const experiments = {};
-        if (pair.agentId && pair.agentName) experiments.agent_name = pair.agentName;
+        // experiments.agent_name is read by harness as the cortex agent_id
+        // (despite the JSON field being called "agent_name"). We MUST send the
+        // agent's id here, not its display name.
+        if (pair.agentId) experiments.agent_name = pair.agentId;
         if (showExpConfig) {
           if (expImage) experiments.image = expImage;
           if (expModelName) experiments.model_name = expModelName;
