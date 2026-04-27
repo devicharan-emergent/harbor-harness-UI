@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { listDatasets, listDatasetsByType, getDatasetForProblem, submitEvalJobs, checkAgentExists } from '@/services/evalApi';
 import { toast } from 'sonner';
-import { Loader2, Rocket, FileText, Search, ChevronRight, Check, AlertCircle } from 'lucide-react';
+import { Loader2, Rocket, FileText, Search, ChevronRight, Check, AlertCircle, X } from 'lucide-react';
 import { parseApiError } from '@/lib/errorUtils';
 import { useEnv } from '@/components/layout/EnvSwitcher';
 
