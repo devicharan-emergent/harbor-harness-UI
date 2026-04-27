@@ -12,9 +12,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { listDatasets, listDatasetsByType, getDatasetForProblem, submitEvalJobs } from '@/services/evalApi';
-import agentApi from '@/lib/api';
 import { toast } from 'sonner';
-import { X, Loader2, Rocket, FileText, Search, ChevronRight, Users, Layers, ArrowUp, ArrowDown, Plus, Trash2 } from 'lucide-react';
+import { X, Loader2, Rocket, FileText, Search, ChevronRight, Layers, ArrowUp, ArrowDown, Plus, Trash2 } from 'lucide-react';
 import { parseApiError } from '@/lib/errorUtils';
 import { useEnv } from '@/components/layout/EnvSwitcher';
 
@@ -26,7 +25,7 @@ const DATASET_TYPES = [
 ];
 
 // ── Pair Row ──────────────────────────────────────────────────────────
-function PairRow({ pair, index, total, agents, problems, onUpdate, onRemove, onMoveUp, onMoveDown }) {
+function PairRow({ pair, index, total, problems, onUpdate, onRemove, onMoveUp, onMoveDown }) {
   return (
     <div
       className="flex items-center gap-2 px-3 py-2 rounded-lg border text-xs bg-card/50 border-border/50 hover:border-border transition-colors"
@@ -58,26 +57,6 @@ function PairRow({ pair, index, total, agents, problems, onUpdate, onRemove, onM
           {index + 1}
         </Badge>
       </div>
-
-      {/* Agent selector */}
-      <Select
-        value={pair.agentId || '_none'}
-        onValueChange={(val) => onUpdate(pair.id, 'agentId', val === '_none' ? null : val)}
-      >
-        <SelectTrigger className="w-[180px] h-8 text-xs" data-testid={`pair-agent-select-${pair.id}`}>
-          <SelectValue placeholder="No agent" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="_none">No agent</SelectItem>
-          {agents.map(a => (
-            <SelectItem key={a.id} value={a.id}>
-              {a.name || a.id}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-
-      <ChevronRight className="w-3 h-3 text-muted-foreground flex-shrink-0" />
 
       {/* Problem selector */}
       <Select
@@ -114,7 +93,7 @@ function PairRow({ pair, index, total, agents, problems, onUpdate, onRemove, onM
 export function RunEvalModal({ open, onClose }) {
   const navigate = useNavigate();
   const { cortexUrl: envCortexUrl } = useEnv();
-  const [step, setStep] = useState(1); // 1: problems, 2: agents, 3: pair & order, 4: configure, 5: review
+  const [step, setStep] = useState(1); // 1: problems, 2: configure, 3: review
 
   // Problem selection
   const [searchQuery, setSearchQuery] = useState('');
@@ -124,15 +103,6 @@ export function RunEvalModal({ open, onClose }) {
   const [selectedPreview, setSelectedPreview] = useState(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [selectedProblems, setSelectedProblems] = useState([]);
-
-  // Agent selection
-  const [agents, setAgents] = useState([]);
-  const [loadingAgents, setLoadingAgents] = useState(false);
-  const [selectedAgents, setSelectedAgents] = useState([]);
-  const [agentSearch, setAgentSearch] = useState('');
-
-  // Pairs
-  const [pairs, setPairs] = useState([]);
 
   // Group ID (mandatory tag for batch jobs)
   const [groupId, setGroupId] = useState('');
@@ -154,8 +124,7 @@ export function RunEvalModal({ open, onClose }) {
   // Template
   const [templateName, setTemplateName] = useState('');
 
-  // Free-text agent_name override. When non-empty this wins over the
-  // agent(s) chosen in Step 2 and is sent at the batch level.
+  // Free-text agent_name override — sent at the batch level when set.
   const [agentNameOverride, setAgentNameOverride] = useState('');
 
   // Breakpoint
@@ -188,67 +157,21 @@ export function RunEvalModal({ open, onClose }) {
     }
   }, [datasetType]);
 
-  // Fetch agents
-  const fetchAgents = useCallback(async () => {
-    setLoadingAgents(true);
-    try {
-      const data = await agentApi.list();
-      setAgents(data || []);
-    } catch (error) {
-      console.error('Failed to fetch agents:', error);
-      setAgents([]);
-    } finally {
-      setLoadingAgents(false);
-    }
-  }, []);
-
   useEffect(() => {
     if (open) {
       fetchDatasets();
-      fetchAgents();
     }
-  }, [open, fetchDatasets, fetchAgents]);
+  }, [open, fetchDatasets]);
 
   useEffect(() => {
     if (open) {
       setStep(1);
       setSelectedProblems([]);
-      setSelectedAgents([]);
-      setPairs([]);
       setSelectedPreview(null);
       setSearchQuery('');
-      setAgentSearch('');
       setAgentNameOverride('');
     }
   }, [open]);
-
-  // Generate pairs when entering step 3
-  const generatePairs = () => {
-    const newPairs = [];
-    let id = Date.now();
-    if (selectedAgents.length > 0) {
-      for (const agent of selectedAgents) {
-        for (const problem of selectedProblems) {
-          newPairs.push({
-            id: String(id++),
-            agentId: agent.id,
-            agentName: agent.name,
-            problemName: problem.name,
-          });
-        }
-      }
-    } else {
-      for (const problem of selectedProblems) {
-        newPairs.push({
-          id: String(id++),
-          agentId: null,
-          agentName: null,
-          problemName: problem.name,
-        });
-      }
-    }
-    setPairs(newPairs);
-  };
 
   const filteredDatasets = datasets.filter(ds => {
     if (!searchQuery) return true;
@@ -260,29 +183,11 @@ export function RunEvalModal({ open, onClose }) {
     );
   });
 
-  const filteredAgents = agents.filter(a => {
-    if (!agentSearch) return true;
-    const q = agentSearch.toLowerCase();
-    return (
-      (a.name || '').toLowerCase().includes(q) ||
-      (a.id || '').toLowerCase().includes(q) ||
-      (a.model?.provider || '').toLowerCase().includes(q)
-    );
-  });
-
   const toggleProblem = (ds) => {
     if (selectedProblems.find(p => p.name === ds.name)) {
       setSelectedProblems(selectedProblems.filter(p => p.name !== ds.name));
     } else {
       setSelectedProblems([...selectedProblems, ds]);
-    }
-  };
-
-  const toggleAgent = (agent) => {
-    if (selectedAgents.find(a => a.id === agent.id)) {
-      setSelectedAgents(selectedAgents.filter(a => a.id !== agent.id));
-    } else {
-      setSelectedAgents([...selectedAgents, agent]);
     }
   };
 
@@ -296,62 +201,13 @@ export function RunEvalModal({ open, onClose }) {
     finally { setLoadingPreview(false); }
   };
 
-  // Pair reordering
-  const movePairUp = (pairId) => {
-    setPairs(prev => {
-      const idx = prev.findIndex(p => p.id === pairId);
-      if (idx <= 0) return prev;
-      const next = [...prev];
-      [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
-      return next;
-    });
-  };
-
-  const movePairDown = (pairId) => {
-    setPairs(prev => {
-      const idx = prev.findIndex(p => p.id === pairId);
-      if (idx === -1 || idx >= prev.length - 1) return prev;
-      const next = [...prev];
-      [next[idx], next[idx + 1]] = [next[idx + 1], next[idx]];
-      return next;
-    });
-  };
-
-  const updatePair = (pairId, field, value) => {
-    setPairs(prev => prev.map(p => {
-      if (p.id !== pairId) return p;
-      if (field === 'agentId') {
-        const agent = agents.find(a => a.id === value);
-        return { ...p, agentId: value, agentName: agent?.name || null };
-      }
-      return { ...p, [field]: value };
-    }));
-  };
-
-  const removePair = (pairId) => {
-    setPairs(prev => prev.filter(p => p.id !== pairId));
-  };
-
-  const addPair = () => {
-    setPairs(prev => [...prev, {
-      id: String(Date.now()),
-      agentId: selectedAgents[0]?.id || null,
-      agentName: selectedAgents[0]?.name || null,
-      problemName: selectedProblems[0]?.name || '',
-    }]);
-  };
-
   const goToStep = (target) => {
-    if (target === 3 && step < 3) {
-      generatePairs();
-    }
     setStep(target);
   };
 
   const handleSubmit = async () => {
-    const validPairs = pairs.filter(p => p.problemName);
-    if (validPairs.length === 0) {
-      toast.error('No valid job pairs to submit');
+    if (selectedProblems.length === 0) {
+      toast.error('Select at least one problem');
       return;
     }
     if (!groupId.trim()) {
@@ -362,22 +218,9 @@ export function RunEvalModal({ open, onClose }) {
     try {
       const trimmedOverride = agentNameOverride.trim();
 
-      // If every valid pair targets the same agent, send `agent_name` at
-      // the batch level (new harness contract) and omit it per-eval. This
-      // avoids ever sending both shapes — which the harness silently
-      // resolves in favor of the batch-level value.
-      const agentIds = validPairs.map((p) => p.agentId).filter(Boolean);
-      const uniformAgentId =
-        agentIds.length === validPairs.length && new Set(agentIds).size === 1
-          ? agentIds[0]
-          : null;
-
-      // Free-text override always wins.
-      const batchAgentName = trimmedOverride || uniformAgentId || null;
-
-      const evals = validPairs.map(pair => {
+      const evals = selectedProblems.map(problem => {
         const evalItem = {
-          problem: pair.problemName,
+          problem: problem.name,
           cpus,
           memory: memoryMb,
           storage: storageGb,
@@ -386,11 +229,6 @@ export function RunEvalModal({ open, onClose }) {
         };
         if (templateName.trim()) evalItem.template_name = templateName.trim();
         const experiments = {};
-        // Per-eval agent override only when there's no batch-level winner
-        // and pairs target *different* agents.
-        if (!batchAgentName && pair.agentId) {
-          experiments.agent_name = pair.agentId;
-        }
         if (showExpConfig) {
           if (expImage) experiments.image = expImage;
           if (expModelName) experiments.model_name = expModelName;
@@ -403,9 +241,8 @@ export function RunEvalModal({ open, onClose }) {
         return evalItem;
       });
 
-      // group_id goes at the top level of the payload, not inside each eval
       const payload = { user_id: userId, group_id: groupId.trim(), evals };
-      if (batchAgentName) payload.agent_name = batchAgentName;
+      if (trimmedOverride) payload.agent_name = trimmedOverride;
       const result = await submitEvalJobs(payload);
       const jobCount = result.jobs?.length || evals.length;
       toast.success(`Submitted ${jobCount} eval job(s)`);
@@ -418,8 +255,8 @@ export function RunEvalModal({ open, onClose }) {
     }
   };
 
-  const validPairCount = pairs.filter(p => p.problemName).length;
-  const stepLabels = ['Problems', 'Agents', 'Pair & Order', 'Configure', 'Review'];
+  const totalJobs = selectedProblems.length;
+  const stepLabels = ['Problems', 'Configure', 'Review'];
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -434,13 +271,13 @@ export function RunEvalModal({ open, onClose }) {
             Run Evaluation
           </DialogTitle>
           <p className="text-xs text-muted-foreground mt-1">
-            Select problems and agents, arrange job order, then submit
+            Pick problems, configure resources, then submit
           </p>
         </DialogHeader>
 
         {/* Step Indicator */}
         <div className="flex items-center gap-1 py-2 flex-wrap">
-          {[1, 2, 3, 4, 5].map(s => (
+          {[1, 2, 3].map(s => (
             <button
               key={s}
               onClick={() => {
@@ -456,7 +293,7 @@ export function RunEvalModal({ open, onClose }) {
               data-testid={`eval-step-${s}`}
             >
               {s}. {stepLabels[s - 1]}
-              {s < 5 && <ChevronRight className="w-3 h-3" />}
+              {s < 3 && <ChevronRight className="w-3 h-3" />}
             </button>
           ))}
         </div>
@@ -574,137 +411,9 @@ export function RunEvalModal({ open, onClose }) {
             </div>
           )}
 
-          {/* ── Step 2: Select Agents ──────────────────────────── */}
+          {/* ── Step 2: Configure ──────────────────────────────── */}
           {step === 2 && (
             <div className="space-y-4 py-2">
-              <p className="text-xs text-muted-foreground">
-                Select agents to pair with your {selectedProblems.length} problem(s). Each agent will run all selected problems.
-                <br /><span className="text-foreground/60">Skipping agents runs problems without association.</span>
-              </p>
-
-              <div className="relative">
-                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input placeholder="Search agents..." value={agentSearch} onChange={e => setAgentSearch(e.target.value)} className="pl-8 text-sm" data-testid="agent-search-input" />
-              </div>
-
-              {selectedAgents.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {selectedAgents.map(a => (
-                    <Badge key={a.id} variant="secondary" className="text-[10px] flex items-center gap-1" data-testid={`selected-agent-${a.id}`}>
-                      <Users className="w-3 h-3" />{a.name || a.id}
-                      <button onClick={() => toggleAgent(a)} className="ml-0.5 hover:text-destructive"><X className="w-3 h-3" /></button>
-                    </Badge>
-                  ))}
-                </div>
-              )}
-
-              <ScrollArea className="h-[380px] border rounded-lg">
-                {loadingAgents ? (
-                  <div className="flex items-center justify-center py-12"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
-                ) : filteredAgents.length === 0 ? (
-                  <div className="text-center py-12 text-sm text-muted-foreground">No agents found</div>
-                ) : (
-                  <div className="p-1">
-                    {filteredAgents.map(agent => {
-                      const isSelected = !!selectedAgents.find(a => a.id === agent.id);
-                      return (
-                        <div
-                          key={agent.id}
-                          className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-xs transition-colors cursor-pointer ${isSelected ? 'bg-primary/10' : 'hover:bg-accent'}`}
-                          onClick={() => toggleAgent(agent)}
-                          data-testid={`agent-item-${agent.id}`}
-                        >
-                          <Checkbox checked={isSelected} onCheckedChange={() => toggleAgent(agent)} className="flex-shrink-0" />
-                          <div className="flex-1 min-w-0">
-                            <div className="font-medium">{agent.name}</div>
-                            <div className="text-muted-foreground text-[10px] font-mono mt-0.5">{agent.id}</div>
-                          </div>
-                          <div className="flex items-center gap-1.5 flex-shrink-0">
-                            {agent.model?.provider && <Badge variant="outline" className="text-[9px] font-mono">{agent.model.provider}</Badge>}
-                            {agent.model?.model_id && <Badge variant="outline" className="text-[9px] font-mono">{agent.model.model_id}</Badge>}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </ScrollArea>
-            </div>
-          )}
-
-          {/* ── Step 3: Pair & Order (Drag-and-Drop) ────────── */}
-          {step === 3 && (
-            <div className="space-y-4 py-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-muted-foreground">
-                    Use arrows to reorder. Change agent/problem assignments as needed. All jobs run simultaneously.
-                  </p>
-                  <p className="text-[10px] text-muted-foreground/70 mt-0.5 flex items-center gap-1">
-                    <Rocket className="w-3 h-3" />
-                    Every job starts immediately upon submission.
-                  </p>
-                </div>
-                <Button variant="outline" size="sm" onClick={addPair} data-testid="add-pair-btn">
-                  <Plus className="w-3.5 h-3.5 mr-1" /> Add Row
-                </Button>
-              </div>
-
-              {pairs.length === 0 ? (
-                <div className="text-center py-12 text-sm text-muted-foreground">
-                  No job pairs. Go back to select problems.
-                </div>
-              ) : (
-                <div className="space-y-1.5">
-                  {pairs.map((pair, index) => (
-                    <PairRow
-                      key={pair.id}
-                      pair={pair}
-                      index={index}
-                      total={pairs.length}
-                      agents={agents}
-                      problems={[...selectedProblems, ...datasets.filter(d => !selectedProblems.find(sp => sp.name === d.name))]}
-                      onUpdate={updatePair}
-                      onRemove={removePair}
-                      onMoveUp={movePairUp}
-                      onMoveDown={movePairDown}
-                    />
-                  ))}
-                </div>
-              )}
-
-              {pairs.length > 1 && (
-                <div className="rounded-lg bg-emerald-500/5 border border-emerald-500/20 px-3 py-2 text-[11px] text-muted-foreground flex items-start gap-2">
-                  <Rocket className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-emerald-600" />
-                  <span>
-                    All <strong className="text-foreground">{pairs.length}</strong> jobs will start running simultaneously.
-                  </span>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ── Step 4: Configure ──────────────────────────────── */}
-          {step === 4 && (
-            <div className="space-y-4 py-2">
-              {/* Agent name override (free-text) */}
-              <div>
-                <Label className="text-sm font-semibold">Agent name override</Label>
-                <p className="text-[11px] text-muted-foreground mt-0.5 mb-2">
-                  Optional. Type any agent name the harness/cortex recognizes
-                  (e.g. <code className="font-mono">full_stack_app_builder_cloud_v8_sonnet_4_5</code>).
-                  When set, this is sent as the batch-level <code className="font-mono">agent_name</code> and
-                  overrides any agents picked in Step 2.
-                </p>
-                <Input
-                  value={agentNameOverride}
-                  onChange={e => setAgentNameOverride(e.target.value)}
-                  placeholder="e.g. full_stack_app_builder_cloud_v8_sonnet_4_5"
-                  className="font-mono text-sm"
-                  data-testid="eval-agent-name-override"
-                />
-              </div>
-
               {/* Group ID */}
               <div>
                 <Label className="text-sm font-semibold">Group ID *</Label>
@@ -728,6 +437,23 @@ export function RunEvalModal({ open, onClose }) {
                   placeholder="e.g. task_manager, ecom_store"
                   className="font-mono text-sm"
                   data-testid="eval-template-name"
+                />
+              </div>
+
+              {/* Agent name override (free-text) */}
+              <div>
+                <Label className="text-sm font-semibold">Agent name</Label>
+                <p className="text-[11px] text-muted-foreground mt-0.5 mb-2">
+                  Optional. Type any agent name the harness/cortex recognizes
+                  (e.g. <code className="font-mono">full_stack_app_builder_cloud_v8_sonnet_4_5</code>).
+                  When set, sent as the batch-level <code className="font-mono">agent_name</code>.
+                </p>
+                <Input
+                  value={agentNameOverride}
+                  onChange={e => setAgentNameOverride(e.target.value)}
+                  placeholder="e.g. full_stack_app_builder_cloud_v8_sonnet_4_5"
+                  className="font-mono text-sm"
+                  data-testid="eval-agent-name-override"
                 />
               </div>
 
@@ -809,37 +535,37 @@ export function RunEvalModal({ open, onClose }) {
             </div>
           )}
 
-          {/* ── Step 5: Review & Submit ────────────────────────── */}
-          {step === 5 && (
+          {/* ── Step 3: Review & Submit ────────────────────────── */}
+          {step === 3 && (
             <div className="space-y-4 py-2">
-              <div className="flex items-center gap-4 text-xs">
+              <div className="flex items-center gap-4 text-xs flex-wrap">
                 <div className="flex items-center gap-1.5">
                   <Rocket className="w-4 h-4 text-muted-foreground" />
                   <span className="text-muted-foreground">Total jobs:</span>
-                  <span className="font-mono font-bold">{validPairCount}</span>
+                  <span className="font-mono font-bold">{totalJobs}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="text-muted-foreground">Group:</span>
                   <Badge variant="secondary" className="font-mono text-[10px]" data-testid="review-group-id">{groupId || '—'}</Badge>
                 </div>
+                {agentNameOverride.trim() && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-muted-foreground">Agent:</span>
+                    <Badge variant="outline" className="font-mono text-[10px] bg-violet-500/10 text-violet-600 border-violet-500/20" data-testid="review-agent-name">
+                      {agentNameOverride.trim()}
+                    </Badge>
+                  </div>
+                )}
               </div>
 
               <Card>
                 <CardContent className="pt-4 space-y-3">
                   <ScrollArea className="max-h-[220px]">
                     <div className="space-y-1.5">
-                      {pairs.filter(p => p.problemName).map((pair, idx) => (
-                        <div key={pair.id} className="flex items-center gap-2 text-xs py-1.5 px-2.5 rounded bg-accent/30">
+                      {selectedProblems.map((problem, idx) => (
+                        <div key={problem.name} className="flex items-center gap-2 text-xs py-1.5 px-2.5 rounded bg-accent/30">
                           <span className="flex-shrink-0 font-mono text-[10px] text-muted-foreground w-5 text-center">{idx + 1}</span>
-                          {pair.agentName && (
-                            <>
-                              <Badge variant="outline" className="text-[9px] font-mono flex-shrink-0">
-                                <Users className="w-2.5 h-2.5 mr-1" />{pair.agentName}
-                              </Badge>
-                              <ChevronRight className="w-3 h-3 text-muted-foreground flex-shrink-0" />
-                            </>
-                          )}
-                          <span className="font-mono text-[10px] truncate">{pair.problemName}</span>
+                          <span className="font-mono text-[10px] truncate">{problem.name}</span>
                         </div>
                       ))}
                     </div>
@@ -859,11 +585,11 @@ export function RunEvalModal({ open, onClose }) {
                 </CardContent>
               </Card>
 
-              {validPairCount > 1 && (
+              {totalJobs > 1 && (
                 <div className="rounded-lg bg-emerald-500/5 border border-emerald-500/20 px-3 py-2 text-[11px] text-muted-foreground flex items-start gap-2">
                   <Rocket className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-emerald-600" />
                   <span>
-                    All <strong className="text-foreground">{validPairCount}</strong> jobs will start running simultaneously, tagged with group <strong className="text-foreground font-mono">{groupId}</strong>.
+                    All <strong className="text-foreground">{totalJobs}</strong> jobs will start running simultaneously, tagged with group <strong className="text-foreground font-mono">{groupId}</strong>.
                   </span>
                 </div>
               )}
@@ -880,22 +606,22 @@ export function RunEvalModal({ open, onClose }) {
           <Button variant="outline" onClick={onClose} disabled={submitting} data-testid="eval-cancel-btn">
             Cancel
           </Button>
-          {step < 5 ? (
+          {step < 3 ? (
             <Button
               onClick={() => goToStep(step + 1)}
-              disabled={(step === 1 && selectedProblems.length === 0) || (step === 4 && !groupId.trim())}
+              disabled={(step === 1 && selectedProblems.length === 0) || (step === 2 && !groupId.trim())}
               data-testid="eval-next-step"
             >
-              {step === 2 && selectedAgents.length === 0 ? 'Skip Agents' : 'Next'} <ChevronRight className="w-4 h-4 ml-1" />
+              Next <ChevronRight className="w-4 h-4 ml-1" />
             </Button>
           ) : (
             <Button
               onClick={handleSubmit}
-              disabled={submitting || validPairCount === 0}
+              disabled={submitting || totalJobs === 0}
               data-testid="submit-eval-button"
             >
               {submitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Rocket className="w-4 h-4 mr-2" />}
-              Submit {validPairCount > 0 && `(${validPairCount} job${validPairCount > 1 ? 's' : ''})`}
+              Submit {totalJobs > 0 && `(${totalJobs} job${totalJobs > 1 ? 's' : ''})`}
             </Button>
           )}
         </DialogFooter>
