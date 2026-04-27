@@ -28,7 +28,6 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { listDatasets, listDatasetsByType } from '@/services/evalApi';
-import agentApi from '@/lib/api';
 import {
   createScheduledBatch,
   getScheduledBatch,
@@ -98,12 +97,6 @@ export default function ScheduleEditor() {
   const [cronExpression, setCronExpression] = useState('0 3 * * *');
   const [problemIds, setProblemIds] = useState([]);
   const [enabled, setEnabled] = useState(true);
-  // Optional cortex agent override — sent as experiments.agent_name on each
-  // generated eval. Empty string means "no override" (harness uses the
-  // dataset's default agent).
-  const [agentId, setAgentId] = useState('');
-  const [agents, setAgents] = useState([]);
-  const [loadingAgents, setLoadingAgents] = useState(false);
 
   // Dataset browsing
   const [datasets, setDatasets] = useState([]);
@@ -121,13 +114,6 @@ export default function ScheduleEditor() {
         setCronExpression(data.cron_expression || '0 3 * * *');
         setProblemIds(data.problem_ids || []);
         setEnabled(data.enabled ?? true);
-        // The schedule may persist the agent override either at the top level
-        // (`agent_id`) or inside `experiments.agent_name`. Read either.
-        setAgentId(
-          data.agent_id ||
-            data.experiments?.agent_name ||
-            ''
-        );
       } catch (error) {
         toast.error(parseApiError(error, 'Failed to load schedule'));
         navigate('/schedules');
@@ -136,26 +122,6 @@ export default function ScheduleEditor() {
       }
     })();
   }, [id, isEdit, navigate]);
-
-  // Load agents once for the optional override picker
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setLoadingAgents(true);
-      try {
-        const data = await agentApi.list();
-        if (!cancelled) setAgents(Array.isArray(data) ? data : []);
-      } catch (error) {
-        console.error('Failed to load agents for schedule editor:', error);
-        if (!cancelled) setAgents([]);
-      } finally {
-        if (!cancelled) setLoadingAgents(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const fetchDatasets = useCallback(async () => {
     setLoadingDatasets(true);
@@ -235,23 +201,12 @@ export default function ScheduleEditor() {
 
     setSubmitting(true);
     try {
-      const trimmedAgent = agentId.trim();
-      // We persist the override both at top-level (`agent_id`) and inside
-      // `experiments` so the schedule survives whichever shape the upstream
-      // store currently accepts.
-      const overrideFields = trimmedAgent
-        ? {
-            agent_id: trimmedAgent,
-            experiments: { agent_name: trimmedAgent },
-          }
-        : {};
       if (isEdit) {
         await updateScheduledBatch(id, {
           schedule_tag: scheduleTag.trim(),
           cron_expression: cronExpression.trim(),
           problem_ids: problemIds,
           enabled,
-          ...overrideFields,
         });
         toast.success('Schedule updated');
         navigate(`/schedules/${id}`);
@@ -261,7 +216,6 @@ export default function ScheduleEditor() {
           cron_expression: cronExpression.trim(),
           problem_ids: problemIds,
           enabled,
-          ...overrideFields,
         });
         toast.success('Schedule created');
         navigate(`/schedules/${created.id}`);
@@ -430,49 +384,6 @@ export default function ScheduleEditor() {
                 Only whole-hour schedules are supported (e.g. 3:00, 9:00, 23:00 IST). Times with minutes
                 like 2:30 or 3:50 are not allowed. Batches are checked hourly.
               </p>
-            </div>
-
-            <Separator />
-
-            <div>
-              <Label htmlFor="schedule-agent" className="text-sm font-semibold">
-                Agent override (optional)
-              </Label>
-              <p className="text-[11px] text-muted-foreground mt-0.5 mb-2">
-                Pick a specific Cortex agent to run every problem in this batch. Leave as
-                "Default" to use the agent each dataset already specifies. Sent to the harness as{' '}
-                <code className="font-mono text-[10px] px-1 py-0.5 rounded bg-muted">
-                  experiments.agent_name
-                </code>{' '}
-                on every fire.
-              </p>
-              <Select
-                value={agentId || '_default'}
-                onValueChange={(v) => setAgentId(v === '_default' ? '' : v)}
-                disabled={loadingAgents}
-              >
-                <SelectTrigger
-                  id="schedule-agent"
-                  className="font-mono text-sm"
-                  data-testid="schedule-agent-select"
-                >
-                  <SelectValue placeholder={loadingAgents ? 'Loading agents…' : 'Default (no override)'} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="_default">Default (no override)</SelectItem>
-                  {agents.map((a) => (
-                    <SelectItem key={a.id} value={a.id} className="font-mono text-xs">
-                      {a.name || a.id}
-                      <span className="text-muted-foreground ml-2 text-[10px]">{a.id}</span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {agentId && !agents.find((a) => a.id === agentId) && (
-                <p className="mt-1.5 text-[11px] text-amber-600 font-mono">
-                  Current value <code>{agentId}</code> is not in the loaded agents list — it will still be sent.
-                </p>
-              )}
             </div>
           </CardContent>
         </Card>
@@ -665,23 +576,6 @@ export default function ScheduleEditor() {
                 <p className="mt-0.5" data-testid="review-problem-count">
                   {problemIds.length} problem{problemIds.length === 1 ? '' : 's'}
                 </p>
-              </div>
-              <div>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">
-                  Agent Override
-                </p>
-                {agentId ? (
-                  <div className="mt-0.5" data-testid="review-agent">
-                    <p className="font-mono text-sm font-medium">
-                      {agents.find((a) => a.id === agentId)?.name || agentId}
-                    </p>
-                    <p className="text-[11px] text-muted-foreground font-mono">{agentId}</p>
-                  </div>
-                ) : (
-                  <p className="mt-0.5 text-sm text-muted-foreground" data-testid="review-agent">
-                    Default (no override)
-                  </p>
-                )}
               </div>
             </div>
 
