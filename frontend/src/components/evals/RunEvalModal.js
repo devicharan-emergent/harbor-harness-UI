@@ -70,9 +70,20 @@ const parseFlatTests = (xml) => {
   return out;
 };
 
-// bug_bench requires `attributes.image` to actually run
-const isBugBenchMissingImage = (ds) =>
-  ds?.dataset_type === 'bug_bench' && !(ds?.attributes && ds.attributes.image);
+// bug_bench: harness exposes `attributes.image_available` as an explicit
+// boolean. Three states:
+//   true  → image in registry, runnable (green)
+//   false → no image yet, needs a build (red)
+//   undef → field hasn't been backfilled for this row (no indicator)
+const bugBenchImageState = (ds) => {
+  if (ds?.dataset_type !== 'bug_bench') return null;
+  const v = ds?.attributes?.image_available;
+  if (v === true) return 'ready';
+  if (v === false) return 'missing';
+  return null;
+};
+
+const isBugBenchMissingImage = (ds) => bugBenchImageState(ds) === 'missing';
 
 // ── Problem preview ──────────────────────────────────────────────────
 function ProblemPreview({ ds }) {
@@ -194,9 +205,9 @@ function ProblemPreview({ ds }) {
         >
           <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
           <span>
-            <strong>No base image.</strong> This bug_bench problem is missing{' '}
-            <code className="font-mono">attributes.image</code> and will fail at runtime.
-            Add a base image to the dataset before running.
+            <strong>Image not available.</strong> This bug_bench problem's base image
+            isn't in the registry yet (<code className="font-mono">attributes.image_available = false</code>).
+            A build is required before it can run end-to-end.
           </span>
         </div>
       )}
@@ -516,24 +527,37 @@ export function RunEvalModal({ open, onClose }) {
                     <div className="p-1">
                       {filteredDatasets.map(ds => {
                         const isSelected = !!selectedProblems.find(p => p.name === ds.name);
-                        const noImage = isBugBenchMissingImage(ds);
+                        const imgState = bugBenchImageState(ds);
+                        const noImage = imgState === 'missing';
+                        const imgReady = imgState === 'ready';
                         return (
                           <div
                             key={ds.name || ds.id}
-                            onClick={() => toggleProblem(ds)}
+                            onClick={() => { toggleProblem(ds); handlePreview(ds); }}
                             role="button"
                             tabIndex={0}
                             onKeyDown={(e) => {
                               if (e.key === 'Enter' || e.key === ' ') {
                                 e.preventDefault();
                                 toggleProblem(ds);
+                                handlePreview(ds);
                               }
                             }}
                             className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs transition-colors cursor-pointer select-none ${isSelected ? 'bg-primary/10' : 'hover:bg-accent'}`}
                             data-testid={`dataset-item-${ds.name}`}
-                            title={noImage ? 'No base image on this bug_bench problem — it will fail at runtime' : undefined}
+                            title={noImage ? 'Base image not in registry yet — needs a build before running' : undefined}
                           >
                             <Checkbox checked={isSelected} tabIndex={-1} className="flex-shrink-0 pointer-events-none" />
+                            {/* Image-status dot (bug_bench only) */}
+                            {imgState && (
+                              <span
+                                className={`flex-shrink-0 w-1.5 h-1.5 rounded-full ${
+                                  imgReady ? 'bg-emerald-500' : 'bg-rose-500'
+                                }`}
+                                aria-hidden
+                                data-testid={`dataset-img-dot-${ds.name}`}
+                              />
+                            )}
                             <div className="flex-1 min-w-0">
                               <div
                                 className={`font-mono font-medium truncate ${noImage ? 'underline decoration-rose-500 decoration-2 underline-offset-2' : ''}`}
@@ -548,7 +572,16 @@ export function RunEvalModal({ open, onClose }) {
                                     data-testid={`dataset-no-image-${ds.name}`}
                                   >
                                     <AlertCircle className="w-2.5 h-2.5" />
-                                    no base image
+                                    image not built
+                                  </span>
+                                )}
+                                {imgReady && (
+                                  <span
+                                    className="inline-flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400"
+                                    data-testid={`dataset-img-ready-${ds.name}`}
+                                  >
+                                    <Check className="w-2.5 h-2.5" />
+                                    image ready
                                   </span>
                                 )}
                               </div>
@@ -774,8 +807,9 @@ export function RunEvalModal({ open, onClose }) {
                     <strong>
                       {selectedProblems.filter(isBugBenchMissingImage).length} selected bug_bench problem(s)
                     </strong>{' '}
-                    are missing <code className="font-mono">attributes.image</code>. Those jobs will fail at runtime —
-                    fix the dataset or remove them before submitting.
+                    don't have a base image in the registry yet
+                    (<code className="font-mono">image_available = false</code>).
+                    Those jobs will fail until a build is pushed.
                   </span>
                 </div>
               )}
