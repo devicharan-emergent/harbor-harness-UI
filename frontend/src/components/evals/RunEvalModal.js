@@ -24,6 +24,189 @@ const DATASET_TYPES = [
   { value: 'test_report_bench', label: 'Test Report Bench' },
 ];
 
+// ── Helpers ───────────────────────────────────────────────────────────
+const decode = (s) =>
+  String(s ?? '')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&');
+
+// Parse <phases><phase>...</phase></phases> (problem_statement, scratch_bench_phased)
+const parsePhasesProblem = (xml) => {
+  if (!xml) return [];
+  const out = [];
+  const re = /<phase\b[^>]*>([\s\S]*?)<\/phase>/gi;
+  let m;
+  while ((m = re.exec(xml)) !== null) out.push(decode(m[1]).trim());
+  return out;
+};
+
+// Parse <phases><phase><test_cases><test_case>...</test_case></test_cases></phase></phases>
+// → array of arrays (one per phase) of test case strings
+const parsePhasesTests = (xml) => {
+  if (!xml) return [];
+  const phases = [];
+  const phaseRe = /<phase\b[^>]*>([\s\S]*?)<\/phase>/gi;
+  const caseRe = /<test_case\b[^>]*>([\s\S]*?)<\/test_case>/gi;
+  let pm;
+  while ((pm = phaseRe.exec(xml)) !== null) {
+    const body = pm[1];
+    const tests = [];
+    let tm;
+    while ((tm = caseRe.exec(body)) !== null) tests.push(decode(tm[1]).trim());
+    phases.push(tests);
+  }
+  return phases;
+};
+
+// Parse flat <test_cases><test_case>...</test_case></test_cases> (bug_bench / test_report_bench)
+const parseFlatTests = (xml) => {
+  if (!xml) return [];
+  const out = [];
+  const re = /<test_case\b[^>]*>([\s\S]*?)<\/test_case>/gi;
+  let m;
+  while ((m = re.exec(xml)) !== null) out.push(decode(m[1]).trim());
+  return out;
+};
+
+// bug_bench requires `attributes.image` to actually run
+const isBugBenchMissingImage = (ds) =>
+  ds?.dataset_type === 'bug_bench' && !(ds?.attributes && ds.attributes.image);
+
+// ── Problem preview ──────────────────────────────────────────────────
+function ProblemPreview({ ds }) {
+  if (!ds) return null;
+  const type = ds.dataset_type || ds.name?.split('/')[0];
+  const missingImage = isBugBenchMissingImage(ds);
+
+  // Structured body per type
+  let body = null;
+  if (type === 'scratch_bench_phased') {
+    const phases = parsePhasesProblem(ds.problem_statement || '');
+    const tests = parsePhasesTests(ds.natural_language_tests || '');
+    const n = Math.max(phases.length, tests.length);
+    if (n === 0) {
+      body = (
+        <pre className="text-xs font-mono whitespace-pre-wrap break-words text-foreground/80 leading-relaxed">
+          {ds.problem_statement || 'No problem statement.'}
+        </pre>
+      );
+    } else {
+      body = (
+        <div className="space-y-3">
+          {Array.from({ length: n }).map((_, i) => (
+            <div key={i} className="rounded-md border bg-muted/20 p-2.5 space-y-2">
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary" className="text-[10px] font-mono flex-shrink-0">
+                  #{i + 1}
+                </Badge>
+                <span className="text-xs font-semibold">Phase {i + 1}</span>
+              </div>
+              {phases[i] && (
+                <div>
+                  <div className="text-[9px] uppercase tracking-wider font-semibold text-muted-foreground">Problem</div>
+                  <pre className="text-[11px] font-mono whitespace-pre-wrap break-words text-foreground/80 mt-0.5">
+                    {phases[i]}
+                  </pre>
+                </div>
+              )}
+              {(tests[i] || []).length > 0 && (
+                <div>
+                  <div className="text-[9px] uppercase tracking-wider font-semibold text-muted-foreground">
+                    Test cases ({tests[i].length})
+                  </div>
+                  <ol className="mt-0.5 space-y-1 list-decimal list-inside text-[11px] font-mono text-foreground/80">
+                    {tests[i].map((t, j) => (
+                      <li key={j} className="whitespace-pre-wrap break-words">{t}</li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      );
+    }
+  } else {
+    // bug_bench, test_report_bench, and anything else: flat problem + flat tests + attrs
+    const tests = parseFlatTests(ds.natural_language_tests || '');
+    const attrs = ds.attributes || {};
+    const attrEntries = Object.entries(attrs).filter(([, v]) => v !== null && v !== undefined && v !== '');
+    body = (
+      <div className="space-y-3">
+        {ds.problem_statement && (
+          <div>
+            <div className="text-[9px] uppercase tracking-wider font-semibold text-muted-foreground">Problem</div>
+            <pre className="text-[11px] font-mono whitespace-pre-wrap break-words text-foreground/80 mt-0.5">
+              {ds.problem_statement}
+            </pre>
+          </div>
+        )}
+        {tests.length > 0 && (
+          <div>
+            <div className="text-[9px] uppercase tracking-wider font-semibold text-muted-foreground">
+              Test cases ({tests.length})
+            </div>
+            <ol className="mt-0.5 space-y-1 list-decimal list-inside text-[11px] font-mono text-foreground/80">
+              {tests.map((t, j) => (
+                <li key={j} className="whitespace-pre-wrap break-words">{t}</li>
+              ))}
+            </ol>
+          </div>
+        )}
+        {attrEntries.length > 0 && (
+          <div>
+            <div className="text-[9px] uppercase tracking-wider font-semibold text-muted-foreground">Attributes</div>
+            <div className="mt-1 rounded-md border bg-muted/20">
+              <table className="w-full text-[11px] font-mono">
+                <tbody>
+                  {attrEntries.map(([k, v]) => (
+                    <tr key={k} className="border-b last:border-b-0">
+                      <td className="px-2 py-1 text-muted-foreground w-[110px] align-top break-all">{k}</td>
+                      <td className="px-2 py-1 break-all">{String(v)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3" data-testid="problem-preview">
+      <div>
+        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Problem</h4>
+        <p className="font-mono text-xs mt-1 font-medium break-all">{ds.name}</p>
+        <div className="flex items-center gap-1.5 mt-1">
+          <Badge variant="outline" className="text-[10px] font-mono">{type}</Badge>
+          {ds.version && <Badge variant="outline" className="text-[10px] font-mono">v{ds.version}</Badge>}
+        </div>
+      </div>
+
+      {missingImage && (
+        <div
+          className="flex items-start gap-2 rounded-md border border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300 px-2.5 py-2 text-[11px]"
+          data-testid="preview-missing-image-warning"
+        >
+          <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+          <span>
+            <strong>No base image.</strong> This bug_bench problem is missing{' '}
+            <code className="font-mono">attributes.image</code> and will fail at runtime.
+            Add a base image to the dataset before running.
+          </span>
+        </div>
+      )}
+
+      <Separator />
+      {body}
+    </div>
+  );
+}
+
 // ── Main Modal ────────────────────────────────────────────────────────
 export function RunEvalModal({ open, onClose }) {
   const navigate = useNavigate();
@@ -333,6 +516,7 @@ export function RunEvalModal({ open, onClose }) {
                     <div className="p-1">
                       {filteredDatasets.map(ds => {
                         const isSelected = !!selectedProblems.find(p => p.name === ds.name);
+                        const noImage = isBugBenchMissingImage(ds);
                         return (
                           <div
                             key={ds.name || ds.id}
@@ -347,11 +531,27 @@ export function RunEvalModal({ open, onClose }) {
                             }}
                             className={`flex items-center gap-2 px-3 py-2 rounded-md text-xs transition-colors cursor-pointer select-none ${isSelected ? 'bg-primary/10' : 'hover:bg-accent'}`}
                             data-testid={`dataset-item-${ds.name}`}
+                            title={noImage ? 'No base image on this bug_bench problem — it will fail at runtime' : undefined}
                           >
                             <Checkbox checked={isSelected} tabIndex={-1} className="flex-shrink-0 pointer-events-none" />
                             <div className="flex-1 min-w-0">
-                              <div className="font-mono font-medium truncate">{ds.name}</div>
-                              <div className="text-muted-foreground text-[10px] mt-0.5">{ds.dataset_type || ds.name?.split('/')[0]}</div>
+                              <div
+                                className={`font-mono font-medium truncate ${noImage ? 'underline decoration-rose-500 decoration-2 underline-offset-2' : ''}`}
+                              >
+                                {ds.name}
+                              </div>
+                              <div className="text-muted-foreground text-[10px] mt-0.5 flex items-center gap-1">
+                                <span>{ds.dataset_type || ds.name?.split('/')[0]}</span>
+                                {noImage && (
+                                  <span
+                                    className="inline-flex items-center gap-0.5 text-rose-600 dark:text-rose-400"
+                                    data-testid={`dataset-no-image-${ds.name}`}
+                                  >
+                                    <AlertCircle className="w-2.5 h-2.5" />
+                                    no base image
+                                  </span>
+                                )}
+                              </div>
                             </div>
                             <button
                               onClick={(e) => { e.stopPropagation(); handlePreview(ds); }}
@@ -369,22 +569,11 @@ export function RunEvalModal({ open, onClose }) {
                   )}
                 </ScrollArea>
 
-                <div className="border rounded-lg p-3 h-[350px] overflow-y-auto">
+                <div className="border rounded-lg p-3 h-[350px] overflow-y-auto no-scrollbar">
                   {loadingPreview ? (
                     <div className="flex items-center justify-center h-full"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
                   ) : selectedPreview ? (
-                    <div className="space-y-3">
-                      <div>
-                        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Problem Statement</h4>
-                        <p className="font-mono text-xs mt-1 font-medium">{selectedPreview.name}</p>
-                      </div>
-                      <Separator />
-                      {selectedPreview.problem_statement ? (
-                        <pre className="text-xs font-mono whitespace-pre-wrap break-words text-foreground/80 leading-relaxed" data-testid="problem-statement-preview">{selectedPreview.problem_statement}</pre>
-                      ) : (
-                        <p className="text-xs text-muted-foreground">No problem statement available.</p>
-                      )}
-                    </div>
+                    <ProblemPreview ds={selectedPreview} />
                   ) : (
                     <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
                       <div className="text-center">
@@ -575,6 +764,21 @@ export function RunEvalModal({ open, onClose }) {
           {/* ── Step 3: Review & Submit ────────────────────────── */}
           {step === 3 && (
             <div className="space-y-4 py-2">
+              {selectedProblems.some(isBugBenchMissingImage) && (
+                <div
+                  className="flex items-start gap-2 rounded-md border border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300 px-3 py-2 text-[11px]"
+                  data-testid="review-missing-image-warning"
+                >
+                  <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                  <span>
+                    <strong>
+                      {selectedProblems.filter(isBugBenchMissingImage).length} selected bug_bench problem(s)
+                    </strong>{' '}
+                    are missing <code className="font-mono">attributes.image</code>. Those jobs will fail at runtime —
+                    fix the dataset or remove them before submitting.
+                  </span>
+                </div>
+              )}
               <div className="flex items-center gap-4 text-xs flex-wrap">
                 <div className="flex items-center gap-1.5">
                   <Rocket className="w-4 h-4 text-muted-foreground" />
