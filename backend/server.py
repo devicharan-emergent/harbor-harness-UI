@@ -393,6 +393,10 @@ async def proxy_submit_eval(body: dict):
         if body.get("agent_name"):
             payload["agent_name"] = body["agent_name"]
 
+        # Per-user ownership (forwarded as-is)
+        if body.get("created_by"):
+            payload["created_by"] = body["created_by"]
+
         # Handle evals array
         if "evals" in body:
             payload["evals"] = body["evals"]
@@ -442,7 +446,8 @@ async def proxy_submit_eval(body: dict):
 async def proxy_list_eval_jobs(
     status: Optional[str] = None,
     limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0)
+    offset: int = Query(0, ge=0),
+    created_by: Optional[str] = None,
 ):
     """Proxy: List eval jobs"""
     try:
@@ -450,6 +455,8 @@ async def proxy_list_eval_jobs(
             params = {"limit": limit, "offset": offset}
             if status:
                 params["status"] = status
+            if created_by:
+                params["created_by"] = created_by
             response = await hclient.get(f"{EVAL_API_BASE}/api/v1/evals", params=params)
             response.raise_for_status()
             return response.json()
@@ -457,13 +464,19 @@ async def proxy_list_eval_jobs(
         raise HTTPException(status_code=500, detail=f"Eval API error: {str(e)}")
 
 @api_router.get("/eval/jobs/aggregate")
-async def proxy_eval_aggregate(group_id: str = Query(..., description="Group ID to aggregate")):
+async def proxy_eval_aggregate(
+    group_id: str = Query(..., description="Group ID to aggregate"),
+    created_by: Optional[str] = None,
+):
     """Proxy: Get aggregate metrics (time per problem, test pass rates) for a group"""
     try:
         async with httpx.AsyncClient(timeout=30.0) as hclient:
+            params = {"group_id": group_id}
+            if created_by:
+                params["created_by"] = created_by
             response = await hclient.get(
                 f"{EVAL_API_BASE}/api/v1/evals/aggregate",
-                params={"group_id": group_id}
+                params=params,
             )
             response.raise_for_status()
             return response.json()
@@ -485,11 +498,14 @@ async def proxy_update_breakpoint(job_id: str, body: dict):
         raise HTTPException(status_code=500, detail=f"Eval API error: {str(e)}")
 
 @api_router.get("/eval/jobs/{job_id}")
-async def proxy_get_eval_job(job_id: str):
+async def proxy_get_eval_job(job_id: str, created_by: Optional[str] = None):
     """Proxy: Get eval job by ID"""
     try:
         async with httpx.AsyncClient(timeout=30.0) as hclient:
-            response = await hclient.get(f"{EVAL_API_BASE}/api/v1/evals/{job_id}")
+            params = {"created_by": created_by} if created_by else None
+            response = await hclient.get(
+                f"{EVAL_API_BASE}/api/v1/evals/{job_id}", params=params,
+            )
             response.raise_for_status()
             return response.json()
     except httpx.HTTPError as e:
@@ -497,11 +513,14 @@ async def proxy_get_eval_job(job_id: str):
                           detail=f"Eval API error: {str(e)}")
 
 @api_router.delete("/eval/jobs/{job_id}")
-async def proxy_cancel_eval_job(job_id: str):
+async def proxy_cancel_eval_job(job_id: str, created_by: Optional[str] = None):
     """Proxy: Cancel eval job"""
     try:
         async with httpx.AsyncClient(timeout=30.0) as hclient:
-            response = await hclient.delete(f"{EVAL_API_BASE}/api/v1/evals/{job_id}")
+            params = {"created_by": created_by} if created_by else None
+            response = await hclient.delete(
+                f"{EVAL_API_BASE}/api/v1/evals/{job_id}", params=params,
+            )
             response.raise_for_status()
             return response.json()
     except httpx.HTTPError as e:
@@ -537,13 +556,21 @@ async def proxy_eval_stats():
         raise HTTPException(status_code=500, detail=f"Eval API error: {str(e)}")
 
 @api_router.get("/eval/groups/{group_id}/jobs")
-async def proxy_group_eval_jobs(group_id: str, limit: int = 50, offset: int = 0):
+async def proxy_group_eval_jobs(
+    group_id: str,
+    limit: int = 50,
+    offset: int = 0,
+    created_by: Optional[str] = None,
+):
     """Proxy: List all eval jobs for a group"""
     try:
         async with httpx.AsyncClient(timeout=30.0) as hclient:
+            params = {"limit": limit, "offset": offset}
+            if created_by:
+                params["created_by"] = created_by
             response = await hclient.get(
                 f"{EVAL_API_BASE}/api/v1/groups/{group_id}/evals",
-                params={"limit": limit, "offset": offset}
+                params=params,
             )
             response.raise_for_status()
             return response.json()
@@ -719,13 +746,18 @@ async def proxy_create_scheduled_batch(body: dict):
 
 
 @api_router.get("/eval/scheduled-batches")
-async def proxy_list_scheduled_batches(enabled: Optional[str] = None):
+async def proxy_list_scheduled_batches(
+    enabled: Optional[str] = None,
+    created_by: Optional[str] = None,
+):
     """Proxy: List scheduled batches. Pass ?enabled=true to filter."""
     try:
         async with httpx.AsyncClient(timeout=30.0) as hclient:
             params = {}
             if enabled is not None:
                 params["enabled"] = enabled
+            if created_by:
+                params["created_by"] = created_by
             response = await hclient.get(f"{EVAL_API_BASE}/api/v1/scheduled-batches", params=params)
             response.raise_for_status()
             return response.json()
@@ -734,11 +766,14 @@ async def proxy_list_scheduled_batches(enabled: Optional[str] = None):
 
 
 @api_router.get("/eval/scheduled-batches/{batch_id}")
-async def proxy_get_scheduled_batch(batch_id: str):
+async def proxy_get_scheduled_batch(batch_id: str, created_by: Optional[str] = None):
     """Proxy: Get a scheduled batch by ID."""
     try:
         async with httpx.AsyncClient(timeout=30.0) as hclient:
-            response = await hclient.get(f"{EVAL_API_BASE}/api/v1/scheduled-batches/{batch_id}")
+            params = {"created_by": created_by} if created_by else None
+            response = await hclient.get(
+                f"{EVAL_API_BASE}/api/v1/scheduled-batches/{batch_id}", params=params,
+            )
             response.raise_for_status()
             return response.json()
     except httpx.HTTPError as e:
@@ -767,11 +802,14 @@ async def proxy_update_scheduled_batch(batch_id: str, body: dict):
 
 
 @api_router.delete("/eval/scheduled-batches/{batch_id}")
-async def proxy_delete_scheduled_batch(batch_id: str):
+async def proxy_delete_scheduled_batch(batch_id: str, created_by: Optional[str] = None):
     """Proxy: Delete a scheduled batch."""
     try:
         async with httpx.AsyncClient(timeout=30.0) as hclient:
-            response = await hclient.delete(f"{EVAL_API_BASE}/api/v1/scheduled-batches/{batch_id}")
+            params = {"created_by": created_by} if created_by else None
+            response = await hclient.delete(
+                f"{EVAL_API_BASE}/api/v1/scheduled-batches/{batch_id}", params=params,
+            )
             response.raise_for_status()
             return response.json()
     except httpx.HTTPError as e:
@@ -779,11 +817,15 @@ async def proxy_delete_scheduled_batch(batch_id: str):
 
 
 @api_router.post("/eval/scheduled-batches/{batch_id}/trigger")
-async def proxy_trigger_scheduled_batch(batch_id: str):
+async def proxy_trigger_scheduled_batch(batch_id: str, body: Optional[dict] = None):
     """Proxy: Manually trigger a scheduled batch to fire now."""
     try:
         async with httpx.AsyncClient(timeout=60.0) as hclient:
-            response = await hclient.post(f"{EVAL_API_BASE}/api/v1/scheduled-batches/{batch_id}/trigger")
+            # Forward body (may carry created_by for ownership stamping).
+            response = await hclient.post(
+                f"{EVAL_API_BASE}/api/v1/scheduled-batches/{batch_id}/trigger",
+                json=body or {},
+            )
             response.raise_for_status()
             return response.json()
     except httpx.HTTPError as e:
@@ -795,6 +837,7 @@ async def proxy_list_scheduled_batch_runs(
     batch_id: str,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    created_by: Optional[str] = None,
 ):
     """Proxy: List eval job runs fired by a scheduled batch.
     Each job has a group_run_id formatted as '{batch_id}-{YYYY-MM-DD}'
@@ -803,6 +846,8 @@ async def proxy_list_scheduled_batch_runs(
     try:
         async with httpx.AsyncClient(timeout=30.0) as hclient:
             params = {"limit": limit, "offset": offset}
+            if created_by:
+                params["created_by"] = created_by
             response = await hclient.get(
                 f"{EVAL_API_BASE}/api/v1/scheduled-batches/{batch_id}/runs",
                 params=params,

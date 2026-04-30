@@ -1,0 +1,30 @@
+{
+  "summary": "Iter19 VALIDATED. Backend proxy now forwards created_by to harness-eval on every affected endpoint (a-k). Pytest /app/backend/tests/test_created_by_passthrough.py: 11/11 PASS using httpx.MockTransport to intercept outbound AsyncClient calls. Frontend: RunEvalModal POST /api/eval/jobs body carries created_by=<USER_ID> alongside group_run_id + evals. /evals and /schedules GET list calls carry ?created_by=<USER_ID>. /datasets + /cortex + /stats + /health show zero created_by leaks.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_created_by_passthrough.py",
+    "/app/test_reports/pytest/pytest_iter19.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "proxy_submit_eval at server.py:369 correctly forwards created_by via `if body.get('created_by'): payload['created_by'] = body['created_by']` — validated by mocked httpx.AsyncClient receiving the exact JSON body with created_by.",
+    "All GET/DELETE eval-proxy endpoints accept `created_by: Optional[str] = None` query parameter and conditionally add it to forwarded params — validated for jobs list/get/cancel, groups/{id}/jobs, jobs/aggregate, scheduled-batches list/get/delete/runs.",
+    "proxy_trigger_scheduled_batch forwards the full POST body (including created_by) as-is via `json=body or {}` — validated.",
+    "Nit: harness may 400 on unknown query keys; prior iters report harness is tolerant but worth confirming end-to-end in a staging harness once real traffic flows. No blocker.",
+    "Carry-over from iter18: server.py is still ~1180 lines; consider splitting into eval_proxy.py / auth.py modules for maintainability."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_created_by_passthrough.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (11/11 passthrough tests pass)",
+    "frontend": "100% (RunEvalModal submit -> POST body has created_by; /evals + /schedules GETs carry ?created_by; /datasets zero leaks)"
+  },
+  "test_credentials": "Seeded user_id=0ee59a27-db9c-4647-aeee-f72173fcd757 with session_token 'pw_iter19_20260430' (valid 7 days from 2026-04-30). Also still valid from iter18: 'pw_iter18_1777566255170'. The original 'pw_test_1034c53aab0f4e8d94e9ff3a692f9da5' was invalidated by iter18's logout test.",
+  "seed_data_creation": "Inserted user_sessions row for session_token='pw_iter19_20260430'. One real eval job was submitted through the UI labeled 'TEST_iter19_created_by-2026-04-30T18-00-05-204Z-zpny' as part of the end-to-end validation. Consider deleting this batch from the harness if cleanup is desired.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "To re-validate iter19: (1) Run `pytest /app/backend/tests/test_created_by_passthrough.py -v` — all 11 must pass. (2) Seed acm_session_token, open /evals, click [data-testid='new-eval-btn'], click a problem row by text, click [data-testid='eval-next-step'], fill Group Run ID via placeholder 'e.g. nightly, sonnet-vs-opus', click [data-testid='eval-next-step'], click [data-testid='submit-eval-button']. Assert POST /api/eval/jobs body JSON has created_by=<user_id>. If session token expired, re-seed via /app/memory/test_credentials.md steps.",
+  "rca of the issue": "ROOT CAUSE (now fixed): The backend proxy endpoints in /app/backend/server.py were not declaring created_by in their signatures/payload construction. proxy_submit_eval was rebuilding the outbound payload with an explicit allowlist of keys (user_id, group_run_id, agent_name, evals) and silently dropping created_by even when the frontend attachOwnership interceptor injected it into the request body. Similarly all GET/DELETE handlers had no created_by query param so it was discarded at the proxy layer. Fix applied by main agent: (a) proxy_submit_eval now has `if body.get('created_by'): payload['created_by'] = body['created_by']`; (b) every affected GET/DELETE handler now declares `created_by: Optional[str] = None` and conditionally injects it into outbound params; (c) proxy_trigger_scheduled_batch forwards the body wholesale. Verified via httpx.MockTransport intercept — outbound request to EVAL_API_BASE/api/v1/... carries created_by in the correct location (body for POSTs, query for GETs/DELETE) for all 11 endpoints. Frontend DevTools also confirm the complete round-trip from RunEvalModal through to the internal API."
+}
