@@ -10,75 +10,55 @@ Build an Agent Configuration Manager (ACM) for managing AI agent configurations,
 - **Dataset Management**: Full CRUD for evaluation datasets/problem statements
 - **Multi-Eval Submission**: Submit batches of evals with mandatory group_id
 - **Environment Switching**: Toggle between dev and ephemeral deployment environments
+- **Google Authentication + per-user ownership**: Gate the app behind login; every eval/schedule request carries the user's UUID as `created_by`.
 
 ## Architecture
 - **Frontend**: React + Tailwind CSS + Shadcn UI (port 3000)
 - **Backend**: FastAPI + MongoDB (port 8001)
 - **External APIs**: Eval API (harness-eval), Builder API (cortex-eph-builder)
 - **Pattern**: Backend-for-Frontend (BFF) with proxy endpoints
-- **State Management**: React Context for environment (EnvContext)
+- **State Management**: React Context (EnvContext, AuthContext)
+- **Auth**: Emergent-managed Google OAuth; session token in `localStorage` (`acm_session_token`) sent as `?access_token=` query param on auth calls.
+- **Ownership**: `created_by` (user UUID) injected via axios interceptor — query param on GET/DELETE, JSON body on POST/PUT/PATCH. Scoped to `/api/eval/jobs*`, `/api/eval/groups/*/jobs*`, and `/api/eval/scheduled-batches*`.
 
 ## Pages
-1. **Agent List** (`/`) - Table with search, filter, dual data source support, delete for DB agents
-2. **Agent Editor** (`/agents/:id/edit`) - Multi-tab form with YAML preview
-3. **Compare View** (`/compare`) - Side-by-side agent diff
-4. **Version History** (`/agents/:id/history`) - Timeline of agent versions
-5. **Wizard** (`/wizard`) - Chat-based agent creation
-6. **Eval Runs** (`/evals`) - **Grouped view by group_id** with collapsible sections
-7. **Job Detail** (`/evals/:id`) - Detailed view with scores, eval metrics, phase results, test breakdown
-8. **Datasets** (`/datasets`) - Dataset CRUD with preview panel
+1. Agent List (`/`), Agent Editor, Compare, Version History, Wizard
+2. Eval Runs (`/evals`), Job Detail (`/evals/:id`)
+3. Datasets (`/datasets`)
+4. Schedules (`/schedules`, `/schedules/:id`, editor)
+5. Auth: `/login`, `/auth/callback`
 
-## What's Been Implemented (Verified March 2026)
-- [x] Phase 1-2: Core dual-mode switching (MongoDB <-> Builder API)
-- [x] Phase 4: Eval API integration with problem statement display
-- [x] Phase 5: Full Builder API CRUD (filesystem=read-only, database=full CRUD)
-- [x] Phase 6A: Dataset CRUD (mandatory PS & NL Tests, format presets, type-specific attributes)
-- [x] Phase 6B: Multi-Eval Submission with mandatory group_id
-- [x] **Grouped Eval Runs**: Jobs displayed in collapsible groups by group_id
-- [x] **Environment Switcher**: Dev/Ephemeral toggle controlling cortex-url
-- [x] **Agent Deletion**: Delete option for database-sourced agents only
-- [x] Agent association badges on EvalRuns and JobDetail
-- [x] Eval Metrics: phase_results with test breakdown on JobDetail
+## What's Been Implemented
+- [x] Dual-mode switching (MongoDB <-> Builder API)
+- [x] Eval API integration + problem-statement display
+- [x] Full Builder API CRUD
+- [x] Dataset CRUD with problem-type wizards (incl. scratch_bench_phased multi-phase editor)
+- [x] Multi-Eval Submission with mandatory group_id (moved to payload top level)
+- [x] Grouped Eval Runs, Environment Switcher, Agent Deletion
+- [x] Scheduled Batches CRUD + trigger + runs history
+- [x] ScheduleDetail Analytics: SummaryKPIs, PhaseHeatmap, per-problem time series, sortable ProblemLeaderboard, Sparkline component
+- [x] Run-Evaluation 3-step wizard with `agent_name` free-text + existence check via `/cortex/agents/exists`
+- [x] Bug-bench image_available indicator (green/red dot)
+- [x] **Google Authentication** (Feb 2026) — Emergent-managed OAuth, login page, protected routes, user menu with logout
+- [x] **Per-user ownership** (Feb 2026) — `created_by` UUID threaded through every relevant request via centralised axios interceptor (`src/services/apiHelpers.js`)
+- [x] **Runtime same-origin API baseURL** (Feb 2026) — `src/services/apiBase.js::getApiBaseURL()` falls back to `window.location.origin` when the served page origin differs from `REACT_APP_BACKEND_URL`, avoiding the preview 307 cross-origin trampoline.
 
-## Bug Fixes (March 19, 2026)
-- [x] Fixed group_id not being sent to API - moved from eval item level to payload top level
-- [x] Updated sidebar layout with fixed positioning for better stability
-
-## Scheduled Batches + Analytics (Feb 2026)
-- [x] Scheduled Batches CRUD + trigger + runs history (proxy endpoints + UI)
-- [x] Whole-hour cron restriction in ScheduleEditor
-- [x] `schedule_tag` + `/runs` API contract migration
-- [x] `group_id` -> `group_run_id` fix on EvalRuns
-- [x] Row-clickable problem selection (ScheduleEditor, RunEvalModal)
-- [x] ScheduleDetail Analytics section: SummaryKPIs, PhaseHeatmap
-- [x] **Per-problem time series chart** (Feb 2026): one line per problem across dates with
-      metric selector (combined_reward / lint_score / browser_reward / lintiq_score).
-      Replaces the prior error-code breakdown which was removed at user request.
-- [x] **Analytics UI polish** (Feb 2026):
-      - KPI tiles: color-coded values by threshold, inline sparklines under reward means,
-        drop "Total Cost —" / "Last Fire" when redundant, 6-col responsive grid.
-      - Chart: end-of-line value labels, 0.5 reference line, legend hover-to-isolate,
-        tooltip sorted by value.
-      - New `ProblemLeaderboard` table — sortable per-problem rows with runs count,
-        latest/mean scores (color-coded), trend arrow, combined-reward sparkline.
-      - New reusable `Sparkline` SVG component.
-
-## Testing Status (Iteration 14 - March 14, 2026)
-- Backend: 14/14 pytest tests passed (100%)
-- Frontend: 33/33 Playwright tests passed (100%)
-- All features verified working
+## Testing Status (Iteration 18 – Feb 2026)
+- Backend: 6/6 pytest auth tests passed
+- Frontend: 7/7 scenarios passed — `/auth/me` same-origin, user-menu hydration, logout, `/evals` + `/schedules` `created_by` injection, `/datasets` no-leakage regression, unauth gating
+- See `/app/test_reports/iteration_18.json`
 
 ## Prioritized Backlog
 ### P1
-- Refactor server.py into separate APIRouter files (agent_routes, proxy_routes, eval_routes)
+- Split `server.py` (~1100 lines) into `auth_routes.py`, `agent_routes.py`, `eval_proxy_routes.py`
 - Dropdown metadata integration (Builder models/tools/prompts in editor)
 
 ### P2
-- Clone Eval Groups feature (re-run batch with new group_id)
-- Builder-side validation pre-save
-- Builder YAML export integration
+- Add Jest/RTL tests for `components/analytics/*` (skipped previously)
+- Theme picker dropdown (multiple palettes – Solarized, GitHub-like, etc.)
+- Clone Eval Groups feature
 
 ### P3
-- Command palette (Cmd+K) for quick actions
+- Command palette (Cmd+K)
 - Batch operations on agent list
-- Re-evaluate drag-and-drop for job reordering (DnD-kit portal issue)
+- Re-evaluate drag-and-drop (DnD-kit portal issue)
