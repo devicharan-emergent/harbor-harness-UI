@@ -7,8 +7,9 @@ Real Google OAuth round-trips are NOT required. A MongoDB-seeded session works e
 - **user_id** (UUID, used as `created_by`): `0ee59a27-db9c-4647-aeee-f72173fcd757`
 - **email**: `TEST_pw_user@example.com`
 - **session_token** (valid 7 days from 2026-04-30):
-  - `pw_test_1034c53aab0f4e8d94e9ff3a692f9da5`
-  - `pw_iter18_1777566255170` (backup, same user)
+  - `pw_iter19_20260430` (iter19 — latest)
+  - `pw_iter18_1777566255170`
+  - ~~`pw_test_1034c53aab0f4e8d94e9ff3a692f9da5`~~ (invalidated by iter18 logout test)
 - **Frontend**: set `localStorage.setItem('acm_session_token', '<token>')` before navigating. The auth interceptor adds `?access_token=<token>` to every `/api/auth/*` call.
 - **Backend** (`_get_session_user` in `server.py`): accepts any of — `session_token` cookie, `Authorization: Bearer <token>`, or `?access_token=<token>` query param.
 

@@ -43,10 +43,15 @@ Build an Agent Configuration Manager (ACM) for managing AI agent configurations,
 - [x] **Per-user ownership** (Feb 2026) — `created_by` UUID threaded through every relevant request via centralised axios interceptor (`src/services/apiHelpers.js`)
 - [x] **Runtime same-origin API baseURL** (Feb 2026) — `src/services/apiBase.js::getApiBaseURL()` falls back to `window.location.origin` when the served page origin differs from `REACT_APP_BACKEND_URL`, avoiding the preview 307 cross-origin trampoline.
 
-## Testing Status (Iteration 18 – Feb 2026)
-- Backend: 6/6 pytest auth tests passed
-- Frontend: 7/7 scenarios passed — `/auth/me` same-origin, user-menu hydration, logout, `/evals` + `/schedules` `created_by` injection, `/datasets` no-leakage regression, unauth gating
-- See `/app/test_reports/iteration_18.json`
+## Testing Status (Iteration 19 – Feb 2026)
+- Backend: 6/6 auth + **11/11 created_by pass-through** tests pass (`/app/backend/tests/test_created_by_passthrough.py`)
+- Frontend: RunEvalModal POST /api/eval/jobs now carries `created_by` in body. /evals + /schedules GETs carry `?created_by=…`. /datasets/cortex/stats/health clean. See `/app/test_reports/iteration_19.json`.
+
+## Bug Fix (Feb 2026 — iter19)
+Backend proxy endpoints were silently dropping `created_by` by rebuilding outbound payloads with a strict allowlist. Fixed in `server.py`:
+- `proxy_submit_eval` (POST /eval/jobs) now forwards `created_by` in body.
+- List/Get/Delete on `/eval/jobs`, `/eval/jobs/{id}`, `/eval/jobs/aggregate`, `/eval/groups/{id}/jobs`, `/eval/scheduled-batches*`, `/eval/scheduled-batches/{id}/runs` now accept `created_by: Optional[str]` and pass it through as a query param.
+- `proxy_trigger_scheduled_batch` forwards its body wholesale.
 
 ## Prioritized Backlog
 ### P1
