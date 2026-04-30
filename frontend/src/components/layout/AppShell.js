@@ -7,6 +7,7 @@ import { ThemeToggle } from './ThemeToggle';
 import { EnvSwitcher } from './EnvSwitcher';
 import { ApiHealthIndicator } from '@/components/evals/ApiHealthIndicator';
 import { DataSourceIndicator } from './DataSourceIndicator';
+import { UserMenu } from './UserMenu';
 
 const navItems = [
   { label: 'Agents', href: '/', icon: Home },
@@ -71,6 +72,7 @@ export default function AppShell() {
         <DataSourceIndicator />
         <ApiHealthIndicator />
         <EnvSwitcher />
+        <UserMenu />
         <div className="flex items-center justify-between px-2.5">
           <span className="text-xs text-muted-foreground">v1.0.0</span>
           <ThemeToggle />

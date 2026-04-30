@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { attachOwnership } from './apiHelpers';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
 
@@ -7,6 +8,9 @@ const client = axios.create({
   headers: { 'Content-Type': 'application/json' },
   timeout: 30000,
 });
+
+// All scheduled-batches endpoints (including /trigger and /runs) are per-user.
+attachOwnership(client, [/\/scheduled-batches(\/|$)/]);
 
 // List all scheduled batches (optionally filter to enabled only)
 // Returns: { batches: [Batch, ...] }

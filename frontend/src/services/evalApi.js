@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { attachOwnership } from './apiHelpers';
 
 // Use our FastAPI backend as proxy to avoid HTTPS/HTTP mixed content issues
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
@@ -10,6 +11,13 @@ const evalApiClient = axios.create({
   },
   timeout: 30000,
 });
+
+// Inject created_by into every eval-job + group-jobs request. Datasets,
+// cortex agent checks, stats, and health are shared resources and stay as-is.
+attachOwnership(evalApiClient, [
+  /\/jobs(\/|$)/,
+  /\/groups\/[^/]+\/jobs(\/|$)/,
+]);
 
 // ============ Eval Jobs ============
 

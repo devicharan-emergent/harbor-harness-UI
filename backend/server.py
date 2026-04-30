@@ -95,7 +95,7 @@ async def auth_session(body: AuthSessionRequest, response: Response):
                        "picture": data.get("picture", existing.get("picture", ""))}}
         )
     else:
-        user_id = f"user_{uuid.uuid4().hex[:12]}"
+        user_id = str(uuid.uuid4())
         await db.users.insert_one({
             "user_id": user_id,
             "email": email,

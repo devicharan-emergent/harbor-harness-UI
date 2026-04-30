@@ -1,0 +1,40 @@
+{
+  "summary": "Tested Google-auth implementation. Backend auth endpoints all pass (6/6). Unauthenticated frontend routing works correctly (/, /evals, /schedules, /datasets redirect to /login; login page renders). CRITICAL BLOCKER: CORS misconfiguration — backend returns Access-Control-Allow-Origin: * while frontend uses withCredentials: true, which browsers reject. This prevents ALL authenticated flows: /api/auth/me, /api/auth/session, UserMenu rendering, created_by interceptor injection, and logout. Could not verify authenticated UI flow (UserMenu, logout) or the end-to-end created_by query/body injection in outgoing /jobs and /scheduled-batches calls because no authenticated session can ever hydrate in the browser.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "CORS middleware (server.py L1101-1107) + backend/.env CORS_ORIGINS=*", "issue": "allow_origins=['*'] combined with allow_credentials=True is invalid. Browser error: 'Access-Control-Allow-Origin header must not be the wildcard * when the request credentials mode is include'. Frontend origin is youthful-haibt-1.internal.stage-preview.emergentagent.com (preview infra) while API is served at youthful-haibt-1.stage-preview.emergentagent.com. /api/auth/me, /auth/session, /auth/logout all fail cross-origin, so no user can ever log in through the browser. Fix: replace wildcard with allow_origin_regex=r'https?://.*\\\\.emergentagent\\\\.com$' OR reflect origin (set CORS_ORIGINS to the actual frontend origin). Keep allow_credentials=True.", "priority": "CRITICAL"}
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Authenticated session hydration", "issue": "UserMenu never renders because /api/auth/me fails CORS — user stays null and ProtectedRoute bounces to /login even when session_token cookie is set. Verified via seeding DB users + user_sessions row and setting the cookie in Playwright. Blocked by the CORS bug above.", "affected_selectors": ["[data-testid=user-menu-trigger]", "[data-testid=user-menu-name]", "[data-testid=user-menu-logout]"]},
+      {"flow": "created_by injection on /api/eval/jobs* and /api/eval/scheduled-batches*", "issue": "Could not observe outbound requests — page never reached /evals or /schedules in authenticated mode due to CORS. Code review of apiHelpers.attachOwnership, evalApi.js (matches /jobs and /groups/.../jobs only), and schedulesApi.js (matches /scheduled-batches) looks correct — datasets + cortex endpoints are correctly excluded.", "affected_selectors": []}
+    ],
+    "design_issues": [
+      {"screen": "/auth/callback", "issues": ["When visited directly with no session_id hash it navigates to /login. Functionally fine (no session to process) but worth flagging — the route is marked public so it should ideally show a spinner and handle the missing-hash case gracefully rather than silently redirect."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_auth.py", "/app/test_reports/pytest/pytest_results_iteration15.xml"],
+  "action_items": [
+    "CRITICAL: Fix CORS in backend/server.py — replace allow_origins=['*'] + allow_credentials=True with allow_origin_regex (e.g. r'https?://([a-z0-9-]+\\\\.)*emergentagent\\\\.com$'). Without this, no one can log in through the preview URL.",
+    "After CORS fix, re-run authenticated UI test to confirm UserMenu renders, logout works, and outgoing /api/eval/jobs + /api/eval/scheduled-batches requests include created_by (query param for GET/DELETE, JSON body for POST/PUT/PATCH), while /api/eval/datasets* and /api/eval/cortex/agents/exists remain clean.",
+    "Optional: /auth/callback should render a placeholder while waiting for AuthContext to process the hash, instead of letting ProtectedRoute/Navigate kick in."
+  ],
+  "critical_code_review_comments": [
+    "server.py: CORSMiddleware wildcard+credentials misconfiguration (see above).",
+    "server.py L147: response.delete_cookie uses samesite='none', secure=True — consistent with set_cookie, good.",
+    "AuthContext.js: hash session_id exchange is inline in useEffect — works but the double-setLoading(false) path (both in hash branch and checkAuth) is OK. Consider moving into checkAuth for symmetry.",
+    "apiHelpers.attachOwnership correctly scopes to the axios client passed in; evalApi matches /jobs and /groups/:id/jobs only; schedulesApi matches /scheduled-batches — datasets + cortex are NOT affected (verified by code read).",
+    "server.py is 1119 lines — exceeds the 700-line guideline. Split auth, agents CRUD, and eval proxy into separate modules."
+  ],
+  "updated_files": ["/app/backend/tests/test_auth.py"],
+  "success_rate": {"backend": "100% (6/6 auth tests pass)", "frontend": "Unauthenticated gating 100% (5/5); authenticated flow UNVERIFIED due to CORS blocker"},
+  "test_credentials": "No real Google creds used. Seeded MongoDB user + user_sessions directly: user_id=0ee59a27-db9c-4647-aeee-f72173fcd757, session_token=pw_test_1034c53aab0f4e8d94e9ff3a692f9da5 (in test_database DB). Seeded rows left in DB for retest.",
+  "seed_data_creation": "Inserted one TEST_pw_user@example.com into users + matching user_sessions row. Test fixtures in test_auth.py self-clean after each run.",
+  "retest_needed": true,
+  "main_agent_can_self_test": false,
+  "context_for_next_testing_agent": "After main agent fixes CORS, re-seed a DB user+session row, set cookie via Playwright context.add_cookies({domain: 'youthful-haibt-1.stage-preview.emergentagent.com', ...}), then navigate to / and verify [data-testid=user-menu-trigger] appears. Then go to /evals and /schedules and intercept page.on('request') to assert created_by=<uuid> is in the URL query for GETs and in the JSON body for POSTs on /api/eval/jobs* and /api/eval/scheduled-batches*. Also assert /api/eval/datasets and /api/eval/cortex/agents/exists do NOT carry created_by. Seeded token still valid for 7 days: pw_test_1034c53aab0f4e8d94e9ff3a692f9da5 with user_id 0ee59a27-db9c-4647-aeee-f72173fcd757.",
+  "rca of the issue": "ROOT CAUSE: FastAPI CORSMiddleware is configured with allow_origins=['*'] (from CORS_ORIGINS='*' in backend/.env) while allow_credentials=True. Per CORS spec, a credentialed request (withCredentials:true, which AuthContext's authAxios and apiHelpers both set) cannot use a wildcard origin — the server must echo the exact request origin. The Emergent preview serves the React app from the *.internal.stage-preview.emergentagent.com subdomain while the backend route lives on *.stage-preview.emergentagent.com, making every auth call a cross-origin credentialed request. REPRODUCTION: open the preview URL in a browser — DevTools shows 'blocked by CORS policy' on every /api/auth/me request, followed by a redirect to /login even with a valid session_token cookie. MITIGATION: in server.py replace the middleware with `app.add_middleware(CORSMiddleware, allow_origin_regex=r'https?://([a-z0-9-]+\\\\.)*emergentagent\\\\.com$', allow_credentials=True, allow_methods=['*'], allow_headers=['*'])` and drop the CORS_ORIGINS='*' default, OR set CORS_ORIGINS to include both the external and internal preview origins explicitly."
+}
