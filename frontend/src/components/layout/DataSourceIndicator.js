@@ -8,7 +8,8 @@ import { toast } from 'sonner';
 import { parseApiError } from '@/lib/errorUtils';
 import { useCapabilities } from '@/hooks/useCapabilities';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
+import { getApiBaseURL } from '@/services/apiBase';
+const BACKEND_URL = getApiBaseURL();
 
 export function DataSourceIndicator() {
   const { capabilities, loading, refresh } = useCapabilities();

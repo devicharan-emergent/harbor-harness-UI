@@ -1,7 +1,8 @@
 import axios from 'axios';
 
 // Use our FastAPI backend as proxy
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
+import { getApiBaseURL } from './apiBase';
+const BACKEND_URL = getApiBaseURL();
 
 const builderApiClient = axios.create({
   baseURL: `${BACKEND_URL}/api/builder`,

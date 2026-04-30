@@ -1,8 +1,8 @@
 import axios from 'axios';
 import { attachOwnership } from './apiHelpers';
+import { getApiBaseURL } from './apiBase';
 
-// Use our FastAPI backend as proxy to avoid HTTPS/HTTP mixed content issues
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
+const BACKEND_URL = getApiBaseURL();
 
 const evalApiClient = axios.create({
   baseURL: `${BACKEND_URL}/api/eval`,

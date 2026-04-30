@@ -4,7 +4,8 @@ import axios from 'axios';
 import { toast } from 'sonner';
 import { useCapabilities } from '@/hooks/useCapabilities';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
+import { getApiBaseURL } from '@/services/apiBase';
+const BACKEND_URL = getApiBaseURL();
 
 export function ReadOnlyBanner({ message }) {
   const { refresh } = useCapabilities();

@@ -1,7 +1,8 @@
 import axios from 'axios';
 import { attachOwnership } from './apiHelpers';
+import { getApiBaseURL } from './apiBase';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
+const BACKEND_URL = getApiBaseURL();
 
 const client = axios.create({
   baseURL: `${BACKEND_URL}/api/eval`,

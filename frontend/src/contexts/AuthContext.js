@@ -1,10 +1,11 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import axios from 'axios';
 import { setCreatedBy } from '@/services/apiHelpers';
+import { getApiBaseURL } from '@/services/apiBase';
 
 const AuthContext = createContext(null);
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = `${getApiBaseURL()}/api`;
 const TOKEN_KEY = 'acm_session_token';
 
 // Shared axios instance. We authenticate by appending ?access_token=<token>
