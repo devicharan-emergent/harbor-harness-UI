@@ -1,0 +1,54 @@
+{
+  "summary": "Retest of Google-auth + created_by ownership with query-param access_token. Backend: 6/6 pytest auth tests pass; curl -L with ?access_token= returns the seeded user JSON as expected. Frontend browser flow: STILL BLOCKED by the exact same cross-origin 307 issue flagged in iterations 15 and 16. The React app is served from https://youthful-haibt-1.internal.stage-preview.emergentagent.com but REACT_APP_BACKEND_URL still points to the PUBLIC host (https://youthful-haibt-1.stage-preview.emergentagent.com). Every axios XHR hits the public host -> preview infra emits an unconditional 307 back to the internal host with Access-Control-Allow-Origin:* (and likely no ACA-Credentials). The browser rejects the cross-origin redirected response with 'Access to XMLHttpRequest ... (redirected from ...) has been blocked by CORS policy'. The query-param access_token does NOT help at the browser layer because the failure is on the redirect CORS check, not on auth. Consequence: /api/auth/me never resolves in-browser, setUser stays null, ProtectedRoute redirects /, /evals, /schedules, /datasets back to /login, and the UserMenu + created_by interceptor + logout flow + datasets regression assertions cannot be observed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Authenticated session hydration (cross-origin 307 CORS block)",
+        "issue": "App served from INTERNAL host, REACT_APP_BACKEND_URL points at PUBLIC host. All /api/* XHRs are cross-origin, get 307-redirected back to INTERNAL, and the browser blocks the redirected response because the 307 carries ACAO:* (ingress-level, not FastAPI). Same root cause as iter15/iter16; the new ?access_token= query-param auth does not fix this because the browser stops the request on the redirect CORS check before any auth header/cookie/query is even considered. Console repeats: 'Access to XMLHttpRequest at https://*.internal.*/api/auth/me?access_token=... (redirected from https://*.stage-preview.*/api/auth/me?access_token=...) has been blocked by CORS policy' and 'Failed to fetch capabilities: AxiosError: Network Error'.",
+        "affected_selectors": ["[data-testid=user-menu-trigger]", "[data-testid=user-menu-name]", "[data-testid=user-menu-logout]", "[data-testid=login-google-btn] (logout-redirect assertion)"]
+      },
+      {
+        "flow": "created_by injection on /api/eval/jobs*, /api/eval/groups/*/jobs*, /api/eval/scheduled-batches*",
+        "issue": "Could not be observed in the browser because the app never hydrates an authenticated user, so /evals and /schedules never render and never fire their API calls. Static code read (apiHelpers.attachOwnership + evalApi matchers /\\/jobs(\\/|$)/ and /\\/groups\\/[^/]+\\/jobs(\\/|$)/, schedulesApi matcher /\\/scheduled-batches(\\/|$)/) looks correct, and excluded endpoints (datasets / cortex / stats / health) are correctly excluded by omission.",
+        "affected_selectors": []
+      },
+      {
+        "flow": "Datasets regression (no created_by leakage)",
+        "issue": "Could not observe any /api/eval/datasets, /api/eval/cortex/agents/exists, /api/eval/stats, /api/eval/health requests because the page redirects to /login. Regression assertion unverified at the browser layer. Code read shows no interceptor attaches created_by to these paths.",
+        "affected_selectors": []
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_auth.py", "/app/test_reports/pytest/pytest_iter17.xml"],
+  "action_items": [
+    "CRITICAL (unchanged from iter15/iter16): Make the frontend call the same origin it is served from. Two viable options: (1) set REACT_APP_BACKEND_URL to an empty string and have axios use window.location.origin + '/api' (same-origin, zero CORS surface), OR (2) set REACT_APP_BACKEND_URL to https://youthful-haibt-1.internal.stage-preview.emergentagent.com (the real serving host on this preview). Either eliminates the 307 trampoline entirely. The query-param access_token work is a valid auth hardening but it does not and cannot fix a cross-origin redirect CORS block — that is browser-spec behavior.",
+    "Alternatively, infra-side: the 307 response at the public host must emit 'Access-Control-Allow-Origin: <request-origin>' instead of '*'. Today it emits '*', which is always rejected for cross-origin redirected XHR regardless of credentials mode.",
+    "Recommend AuthContext.js set axios.defaults.withCredentials=false (or per-instance) now that cookies are no longer the auth carrier — not strictly required for the current failure but reduces confusion and lets ACAO:* responses through if ever received directly.",
+    "Once the origin mismatch is fixed, re-run: (a) inject 'acm_session_token'='pw_test_1034c53aab0f4e8d94e9ff3a692f9da5' via localStorage, navigate /, assert [data-testid=user-menu-trigger] + [data-testid=user-menu-name]; (b) click [data-testid=user-menu-logout] -> /login + [data-testid=login-google-btn] + storage cleared; (c) /evals + /schedules: intercept requests and assert created_by=0ee59a27-db9c-4647-aeee-f72173fcd757 appears as query param on GET/DELETE and in JSON body on POST/PUT/PATCH for /jobs*, /groups/*/jobs*, /scheduled-batches*; (d) /datasets: assert created_by is ABSENT from /datasets, /cortex/agents/exists, /stats, /health."
+  ],
+  "critical_code_review_comments": [
+    "Browser-level evidence captured during this iteration: axios baseURL resolves to the public host (https://youthful-haibt-1.stage-preview.emergentagent.com) and every request logs 'redirected from <public>.../api/... to <internal>.../api/...' with CORS-policy block. This proves the origin mismatch is still live even after the query-param auth refactor.",
+    "The 307 redirect responses seen in this preview environment always emit ACAO:*, which browsers reject for ANY cross-origin redirected XHR carrying credentials mode 'include', and also reject cross-origin redirects with differing origin chains in many cases. The ONLY robust fix is same-origin — see action items.",
+    "server.py auth logic is correct (3-way: cookie / Bearer / ?access_token=). _get_session_user acceptance of the three sources is verified by a successful curl to /api/auth/me?access_token=... returning the seeded user JSON.",
+    "apiHelpers.attachOwnership + evalApi matchers + schedulesApi matcher look correct by code read; scope is limited to /jobs, /groups/:id/jobs, /scheduled-batches; datasets / cortex / stats / health are untouched. Cannot validate end-to-end because page never hydrates an authenticated user.",
+    "AuthContext.js should drop withCredentials:true now that cookies aren't the primary carrier — not the blocker, but cleanup.",
+    "server.py still ~1100+ lines; split auth, agents, eval proxy into modules (carry-over from iter15 review)."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (6/6 pytest test_auth.py pass; curl -L against /api/auth/me?access_token= returns expected user JSON)",
+    "frontend": "Unauthenticated /login rendering and / -> /login redirect: PASS. Authenticated UserMenu hydration, logout flow, /evals + /schedules created_by injection, /datasets regression: UNVERIFIED — all blocked by cross-origin 307 CORS on XHR. Same blocker as iter15/iter16, different layer (now also affects query-param auth because the block happens before auth)."
+  },
+  "test_credentials": "Seeded session reused: localStorage 'acm_session_token' = 'pw_test_1034c53aab0f4e8d94e9ff3a692f9da5' ; user_id = 0ee59a27-db9c-4647-aeee-f72173fcd757. Confirmed still valid via direct curl.",
+  "seed_data_creation": "None this iteration. Existing seed row in user_sessions/users (TEST_pw_user@example.com) reused.",
+  "retest_needed": true,
+  "main_agent_can_self_test": false,
+  "context_for_next_testing_agent": "Do not retest until the frontend/backend origin mismatch is resolved. Easiest verification on next iter: after the fix, open DevTools Network tab on / and confirm /api/auth/me has no 'redirected from' annotation (i.e. it is same-origin). Then run the same Playwright script from iter17: localStorage.setItem('acm_session_token','pw_test_1034c53aab0f4e8d94e9ff3a692f9da5'); goto /; assert user-menu; logout; goto /evals + /schedules and intercept requests for created_by=0ee59a27-db9c-4647-aeee-f72173fcd757 on /jobs*, /groups/*/jobs*, /scheduled-batches*; goto /datasets and assert created_by is absent on /datasets, /cortex/agents/exists, /stats, /health. Seeded token remains valid for 7 days from 2026-04-30.",
+  "rca of the issue": "ROOT CAUSE (persistent across iter15, iter16, iter17): The Emergent preview infra serves the SPA from https://youthful-haibt-1.internal.stage-preview.emergentagent.com but the app's REACT_APP_BACKEND_URL is pinned to the public host https://youthful-haibt-1.stage-preview.emergentagent.com. Every axios call is therefore cross-origin, and the public host issues an unconditional HTTP 307 back to the internal host with Access-Control-Allow-Origin: * injected at the Cloudflare/ingress layer (never reaches FastAPI CORSMiddleware). Browsers reject this for credentialed XHR and also refuse to follow cross-origin redirects whose CORS metadata doesn't permit the original origin — the 'redirected from' error visible in the console. The query-param access_token refactor in iter17 solves the server-side auth read but cannot affect the browser's redirect-CORS check, so the UI still never receives /api/auth/me successfully, never sets user, and ProtectedRoute always redirects to /login. REPRODUCTION: (a) open preview URL https://youthful-haibt-1.stage-preview.emergentagent.com in a browser; (b) it 307s to internal host; (c) localStorage.setItem('acm_session_token', 'pw_test_1034c53aab0f4e8d94e9ff3a692f9da5'); (d) reload — DevTools shows 'Access to XMLHttpRequest at https://*.internal*/api/auth/me?access_token=... (redirected from https://*.stage-preview*/api/auth/me?access_token=...) has been blocked by CORS policy: No Access-Control-Allow-Origin header is present on the requested resource'. curl -L with the same token succeeds because curl does not enforce CORS. MITIGATION (application-level, strongly preferred): set REACT_APP_BACKEND_URL to '' (empty string, use relative '/api') or to the internal host. MITIGATION (infra-level): make the 307 at the public host echo the Origin header in ACAO and emit ACA-Credentials:true."
+}

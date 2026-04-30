@@ -38,13 +38,21 @@ SESSION_TTL_DAYS = 7
 
 
 async def _get_session_user(request: Request) -> Optional[Dict[str, Any]]:
-    """Resolve current user from session_token cookie OR Authorization header.
-    Returns a user dict (without _id) or None."""
+    """Resolve current user from (in priority order): session_token cookie,
+    Authorization: Bearer header, or ?access_token= query param.
+    Returns a user dict (without _id) or None.
+
+    The query-param fallback exists because the preview infra 307-redirects
+    api traffic to an internal subdomain, and browsers strip the Authorization
+    header on cross-origin redirects. Query params survive the redirect.
+    """
     token = request.cookies.get("session_token")
     if not token:
         auth_header = request.headers.get("authorization") or ""
         if auth_header.lower().startswith("bearer "):
             token = auth_header.split(" ", 1)[1].strip()
+    if not token:
+        token = request.query_params.get("access_token")
     if not token:
         return None
     session_doc = await db.user_sessions.find_one(
@@ -113,6 +121,9 @@ async def auth_session(body: AuthSessionRequest, response: Response):
         "created_at": datetime.now(timezone.utc),
     })
 
+    # Keep cookie for same-origin / first-party deployments; the frontend
+    # primarily authenticates via Authorization: Bearer to avoid cross-origin
+    # withCredentials preflight on Emergent's public->internal 307 trampoline.
     response.set_cookie(
         key="session_token",
         value=session_token,
@@ -128,6 +139,7 @@ async def auth_session(body: AuthSessionRequest, response: Response):
         "email": email,
         "name": data.get("name", ""),
         "picture": data.get("picture", ""),
+        "session_token": session_token,
     }
 
 
@@ -141,7 +153,14 @@ async def auth_me(request: Request):
 
 @api_router.post("/auth/logout")
 async def auth_logout(request: Request, response: Response):
+    # Accept token from cookie, Authorization: Bearer header, or ?access_token.
     token = request.cookies.get("session_token")
+    if not token:
+        auth_header = request.headers.get("authorization") or ""
+        if auth_header.lower().startswith("bearer "):
+            token = auth_header.split(" ", 1)[1].strip()
+    if not token:
+        token = request.query_params.get("access_token")
     if token:
         await db.user_sessions.delete_one({"session_token": token})
     response.delete_cookie("session_token", path="/", samesite="none", secure=True)
