@@ -1101,7 +1101,7 @@ app.include_router(api_router)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origin_regex=r"https?://([a-z0-9-]+\.)*emergentagent\.com$",
     allow_methods=["*"],
     allow_headers=["*"],
 )
