@@ -78,6 +78,26 @@ class AuthSessionRequest(BaseModel):
     session_id: str
 
 
+# Hardcoded user_id pins: if the authenticated email contains any of these
+# substrings (case-insensitive), the user row is forced to the given UUID and
+# any pre-existing user row/sessions for that email are migrated to it. This
+# keeps `created_by` stamps stable for specific operators across re-logins
+# and across environments where the email may have been seeded with a
+# different random UUID.
+PINNED_USER_IDS: list[tuple[str, str]] = [
+    ("parth", "62c4dfe4-b032-4e03-8c3f-9fb5ad090836"),
+    ("devi",  "01f477ee-0da0-4247-af41-a8dff6150681"),
+]
+
+
+def _pinned_user_id_for(email: str) -> Optional[str]:
+    e = (email or "").lower()
+    for substr, uid in PINNED_USER_IDS:
+        if substr in e:
+            return uid
+    return None
+
+
 @api_router.post("/auth/session")
 async def auth_session(body: AuthSessionRequest, response: Response):
     """Exchange a one-time Emergent session_id for a persistent session cookie."""
@@ -93,17 +113,30 @@ async def auth_session(body: AuthSessionRequest, response: Response):
     if not email:
         raise HTTPException(status_code=400, detail="Emergent auth missing email")
 
+    pinned = _pinned_user_id_for(email)
+
     # Upsert user (keyed by email so the same Google account = same row)
     existing = await db.users.find_one({"email": email}, {"_id": 0})
     if existing:
-        user_id = existing["user_id"]
+        user_id = pinned or existing["user_id"]
+        # If the pinned id differs from the currently stored id, migrate
+        # both the user row and any existing sessions so ownership stays
+        # consistent after the switch.
+        if pinned and existing["user_id"] != pinned:
+            await db.user_sessions.update_many(
+                {"user_id": existing["user_id"]},
+                {"$set": {"user_id": pinned}},
+            )
         await db.users.update_one(
-            {"user_id": user_id},
-            {"$set": {"name": data.get("name", existing.get("name", "")),
-                       "picture": data.get("picture", existing.get("picture", ""))}}
+            {"email": email},
+            {"$set": {
+                "user_id": user_id,
+                "name": data.get("name", existing.get("name", "")),
+                "picture": data.get("picture", existing.get("picture", "")),
+            }},
         )
     else:
-        user_id = str(uuid.uuid4())
+        user_id = pinned or str(uuid.uuid4())
         await db.users.insert_one({
             "user_id": user_id,
             "email": email,
