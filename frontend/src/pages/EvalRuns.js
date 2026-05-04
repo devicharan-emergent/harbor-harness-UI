@@ -9,6 +9,7 @@ import { Loader2, Clock, Cpu, CheckCircle, XCircle, Ban, ActivitySquare, Refresh
 import { formatDistanceToNow } from 'date-fns';
 import { Progress } from '@/components/ui/progress';
 import { RunEvalModal } from '@/components/evals/RunEvalModal';
+import { EvalFilterBar, EMPTY_FILTERS, buildJobFilter } from '@/components/evals/EvalFilterBar';
 
 const STATUS_CONFIG = {
   queued: { color: 'bg-amber-500', icon: Clock, label: 'Queued' },
@@ -142,6 +143,7 @@ export default function EvalRuns() {
   const pageSize = 100;
   const [evalModalOpen, setEvalModalOpen] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState({});
+  const [filters, setFilters] = useState(EMPTY_FILTERS);
 
   // Expanded group detail jobs (from group API)
   const [groupDetailJobs, setGroupDetailJobs] = useState({});
@@ -176,9 +178,17 @@ export default function EvalRuns() {
   useEffect(() => { fetchJobs(); }, [fetchJobs]);
 
   // Group jobs by group_run_id (falling back to legacy group_id for compatibility)
+  // Filter first — groups with zero matching jobs disappear entirely.
+  const filterPredicate = useMemo(() => buildJobFilter(filters), [filters]);
+
+  const filteredJobs = useMemo(
+    () => jobs.filter(filterPredicate),
+    [jobs, filterPredicate],
+  );
+
   const groups = useMemo(() => {
     const map = {};
-    for (const job of jobs) {
+    for (const job of filteredJobs) {
       const gid =
         job.group_run_id ||
         job.group_id ||
@@ -195,7 +205,7 @@ export default function EvalRuns() {
     }
     // Sort groups by latest created descending
     return Object.values(map).sort((a, b) => new Date(b.latestCreated) - new Date(a.latestCreated));
-  }, [jobs]);
+  }, [filteredJobs]);
 
   const toggleGroup = async (groupId) => {
     const isOpen = expandedGroups[groupId];
@@ -226,7 +236,12 @@ export default function EvalRuns() {
 
   const getGroupJobs = (group) => {
     if (group.groupId === '_ungrouped') return group.jobs;
-    return groupDetailJobs[group.groupId] || group.jobs;
+    // When expanded we fetch the full per-group job list (may include jobs
+    // not in the current page). Apply the same filter so expanded content
+    // respects what the user is narrowing on.
+    const detail = groupDetailJobs[group.groupId];
+    if (!detail) return group.jobs;
+    return detail.filter(filterPredicate);
   };
 
   // Unique agents in a group
@@ -311,6 +326,9 @@ export default function EvalRuns() {
         ))}
       </div>
 
+      {/* Advanced filters (batch / agent / prompt / date range) */}
+      <EvalFilterBar value={filters} onChange={setFilters} />
+
       {/* Groups */}
       {loading ? (
         <div className="flex items-center justify-center py-16">
@@ -318,7 +336,9 @@ export default function EvalRuns() {
         </div>
       ) : groups.length === 0 ? (
         <Card>
-          <CardContent className="py-16 text-center text-sm text-muted-foreground">No eval runs found</CardContent>
+          <CardContent className="py-16 text-center text-sm text-muted-foreground">
+            {jobs.length > 0 ? 'No eval runs match the current filters' : 'No eval runs found'}
+          </CardContent>
         </Card>
       ) : (
         <div className="space-y-2">

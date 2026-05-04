@@ -1,0 +1,31 @@
+{
+  "summary": "Frontend-only Playwright test of new /evals filter bar (EvalFilterBar + EvalRuns integration). Mocked listEvalJobs / stats / groups-jobs / aggregate with 4 fixture jobs across 3 groups (batch-alpha-001, batch-beta-002, batch-gamma-003) to exercise every filter dimension end-to-end. All 11 scripted assertions passed.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/evals expanded group", "issues": ["React warning: 'Collapsible is changing from uncontrolled to controlled'. Fires when expandedGroups[groupId] first flips to true (undefined → true). Cosmetic only but should be fixed by initialising open={!!expandedGroups[group.groupId]} (already correct since !!undefined===false) or by seeding expandedGroups with explicit false values. Low priority."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "(optional, low priority) silence Radix Collapsible controlled/uncontrolled warning by coercing `open` to a boolean on first render (e.g. open={Boolean(expandedGroups[group.groupId])})."
+  ],
+  "critical_code_review_comments": [
+    "buildJobFilter correctly treats each filled-in field as an INDEPENDENT predicate and combines via AND/OR based on filters.mode — verified in UI with agent=full_stack + prompt=login_fix (AND → empty, OR → alpha+beta).",
+    "Date range is inclusive with from=00:00 and to=23:59 (validated: range 2026-04-21..2026-04-23 correctly isolates the 2026-04-22 job in batch-beta-002).",
+    "getGroupJobs() applies the same predicate to fetched per-group detail jobs → expanded view stays consistent with top-level filter (validated: with prompt=auth_fix, alpha-001 shows only the auth_fix row, not the hello_world row).",
+    "Empty-state copy branches correctly on jobs.length (shows 'No eval runs match the current filters' when filters are active, 'No eval runs found' otherwise).",
+    "Active chips render only for set filters; X on an individual chip clears just that filter; filter-reset-btn clears all.",
+    "Status stat cards remain independent of the new filter bar (clicking stat-card-failed re-fetches with status=failed without touching `filters` state)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A", "frontend": "100% (11/11 assertions)"},
+  "test_credentials": "localStorage acm_session_token=pw_iter19_20260430 (user 0ee59a27-db9c-4647-aeee-f72173fcd757). Still valid.",
+  "seed_data_creation": "No DB seeding — harness-eval jobs for the test user are empty in this preview, so jobs/stats/groups/aggregate endpoints were mocked via Playwright route-interception with 4 synthetic jobs across 3 groups. This is the pattern explicitly allowed by the review_request's agent_to_agent_context_note.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "The /evals page now hosts a client-side EvalFilterBar (batch / agent / prompt / date-range + AND|OR toggle + chips + reset). Filters are applied both to the flat jobs list (feeds the groups memo) and to the per-group expanded job rows. Pagination and status stat cards are untouched. For future tests that need harness data, either seed via POST /api/eval/jobs (submitEvalJobs) or reuse the Playwright route mock pattern in the iteration 20 test script.",
+  "rca of the issue": "N/A — feature-addition testing only, no bugs found."
+}
