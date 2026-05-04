@@ -40,8 +40,9 @@ Build an Agent Configuration Manager (ACM) for managing AI agent configurations,
 - [x] Run-Evaluation 3-step wizard with `agent_name` free-text + existence check via `/cortex/agents/exists`
 - [x] Bug-bench image_available indicator (green/red dot)
 - [x] **Google Authentication** (Feb 2026) — Emergent-managed OAuth, login page, protected routes, user menu with logout
-- [x] **Per-user ownership** (Feb 2026) — `created_by` UUID threaded through every relevant request via centralised axios interceptor (`src/services/apiHelpers.js`)
+- [x] **Per-user ownership** (Feb 2026) — `created_by` UUID threaded through every relevant request via centralised axios interceptor (`src/services/apiHelpers.js`) and backend proxy pass-through
 - [x] **Runtime same-origin API baseURL** (Feb 2026) — `src/services/apiBase.js::getApiBaseURL()` falls back to `window.location.origin` when the served page origin differs from `REACT_APP_BACKEND_URL`, avoiding the preview 307 cross-origin trampoline.
+- [x] **EvalRuns filter bar** (Feb 2026) — batch-name search + independent agent / prompt / date-range filters with AND/OR combine toggle, active-filter chips, clear-all, and empty-state copy (`src/components/evals/EvalFilterBar.js`).
 
 ## Testing Status (Iteration 19 – Feb 2026)
 - Backend: 6/6 auth + **11/11 created_by pass-through** tests pass (`/app/backend/tests/test_created_by_passthrough.py`)

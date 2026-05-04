@@ -350,7 +350,7 @@ export default function EvalRuns() {
             const isUngrouped = group.groupId === '_ungrouped';
 
             return (
-              <Collapsible key={group.groupId} open={isOpen} onOpenChange={() => toggleGroup(group.groupId)}>
+              <Collapsible key={group.groupId} open={Boolean(isOpen)} onOpenChange={() => toggleGroup(group.groupId)}>
                 <CollapsibleTrigger asChild>
                   <Card className="cursor-pointer hover:bg-accent/30 transition-colors" data-testid={`group-${group.groupId}`}>
                     <CardContent className="p-4">
