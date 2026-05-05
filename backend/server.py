@@ -679,11 +679,6 @@ async def proxy_dataset_by_name(name: str):
 async def proxy_create_dataset(body: dict):
     """Proxy: Create a new dataset"""
     try:
-        # Harness requires problem_set_ids to be non-null (NOT NULL constraint).
-        # Default to an empty object so every create succeeds without the
-        # frontend having to know about this field.
-        if body.get("problem_set_ids") is None:
-            body["problem_set_ids"] = {}
         async with httpx.AsyncClient(timeout=30.0) as hclient:
             response = await hclient.post(f"{EVAL_API_BASE}/api/v1/datasets", json=body)
             if response.status_code >= 400:
@@ -707,7 +702,6 @@ async def proxy_create_dataset(body: dict):
                         "attributes": body.get("attributes", {}),
                         "description": body.get("description", ""),
                         "tags": body.get("tags", []),
-                        "problem_set_ids": body.get("problem_set_ids") or {},
                     }
                     update_resp = await hclient.put(
                         f"{EVAL_API_BASE}/api/v1/datasets/{ds_id}", json=update_body
