@@ -10,9 +10,10 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Loader2, Search, Plus, Pencil, Trash2, FileText, RefreshCw, Database, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Loader2, Search, Plus, Pencil, Trash2, RefreshCw, Database, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { DatasetEditorModal } from '@/components/evals/DatasetEditorModal';
+import { DatasetPreviewModal } from '@/components/evals/DatasetPreviewModal';
 import { parseApiError } from '@/lib/errorUtils';
 
 const DATASET_TYPES = [
@@ -44,8 +45,9 @@ export default function DatasetsPage() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
-  // Detail preview
+  // Detail preview (modal)
   const [previewDataset, setPreviewDataset] = useState(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [loadingPreview, setLoadingPreview] = useState(false);
 
   const fetchDatasets = useCallback(async () => {
@@ -116,14 +118,13 @@ export default function DatasetsPage() {
   };
 
   const handlePreview = async (ds) => {
-    if (previewDataset?.id === ds.id) {
-      setPreviewDataset(null);
-      return;
-    }
+    // Open modal immediately with whatever we have; fill in async details if missing.
+    setPreviewOpen(true);
     if (ds.problem_statement) {
       setPreviewDataset(ds);
       return;
     }
+    setPreviewDataset(null);
     setLoadingPreview(true);
     try {
       const full = await getDatasetInstance(ds.dataset_type, ds.instance_id);
@@ -133,6 +134,12 @@ export default function DatasetsPage() {
     } finally {
       setLoadingPreview(false);
     }
+  };
+
+  const closePreview = () => {
+    setPreviewOpen(false);
+    // Clear after the dialog animates out so we don't flash a different dataset.
+    setTimeout(() => setPreviewDataset(null), 200);
   };
 
   const truncateText = (text, maxLen = 120) => {
@@ -191,226 +198,151 @@ export default function DatasetsPage() {
         </div>
       </div>
 
-      {/* Content: Table + Optional Preview */}
-      <div className={`grid gap-4 ${previewDataset ? 'grid-cols-1 lg:grid-cols-[1fr_380px]' : 'grid-cols-1'}`}>
-        {/* Table */}
-        <Card>
-          <CardContent className="pt-4">
-            {loading ? (
-              <div className="flex items-center justify-center py-16">
-                <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-              </div>
-            ) : filteredDatasets.length === 0 ? (
-              <div className="text-center py-16">
-                <Database className="w-10 h-10 mx-auto mb-3 text-muted-foreground/30" />
-                <p className="text-sm text-muted-foreground">No datasets found</p>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="mt-4"
-                  onClick={() => { setEditingDataset(null); setEditorOpen(true); }}
-                  data-testid="empty-new-dataset-btn"
-                >
-                  <Plus className="w-3.5 h-3.5 mr-1.5" />
-                  Create your first dataset
-                </Button>
-              </div>
-            ) : (
-              <>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="text-xs">Name / Instance</TableHead>
-                      <TableHead className="text-xs">Type</TableHead>
-                      <TableHead className="text-xs">Version</TableHead>
-                      <TableHead className="text-xs">Description</TableHead>
-                      <TableHead className="text-xs w-[100px]">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredDatasets.map(ds => (
-                      <TableRow
-                        key={ds.id || ds.name}
-                        className={`cursor-pointer hover:bg-accent/50 transition-colors ${previewDataset?.id === ds.id ? 'bg-accent/30' : ''}`}
-                        onClick={() => handlePreview(ds)}
-                        data-testid={`dataset-row-${ds.instance_id || ds.id}`}
-                      >
-                        <TableCell className="max-w-[300px]">
-                          <div className="font-mono text-xs font-medium truncate">{ds.name || `${ds.dataset_type}/${ds.instance_id}`}</div>
-                          <div className="text-[10px] text-muted-foreground/60 font-mono mt-0.5">{ds.id}</div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            variant="outline"
-                            className={`text-[10px] font-mono ${TYPE_BADGE_COLORS[ds.dataset_type] || ''}`}
-                          >
-                            {ds.dataset_type}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-xs font-mono">v{ds.version ?? '—'}</span>
-                        </TableCell>
-                        <TableCell className="max-w-[250px]">
-                          <span className="text-xs text-muted-foreground truncate block">
-                            {truncateText(ds.description, 80) || '—'}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-                            <TooltipProvider>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-7 w-7"
-                                    onClick={() => handleEdit(ds)}
-                                    data-testid={`edit-dataset-${ds.instance_id || ds.id}`}
-                                  >
-                                    <Pencil className="w-3.5 h-3.5" />
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>Edit</TooltipContent>
-                              </Tooltip>
-                            </TooltipProvider>
-                            <TooltipProvider>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-7 w-7 text-destructive hover:text-destructive"
-                                    onClick={() => setDeleteTarget(ds)}
-                                    data-testid={`delete-dataset-${ds.instance_id || ds.id}`}
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>Delete</TooltipContent>
-                              </Tooltip>
-                            </TooltipProvider>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-
-                {/* Pagination */}
-                <div className="flex items-center justify-between mt-4 pt-4 border-t">
-                  <p className="text-xs text-muted-foreground">
-                    Showing {filteredDatasets.length} dataset{filteredDatasets.length !== 1 ? 's' : ''} (Page {page + 1})
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPage(p => Math.max(0, p - 1))}
-                      disabled={page === 0}
-                      className="h-7 text-xs"
-                      data-testid="datasets-prev-page"
+      {/* Content: Table */}
+      <Card>
+        <CardContent className="pt-4">
+          {loading ? (
+            <div className="flex items-center justify-center py-16">
+              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : filteredDatasets.length === 0 ? (
+            <div className="text-center py-16">
+              <Database className="w-10 h-10 mx-auto mb-3 text-muted-foreground/30" />
+              <p className="text-sm text-muted-foreground">No datasets found</p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-4"
+                onClick={() => { setEditingDataset(null); setEditorOpen(true); }}
+                data-testid="empty-new-dataset-btn"
+              >
+                <Plus className="w-3.5 h-3.5 mr-1.5" />
+                Create your first dataset
+              </Button>
+            </div>
+          ) : (
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-xs">Name / Instance</TableHead>
+                    <TableHead className="text-xs">Type</TableHead>
+                    <TableHead className="text-xs">Version</TableHead>
+                    <TableHead className="text-xs">Description</TableHead>
+                    <TableHead className="text-xs w-[100px]">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredDatasets.map(ds => (
+                    <TableRow
+                      key={ds.id || ds.name}
+                      className="cursor-pointer hover:bg-accent/50 transition-colors"
+                      onClick={() => handlePreview(ds)}
+                      data-testid={`dataset-row-${ds.instance_id || ds.id}`}
                     >
-                      <ChevronLeft className="w-3.5 h-3.5 mr-1" />
-                      Previous
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPage(p => p + 1)}
-                      disabled={datasets.length < pageSize}
-                      className="h-7 text-xs"
-                      data-testid="datasets-next-page"
-                    >
-                      Next
-                      <ChevronRight className="w-3.5 h-3.5 ml-1" />
-                    </Button>
-                  </div>
-                </div>
-              </>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Preview Panel */}
-        {previewDataset && (
-          <Card className="h-fit lg:sticky lg:top-6">
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm flex items-center gap-2">
-                  <FileText className="w-4 h-4" />
-                  Preview
-                </CardTitle>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6"
-                  onClick={() => setPreviewDataset(null)}
-                  data-testid="close-preview-btn"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <ScrollArea className="h-[500px]">
-                <div className="space-y-3 pr-4">
-                  <div>
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Name</p>
-                    <p className="font-mono text-xs font-medium mt-0.5">{previewDataset.name}</p>
-                  </div>
-                  <div>
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Type</p>
-                    <Badge variant="outline" className={`text-[10px] font-mono mt-0.5 ${TYPE_BADGE_COLORS[previewDataset.dataset_type] || ''}`}>
-                      {previewDataset.dataset_type}
-                    </Badge>
-                  </div>
-                  {previewDataset.description && (
-                    <div>
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Description</p>
-                      <p className="text-xs mt-0.5">{previewDataset.description}</p>
-                    </div>
-                  )}
-                  <Separator />
-                  {previewDataset.problem_statement ? (
-                    <div>
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Problem Statement</p>
-                      <pre className="text-xs font-mono whitespace-pre-wrap break-words text-foreground/80 leading-relaxed mt-1 max-h-[200px] overflow-y-auto" data-testid="preview-problem-statement">
-                        {previewDataset.problem_statement}
-                      </pre>
-                    </div>
-                  ) : (
-                    <p className="text-xs text-muted-foreground italic">No problem statement</p>
-                  )}
-                  {previewDataset.natural_language_tests && (
-                    <>
-                      <Separator />
-                      <div>
-                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Test Cases</p>
-                        <pre className="text-xs font-mono whitespace-pre-wrap break-words text-foreground/60 leading-relaxed mt-1 max-h-[150px] overflow-y-auto">
-                          {previewDataset.natural_language_tests}
-                        </pre>
-                      </div>
-                    </>
-                  )}
-                  {previewDataset.tags?.length > 0 && (
-                    <>
-                      <Separator />
-                      <div>
-                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Tags</p>
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {previewDataset.tags.map(tag => (
-                            <Badge key={tag} variant="outline" className="text-[9px]">{tag}</Badge>
-                          ))}
+                      <TableCell className="max-w-[300px]">
+                        <div className="font-mono text-xs font-medium truncate">{ds.name || `${ds.dataset_type}/${ds.instance_id}`}</div>
+                        <div className="text-[10px] text-muted-foreground/60 font-mono mt-0.5">{ds.id}</div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant="outline"
+                          className={`text-[10px] font-mono ${TYPE_BADGE_COLORS[ds.dataset_type] || ''}`}
+                        >
+                          {ds.dataset_type}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-xs font-mono">v{ds.version ?? '—'}</span>
+                      </TableCell>
+                      <TableCell className="max-w-[250px]">
+                        <span className="text-xs text-muted-foreground truncate block">
+                          {truncateText(ds.description, 80) || '—'}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7"
+                                  onClick={() => handleEdit(ds)}
+                                  data-testid={`edit-dataset-${ds.instance_id || ds.id}`}
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Edit</TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7 text-destructive hover:text-destructive"
+                                  onClick={() => setDeleteTarget(ds)}
+                                  data-testid={`delete-dataset-${ds.instance_id || ds.id}`}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Delete</TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
                         </div>
-                      </div>
-                    </>
-                  )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+
+              {/* Pagination */}
+              <div className="flex items-center justify-between mt-4 pt-4 border-t">
+                <p className="text-xs text-muted-foreground">
+                  Showing {filteredDatasets.length} dataset{filteredDatasets.length !== 1 ? 's' : ''} (Page {page + 1})
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage(p => Math.max(0, p - 1))}
+                    disabled={page === 0}
+                    className="h-7 text-xs"
+                    data-testid="datasets-prev-page"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5 mr-1" />
+                    Previous
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage(p => p + 1)}
+                    disabled={datasets.length < pageSize}
+                    className="h-7 text-xs"
+                    data-testid="datasets-next-page"
+                  >
+                    Next
+                    <ChevronRight className="w-3.5 h-3.5 ml-1" />
+                  </Button>
                 </div>
-              </ScrollArea>
-            </CardContent>
-          </Card>
-        )}
-      </div>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Preview Modal */}
+      <DatasetPreviewModal
+        open={previewOpen}
+        onClose={closePreview}
+        dataset={previewDataset}
+        loading={loadingPreview}
+      />
 
       {/* Editor Modal */}
       <DatasetEditorModal

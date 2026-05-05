@@ -98,7 +98,7 @@ function decodeEntities(s) {
 
 // Best-effort parse. Returns an array of inner-text-of-phase strings.
 // Accepts both `<phase>` and `<phase name="...">` forms.
-function parseProblemPhases(xml) {
+export function parseProblemPhases(xml) {
   if (!xml || typeof xml !== 'string') return [];
   const regex = /<phase\b[^>]*>([\s\S]*?)<\/phase>/gi;
   const out = [];
@@ -111,7 +111,7 @@ function parseProblemPhases(xml) {
 
 // Parse natural_language_tests into an array of arrays of test case strings.
 // One outer entry per phase; inner array contains each <test_case> body.
-function parseTestsPhases(xml) {
+export function parseTestsPhases(xml) {
   if (!xml || typeof xml !== 'string') return [];
   const phaseRe = /<phase\b[^>]*>([\s\S]*?)<\/phase>/gi;
   const testRe = /<test_case\b[^>]*>([\s\S]*?)<\/test_case>/gi;
