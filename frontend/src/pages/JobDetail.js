@@ -124,9 +124,8 @@ export default function JobDetail() {
   // Scores at top level per API docs
   const browserReward = job.browser_reward;
   const lintiqScore = job.lintiq_score;
-  const lintScore = job.lint_score;
   const combinedReward = job.combined_reward;
-  const hasScores = browserReward !== undefined || lintiqScore !== undefined || lintScore !== undefined || combinedReward !== undefined;
+  const hasScores = browserReward !== undefined || lintiqScore !== undefined || combinedReward !== undefined;
   const phaseResults = job.phase_results || [];
 
   return (
@@ -441,15 +440,6 @@ export default function JobDetail() {
                     <Progress value={Number(lintiqScore) * 100} className="h-2" />
                   </div>
                 )}
-                {lintScore !== undefined && lintScore !== null && (
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs font-medium">Lint Score</span>
-                      <span className="text-xs font-mono">{Number(lintScore).toFixed(3)}</span>
-                    </div>
-                    <Progress value={Number(lintScore) * 100} className="h-2" />
-                  </div>
-                )}
                 {combinedReward !== undefined && combinedReward !== null && (
                   <div>
                     <div className="flex items-center justify-between mb-2">
@@ -547,7 +537,6 @@ export default function JobDetail() {
                     : null;
                   const matchedPhase = phaseResults.find(p => p.phase_index === pm.phase_index);
                   const phaseLintiq = matchedPhase?.lintiq_score;
-                  const phaseLint = matchedPhase?.lint_score;
                   return (
                   <div key={idx} className="space-y-3">
                     <div className="flex items-center justify-between">
@@ -556,11 +545,6 @@ export default function JobDetail() {
                         {phaseDuration != null && (
                           <Badge variant="outline" className="text-[10px] font-mono">
                             {phaseDuration < 60 ? `${phaseDuration.toFixed(0)}s` : `${Math.floor(phaseDuration / 60)}m ${Math.round(phaseDuration % 60)}s`}
-                          </Badge>
-                        )}
-                        {phaseLint != null && phaseLint < 1 && (
-                          <Badge variant={phaseLint >= 0.8 ? 'secondary' : 'destructive'} className="text-[9px] font-mono">
-                            Lint {(phaseLint * 100).toFixed(0)}%
                           </Badge>
                         )}
                         {phaseLintiq != null && (
@@ -665,15 +649,6 @@ export default function JobDetail() {
                               Browser {(phase.browser_reward * 100).toFixed(0)}%
                             </Badge>
                           )}
-                          {phase.lint_score != null && phase.lint_score < 1 && (
-                            <Badge
-                              variant={phase.lint_score >= 0.8 ? 'secondary' : 'destructive'}
-                              className="text-[9px] font-mono"
-                              data-testid={`phase-${phaseIdx}-lint`}
-                            >
-                              Lint {(phase.lint_score * 100).toFixed(0)}%
-                            </Badge>
-                          )}
                           {phase.lintiq_score != null && (
                             <Badge
                               variant={phase.lintiq_score >= 0.8 ? 'default' : phase.lintiq_score >= 0.5 ? 'secondary' : 'destructive'}
@@ -774,14 +749,9 @@ export default function JobDetail() {
                           {/* Header */}
                           <div className="flex items-center justify-between">
                             <span className="text-[11px] font-semibold text-red-700 dark:text-red-400">Lint Issues</span>
-                            <div className="flex items-center gap-2">
-                              <span className="text-[10px] font-mono text-muted-foreground">
-                                {phase.lint_report.summary?.files_with_errors} file{phase.lint_report.summary?.files_with_errors !== 1 ? 's' : ''} · {phase.lint_report.summary?.total_errors} error{phase.lint_report.summary?.total_errors !== 1 ? 's' : ''}
-                              </span>
-                              <span className={`text-[10px] font-mono font-medium ${phase.lint_report.overall_score >= 80 ? 'text-amber-500' : 'text-red-500'}`}>
-                                {phase.lint_report.overall_score}/100
-                              </span>
-                            </div>
+                            <span className="text-[10px] font-mono text-muted-foreground">
+                              {phase.lint_report.summary?.files_with_errors} file{phase.lint_report.summary?.files_with_errors !== 1 ? 's' : ''} · {phase.lint_report.summary?.total_errors} error{phase.lint_report.summary?.total_errors !== 1 ? 's' : ''}
+                            </span>
                           </div>
 
                           {/* Error breakdown badges */}
@@ -850,16 +820,7 @@ export default function JobDetail() {
           {job.eval_metrics?.lint_report && (
             <Card data-testid="lint-report-card">
               <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm">Custom Lint Report</CardTitle>
-                  <span className={`text-sm font-mono font-medium ${
-                    job.eval_metrics.lint_report.overall_score >= 80
-                      ? 'text-amber-500 dark:text-amber-400'
-                      : 'text-red-600 dark:text-red-400'
-                  }`}>
-                    {job.eval_metrics.lint_report.overall_score}/100
-                  </span>
-                </div>
+                <CardTitle className="text-sm">Custom Lint Report</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
 
