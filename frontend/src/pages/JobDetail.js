@@ -10,6 +10,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { toast } from 'sonner';
 import { ArrowLeft, Copy, XCircle, Loader2, CheckCircle, Clock, AlertTriangle, Cpu, ActivitySquare, Ban, FileText, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react';
 import { formatDistanceToNow, formatDuration, intervalToDuration } from 'date-fns';
+import { LintRuleBreakdown } from '@/components/evals/LintRuleBreakdown';
 
 const STATUS_ICONS = {
   queued: Clock,
@@ -754,16 +755,11 @@ export default function JobDetail() {
                             </span>
                           </div>
 
-                          {/* Error breakdown badges */}
-                          {phase.lint_report.summary?.error_breakdown && Object.keys(phase.lint_report.summary.error_breakdown).length > 0 && (
-                            <div className="flex flex-wrap gap-1.5">
-                              {Object.entries(phase.lint_report.summary.error_breakdown).map(([code, count]) => (
-                                <Badge key={code} variant="outline" className="text-[9px] font-mono border-red-400/40 text-red-600 dark:text-red-400 py-0">
-                                  {code} &times; {count}
-                                </Badge>
-                              ))}
-                            </div>
-                          )}
+                          {/* Error breakdown — split by severity, grouped by rule id */}
+                          <LintRuleBreakdown
+                            lintReport={phase.lint_report}
+                            testid={`phase-${phaseIdx}-lint-breakdown`}
+                          />
 
                           {/* Recommendations */}
                           {phase.lint_report.recommendations?.length > 0 && (
@@ -842,23 +838,20 @@ export default function JobDetail() {
                   </div>
                 )}
 
-                {/* Error Breakdown */}
-                {job.eval_metrics.lint_report.summary?.error_breakdown &&
-                  Object.keys(job.eval_metrics.lint_report.summary.error_breakdown).length > 0 && (
-                  <>
-                    <Separator />
-                    <div>
-                      <p className="text-xs font-medium mb-2">Error Breakdown</p>
-                      <div className="flex flex-wrap gap-2">
-                        {Object.entries(job.eval_metrics.lint_report.summary.error_breakdown).map(([code, count]) => (
-                          <Badge key={code} variant="outline" className="text-[10px] font-mono border-red-400/40 text-red-600 dark:text-red-400">
-                            {code} &times; {count}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  </>
-                )}
+                {/* Error breakdown — split by severity, grouped by rule id */}
+                {(() => {
+                  const hasAny = (job.eval_metrics.lint_report?.raw_output?.files || []).some((f) => (f.errors || []).length > 0);
+                  if (!hasAny) return null;
+                  return (
+                    <>
+                      <Separator />
+                      <LintRuleBreakdown
+                        lintReport={job.eval_metrics.lint_report}
+                        testid="lint-report-breakdown"
+                      />
+                    </>
+                  );
+                })()}
 
                 {/* Recommendations */}
                 {job.eval_metrics.lint_report.recommendations?.length > 0 && (
