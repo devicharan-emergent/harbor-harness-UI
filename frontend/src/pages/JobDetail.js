@@ -761,18 +761,6 @@ export default function JobDetail() {
                             testid={`phase-${phaseIdx}-lint-breakdown`}
                           />
 
-                          {/* Recommendations */}
-                          {phase.lint_report.recommendations?.length > 0 && (
-                            <div className="space-y-1">
-                              {phase.lint_report.recommendations.map((rec, rIdx) => (
-                                <div key={rIdx} className="flex items-start gap-1.5 text-[11px]">
-                                  <span className="mt-1 w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" />
-                                  <span className="text-foreground/70 leading-relaxed">{rec}</span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
                           {/* Files with errors */}
                           <div className="space-y-2">
                             {phase.lint_report.raw_output.files
@@ -852,24 +840,6 @@ export default function JobDetail() {
                     </>
                   );
                 })()}
-
-                {/* Recommendations */}
-                {job.eval_metrics.lint_report.recommendations?.length > 0 && (
-                  <>
-                    <Separator />
-                    <div>
-                      <p className="text-xs font-medium mb-2">Recommendations</p>
-                      <div className="space-y-2">
-                        {job.eval_metrics.lint_report.recommendations.map((rec, idx) => (
-                          <div key={idx} className="flex items-start gap-2 text-xs">
-                            <span className="mt-1 w-2 h-2 rounded-full flex-shrink-0 bg-red-500" />
-                            <span className="text-foreground/70">{rec}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </>
-                )}
 
                 {/* Files with Errors */}
                 {job.eval_metrics.lint_report.raw_output?.files?.some(f => f.error_count > 0) && (
