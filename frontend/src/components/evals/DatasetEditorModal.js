@@ -814,9 +814,8 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
         description: description,
         tags: tags,
         attributes: buildAttributes(),
-        // Harness requires a non-null problem_set_ids on the row; always
-        // send an empty object from the UI so it shows up in the payload.
-        problem_set_ids: {},
+        // Harness requires a non-null problem_set_ids on the row.
+        problem_set_ids: 'data-sets',
       };
 
       if (isEditing) {
