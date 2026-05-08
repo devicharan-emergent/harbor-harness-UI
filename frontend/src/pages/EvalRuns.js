@@ -159,23 +159,55 @@ export default function EvalRuns() {
     }
   }, []);
 
+  // True when any advanced filter is set. Batch-name search + agent + prompt
+  // + date-range all behave as "narrow across the whole dataset"; with normal
+  // server pagination the filter can only see the current page which looks
+  // broken when matches live on later pages. So we auto-fetch-all here.
+  const hasActiveFilter = useMemo(() => (
+    Boolean(
+      (filters.batch || '').trim() ||
+      (filters.agent || '').trim() ||
+      (filters.prompt || '').trim() ||
+      filters.dateFrom ||
+      filters.dateTo,
+    )
+  ), [filters]);
+
   const fetchJobs = useCallback(async () => {
     setLoading(true);
     try {
-      const params = { limit: pageSize, offset: page * pageSize };
-      if (selectedStatus !== 'all') params.status = selectedStatus;
-      const data = await listEvalJobs(params);
-      setJobs(data.jobs || []);
+      if (hasActiveFilter) {
+        // Exhaustive fetch (capped) so client-side filters see everything.
+        const all = [];
+        const MAX_JOBS = 2000; // safety cap — stops well before OOM
+        for (let offset = 0; offset < MAX_JOBS; offset += pageSize) {
+          const params = { limit: pageSize, offset };
+          if (selectedStatus !== 'all') params.status = selectedStatus;
+          // eslint-disable-next-line no-await-in-loop
+          const chunk = await listEvalJobs(params);
+          const jobsChunk = chunk.jobs || [];
+          all.push(...jobsChunk);
+          if (jobsChunk.length < pageSize) break;
+        }
+        setJobs(all);
+      } else {
+        const params = { limit: pageSize, offset: page * pageSize };
+        if (selectedStatus !== 'all') params.status = selectedStatus;
+        const data = await listEvalJobs(params);
+        setJobs(data.jobs || []);
+      }
     } catch (err) {
       console.error('Failed to fetch jobs:', err);
       setJobs([]);
     } finally {
       setLoading(false);
     }
-  }, [selectedStatus, page]);
+  }, [selectedStatus, page, hasActiveFilter]);
 
   useEffect(() => { fetchStats(); }, []);
   useEffect(() => { fetchJobs(); }, [fetchJobs]);
+  // When a filter toggles on, reset pagination so `page` never ends up stale.
+  useEffect(() => { if (hasActiveFilter) setPage(0); }, [hasActiveFilter]);
 
   // Group jobs by group_run_id (falling back to legacy group_id for compatibility)
   // Filter first — groups with zero matching jobs disappear entirely.
@@ -452,8 +484,8 @@ export default function EvalRuns() {
         </div>
       )}
 
-      {/* Pagination */}
-      {!loading && jobs.length >= pageSize && (
+      {/* Pagination — hidden while filters are active (we fetch-all then). */}
+      {!loading && !hasActiveFilter && jobs.length >= pageSize && (
         <div className="flex items-center justify-between">
           <p className="text-xs text-muted-foreground">Page {page + 1}</p>
           <div className="flex items-center gap-2">
