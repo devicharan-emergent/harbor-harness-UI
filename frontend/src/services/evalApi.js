@@ -15,7 +15,7 @@ const evalApiClient = axios.create({
 // Inject created_by into every eval-job + group-jobs request. Datasets,
 // cortex agent checks, stats, and health are shared resources and stay as-is.
 attachOwnership(evalApiClient, [
-  /\/jobs(\/|$)/,
+  /\/jobs(\/|$|-with-es$)/,
   /\/groups\/[^/]+\/jobs(\/|$)/,
 ]);
 
@@ -29,6 +29,18 @@ attachOwnership(evalApiClient, [
  */
 export const submitEvalJobs = async (payload) => {
   const response = await evalApiClient.post('/jobs', payload);
+  return response.data;
+};
+
+/**
+ * Submit evals via the eph-aware variant. When `payload.eph_name` is set,
+ * the backend derives emergent_agents_url + per-eval cortex_url from it and
+ * re-runs readiness preflight server-side. Falls back to explicit-URL
+ * behavior when eph_name is absent (back-compat).
+ * POST /api/eval/jobs-with-es  →  harness /api/v1/internal/evals-with-es
+ */
+export const submitEvalJobsWithEs = async (payload) => {
+  const response = await evalApiClient.post('/jobs-with-es', payload, { skipOwnership: false });
   return response.data;
 };
 

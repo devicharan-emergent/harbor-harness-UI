@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,11 +11,12 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
-import { listDatasets, listDatasetsByType, getDatasetForProblem, submitEvalJobs, checkAgentExists } from '@/services/evalApi';
+import { listDatasets, listDatasetsByType, getDatasetForProblem, submitEvalJobs, submitEvalJobsWithEs, checkAgentExists } from '@/services/evalApi';
 import { toast } from 'sonner';
 import { Loader2, Rocket, FileText, Search, ChevronRight, Check, AlertCircle, X } from 'lucide-react';
 import { parseApiError } from '@/lib/errorUtils';
 import { useEnv } from '@/components/layout/EnvSwitcher';
+import { EphPicker } from '@/components/cortex/EphPicker';
 
 const DATASET_TYPES = [
   { value: 'all', label: 'All Types' },
@@ -250,6 +251,15 @@ export function RunEvalModal({ open, onClose }) {
   const [expModelName, setExpModelName] = useState('');
   const [expCortexUrl, setExpCortexUrl] = useState('');
 
+  // Eph-driven submission. When an eph is selected the backend derives
+  // emergent_agents_url + per-eval cortex_url server-side and re-runs
+  // readiness preflight. Free-text cortex_url stays behind ?advanced=1 only.
+  const [searchParams] = useSearchParams();
+  const advancedMode = useMemo(() => searchParams.get('advanced') === '1', [searchParams]);
+  const [submitEph, setSubmitEph] = useState('');
+  // null = not yet probed; otherwise the readiness object from the API.
+  const [submitEphReadiness, setSubmitEphReadiness] = useState(null);
+
   // Template
   const [templateName, setTemplateName] = useState('');
 
@@ -405,7 +415,9 @@ export function RunEvalModal({ open, onClose }) {
         if (showExpConfig) {
           if (expImage) experiments.image = expImage;
           if (expModelName) experiments.model_name = expModelName;
-          if (expCortexUrl) experiments.cortex_url = expCortexUrl;
+          // cortex_url only flows through in advanced mode AND when there's no
+          // eph selected — eph-driven submission derives URLs server-side.
+          if (advancedMode && !submitEph && expCortexUrl) experiments.cortex_url = expCortexUrl;
         }
         if (breakpointEnabled && breakpointMins > 0) {
           experiments.breakpoint_duration_mins = breakpointMins;
@@ -424,7 +436,13 @@ export function RunEvalModal({ open, onClose }) {
 
       const payload = { user_id: userId, group_run_id: groupRunId, evals };
       if (trimmedOverride) payload.agent_name = trimmedOverride;
-      const result = await submitEvalJobs(payload);
+      if (submitEph) payload.eph_name = submitEph;
+
+      // Route through /jobs-with-es when an eph is set so the backend can
+      // derive emergent_agents_url + cortex_url and re-validate readiness.
+      const result = submitEph
+        ? await submitEvalJobsWithEs(payload)
+        : await submitEvalJobs(payload);
       const jobCount = result.jobs?.length || evals.length;
       toast.success(`Submitted ${jobCount} eval job(s)`);
       onClose();
@@ -623,6 +641,21 @@ export function RunEvalModal({ open, onClose }) {
           {/* ── Step 2: Configure ──────────────────────────────── */}
           {step === 2 && (
             <div className="space-y-4 py-2">
+              {/* Eph picker (replaces free-text URL — the whole point of this flow) */}
+              <div>
+                <Label className="text-sm font-semibold">Target eph *</Label>
+                <p className="text-[11px] text-muted-foreground mt-0.5 mb-2">
+                  Pick the ephemeral deployment to evaluate against. The backend derives
+                  emergent + cortex URLs from this name and gates submission on live
+                  service readiness — no URLs to paste, no silent rot.
+                </p>
+                <EphPicker
+                  value={submitEph}
+                  onChange={(name) => { setSubmitEph(name); setSubmitEphReadiness(null); }}
+                  onReadiness={setSubmitEphReadiness}
+                />
+              </div>
+
               {/* Group Run ID */}
               <div>
                 <Label className="text-sm font-semibold">Group Run ID *</Label>
@@ -784,10 +817,16 @@ export function RunEvalModal({ open, onClose }) {
                       <Label className="text-xs">Model Name</Label>
                       <Input value={expModelName} onChange={e => setExpModelName(e.target.value)} className="font-mono text-xs" placeholder="e.g. claude-sonnet-4.5" />
                     </div>
-                    <div>
-                      <Label className="text-xs">Cortex URL</Label>
-                      <Input value={expCortexUrl} onChange={e => setExpCortexUrl(e.target.value)} className="font-mono text-xs" placeholder="https://cortex-cli..." />
-                    </div>
+                    {advancedMode && (
+                      <div>
+                        <Label className="text-xs">Cortex URL (advanced)</Label>
+                        <Input value={expCortexUrl} onChange={e => setExpCortexUrl(e.target.value)} className="font-mono text-xs" placeholder="https://cortex-cli..." />
+                        <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1">
+                          Free-text URL mode is enabled by <span className="font-mono">?advanced=1</span>.
+                          Prefer the eph picker — URLs that look fine here can be silently dead.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -885,7 +924,16 @@ export function RunEvalModal({ open, onClose }) {
             {step < 3 ? (
               <Button
                 onClick={() => goToStep(step + 1)}
-                disabled={(step === 1 && selectedProblems.length === 0) || (step === 2 && !groupId.trim())}
+                disabled={
+                  (step === 1 && selectedProblems.length === 0) ||
+                  (step === 2 && (
+                    !groupId.trim() ||
+                    // Eph-driven mode: must be probed and ready. Advanced mode
+                    // can skip the eph picker entirely.
+                    (!advancedMode && !submitEphReadiness?.ready) ||
+                    (advancedMode && submitEph && !submitEphReadiness?.ready)
+                  ))
+                }
                 data-testid="eval-next-step"
               >
                 Next <ChevronRight className="w-4 h-4 ml-1" />
@@ -893,8 +941,17 @@ export function RunEvalModal({ open, onClose }) {
             ) : (
               <Button
                 onClick={handleSubmit}
-                disabled={submitting || totalJobs === 0 || agentVerified === false}
-                title={agentVerified === false ? 'Agent name failed verification — fix it or clear the eph check' : undefined}
+                disabled={
+                  submitting || totalJobs === 0 ||
+                  agentVerified === false ||
+                  (!advancedMode && !submitEphReadiness?.ready) ||
+                  (advancedMode && submitEph && !submitEphReadiness?.ready)
+                }
+                title={
+                  agentVerified === false ? 'Agent name failed verification — fix it or clear the eph check' :
+                  (!advancedMode && !submitEphReadiness?.ready) ? 'Select an eph and confirm it is ready before submitting' :
+                  undefined
+                }
                 data-testid="submit-eval-button"
               >
                 {submitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Rocket className="w-4 h-4 mr-2" />}

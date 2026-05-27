@@ -66,6 +66,15 @@ export async function deleteAgent(ephName, agentId) {
   return r.data;
 }
 
+// Service-readiness probe. Returns the harness contract:
+//   { eph, db, emergent, cortex, ready, emergent_url, cortex_url, message }
+// Today this hits a BFF stub; will swap to a real harness proxy when the
+// upstream readiness endpoint lands. Frontend doesn't care which.
+export async function getEphReadiness(ephName) {
+  const r = await client.get(`/ephs/${encodeURIComponent(ephName)}/readiness`);
+  return r.data;
+}
+
 // Convenience: normalise an axios error into { status, code, message, raw }.
 // The harness returns `{ error, message, code }`; FastAPI wraps it in `detail`.
 export function parseCortexError(err) {

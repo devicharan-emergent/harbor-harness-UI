@@ -15,6 +15,7 @@ import {
   getAgent, createAgent, updateAgent, deleteAgent, parseCortexError,
 } from '@/services/cortexApi';
 import { validateAgentEnvelope, blankAgentYaml } from '@/lib/agentYaml';
+import { AgentQuickFields } from '@/components/cortex/AgentQuickFields';
 
 // Editor mode is derived from props:
 //   - `mode === 'create'`: agentId is what the user types in the id input; metadata.id locked to it.
@@ -210,6 +211,15 @@ export function AgentEditor({
             {validation.errors.map((e) => <div key={e} className="font-mono">• {e}</div>)}
           </div>
         </div>
+      )}
+
+      {/* Quick fields (comment-preserving form bindings over yamlText) */}
+      {yamlText.trim().length > 0 && (
+        <AgentQuickFields
+          yamlText={yamlText}
+          agentId={agentId}
+          onChange={setYamlText}
+        />
       )}
 
       {/* Editor */}

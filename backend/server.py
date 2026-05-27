@@ -464,6 +464,54 @@ async def proxy_cortex_delete_agent(agent_id: str, eph_name: str = Query(...)):
         params={"eph_name": eph_name},
     )
 
+
+# Eph readiness — STUB until harness ships GET /api/v1/cortex/ephs/{eph}/readiness.
+# Once that endpoint exists, replace the body with a single _proxy_cortex call
+# to the same path. Keep this stub for local dev tooling so the UI can be
+# reviewed today.
+#
+# Stub keying (per spec): cluster3-test → emergent:false (cron-cleaned),
+# anything else → all three true. Exercises the partial-down UX path.
+@api_router.get("/eval/cortex/ephs/{eph}/readiness")
+async def proxy_cortex_eph_readiness(eph: str):
+    if eph == "cluster3-test":
+        return {
+            "eph": eph,
+            "db": True,
+            "emergent": False,
+            "cortex": True,
+            "ready": False,
+            "emergent_url": f"https://emergent-agents-{eph}-stub.run.app",
+            "cortex_url": f"http://cortex-{eph}-stub.run.app",
+            "message": (
+                f"emergent agent-service for '{eph}' is unreachable "
+                "(cron-cleaned?) — pick another eph or redeploy it."
+            ),
+        }
+    return {
+        "eph": eph,
+        "db": True,
+        "emergent": True,
+        "cortex": True,
+        "ready": True,
+        "emergent_url": f"https://emergent-agents-{eph}-stub.run.app",
+        "cortex_url": f"http://cortex-{eph}-stub.run.app",
+        "message": "",
+    }
+
+
+@api_router.post("/eval/jobs-with-es")
+async def proxy_submit_eval_with_es(body: dict):
+    """Proxy → harness POST /api/v1/internal/evals-with-es.
+    Pass-through. When `eph_name` is present, harness derives
+    `emergent_agents_url` + per-eval `cortex_url` from it server-side and
+    re-runs the readiness preflight. Fall-back (no eph_name) keeps the
+    explicit-URL behavior for back-compat.
+    """
+    return await _proxy_cortex(
+        "POST", "/api/v1/internal/evals-with-es", json=body,
+    )
+
 @api_router.post("/eval/jobs")
 async def proxy_submit_eval(body: dict):
     """Proxy: Submit eval jobs to external Eval API.
