@@ -7,6 +7,7 @@ import os
 import logging
 import copy
 import uuid
+from urllib.parse import quote
 from pathlib import Path
 from typing import List, Optional, Any, Dict
 from datetime import datetime, timezone, timedelta
@@ -398,6 +399,70 @@ async def proxy_agent_exists(eph_name: str = Query(...), agent_name: str = Query
                 data = {"message": response.text}
             raise HTTPException(status_code=response.status_code, detail=data)
         return response.json()
+
+
+# ---------------------------------------------------------------------------
+# Cortex agent YAML CRUD (in-eph cortex_<eph>.agent_definitions table).
+# Thin pass-through proxies — the harness owns validation and error envelopes.
+# ---------------------------------------------------------------------------
+
+async def _proxy_cortex(
+    method: str, path: str, *,
+    params: Optional[Dict[str, Any]] = None,
+    json: Optional[Dict[str, Any]] = None,
+):
+    """Forward to {EVAL_API_BASE}{path}, surfacing harness JSON errors as-is."""
+    async with httpx.AsyncClient(timeout=30.0) as hclient:
+        resp = await hclient.request(method, f"{EVAL_API_BASE}{path}", params=params, json=json)
+    if resp.status_code >= 400:
+        try:
+            detail = resp.json()
+        except Exception:
+            detail = {"message": resp.text or "harness error"}
+        raise HTTPException(status_code=resp.status_code, detail=detail)
+    return resp.json()
+
+
+@api_router.get("/eval/cortex/ephs/exists")
+async def proxy_cortex_eph_exists(eph_name: str = Query(...)):
+    return await _proxy_cortex("GET", "/api/v1/cortex/ephs/exists", params={"eph_name": eph_name})
+
+
+@api_router.get("/eval/cortex/agents")
+async def proxy_cortex_list_agents(eph_name: str = Query(...)):
+    return await _proxy_cortex("GET", "/api/v1/cortex/agents", params={"eph_name": eph_name})
+
+
+@api_router.get("/eval/cortex/agents/{agent_id}")
+async def proxy_cortex_get_agent(agent_id: str, eph_name: str = Query(...)):
+    return await _proxy_cortex(
+        "GET", f"/api/v1/cortex/agents/{quote(agent_id, safe='')}",
+        params={"eph_name": eph_name},
+    )
+
+
+@api_router.post("/eval/cortex/agents")
+async def proxy_cortex_create_agent(body: dict, eph_name: str = Query(...)):
+    return await _proxy_cortex(
+        "POST", "/api/v1/cortex/agents",
+        params={"eph_name": eph_name}, json=body,
+    )
+
+
+@api_router.put("/eval/cortex/agents/{agent_id}")
+async def proxy_cortex_update_agent(agent_id: str, body: dict, eph_name: str = Query(...)):
+    return await _proxy_cortex(
+        "PUT", f"/api/v1/cortex/agents/{quote(agent_id, safe='')}",
+        params={"eph_name": eph_name}, json=body,
+    )
+
+
+@api_router.delete("/eval/cortex/agents/{agent_id}")
+async def proxy_cortex_delete_agent(agent_id: str, eph_name: str = Query(...)):
+    return await _proxy_cortex(
+        "DELETE", f"/api/v1/cortex/agents/{quote(agent_id, safe='')}",
+        params={"eph_name": eph_name},
+    )
 
 @api_router.post("/eval/jobs")
 async def proxy_submit_eval(body: dict):

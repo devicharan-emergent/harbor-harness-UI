@@ -17,6 +17,7 @@ import DatasetsPage from "@/pages/DatasetsPage";
 import SchedulesList from "@/pages/SchedulesList";
 import ScheduleEditor from "@/pages/ScheduleEditor";
 import ScheduleDetail from "@/pages/ScheduleDetail";
+import CortexAgents from "@/pages/CortexAgents";
 import Login from "@/pages/Login";
 import AuthCallback from "@/pages/AuthCallback";
 
@@ -60,6 +61,7 @@ const router = createBrowserRouter([
           { path: "/schedules/new", element: <ScheduleEditor /> },
           { path: "/schedules/:id", element: <ScheduleDetail /> },
           { path: "/schedules/:id/edit", element: <ScheduleEditor /> },
+          { path: "/cortex/agents", element: <CortexAgents /> },
         ],
       },
     ],
