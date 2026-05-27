@@ -38,6 +38,8 @@ function urlMatches(url, matchers) {
 // request whose URL matches any of the provided regexes.
 export function attachOwnership(axiosInstance, matchers) {
   axiosInstance.interceptors.request.use((config) => {
+    // No need for permissions for now
+    return config;
     const createdBy = getCreatedBy();
     if (!createdBy) return config;
 

@@ -746,50 +746,65 @@ export default function JobDetail() {
 
                       {/* Phase Lint Report */}
                       {phase.lint_report && phase.lint_report.raw_output?.files?.some(f => f.error_count > 0) && (
-                        <div className="mt-2 rounded-lg border border-red-400/20 bg-red-50/40 dark:bg-red-950/20 p-3 space-y-3">
-                          {/* Header */}
-                          <div className="flex items-center justify-between">
-                            <span className="text-[11px] font-semibold text-red-700 dark:text-red-400">Lint Issues</span>
-                            <span className="text-[10px] font-mono text-muted-foreground">
-                              {phase.lint_report.summary?.files_with_errors} file{phase.lint_report.summary?.files_with_errors !== 1 ? 's' : ''} · {phase.lint_report.summary?.total_errors} error{phase.lint_report.summary?.total_errors !== 1 ? 's' : ''}
-                            </span>
-                          </div>
+                        <Collapsible className="mt-2">
+                          <div className="rounded-lg border border-red-400/20 bg-red-50/40 dark:bg-red-950/20">
+                            {/* Header / trigger */}
+                            <CollapsibleTrigger asChild>
+                              <button
+                                type="button"
+                                className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left hover:bg-red-500/5 transition-colors rounded-lg [&[data-state=open]>svg]:rotate-180"
+                                data-testid={`phase-${phaseIdx}-lint-toggle`}
+                              >
+                                <span className="text-[11px] font-semibold text-red-700 dark:text-red-400">Lint Issues</span>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] font-mono text-muted-foreground">
+                                    {phase.lint_report.summary?.files_with_errors} file{phase.lint_report.summary?.files_with_errors !== 1 ? 's' : ''} · {phase.lint_report.summary?.total_errors} error{phase.lint_report.summary?.total_errors !== 1 ? 's' : ''}
+                                  </span>
+                                  <ChevronDown className="w-3.5 h-3.5 text-muted-foreground transition-transform" />
+                                </div>
+                              </button>
+                            </CollapsibleTrigger>
 
-                          {/* Error breakdown — split by severity, grouped by rule id */}
-                          <LintRuleBreakdown
-                            lintReport={phase.lint_report}
-                            testid={`phase-${phaseIdx}-lint-breakdown`}
-                          />
+                            <CollapsibleContent>
+                              <div className="px-3 pb-3 space-y-3">
+                                {/* Error breakdown — split by severity, grouped by rule id */}
+                                <LintRuleBreakdown
+                                  lintReport={phase.lint_report}
+                                  testid={`phase-${phaseIdx}-lint-breakdown`}
+                                />
 
-                          {/* Files with errors */}
-                          <div className="space-y-2">
-                            {phase.lint_report.raw_output.files
-                              .filter(f => f.error_count > 0)
-                              .map((file, fIdx) => (
-                                <div key={fIdx} className="space-y-1">
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-[10px] font-mono text-muted-foreground truncate flex-1 min-w-0">{file.file}</span>
-                                    <Badge variant="outline" className="text-[9px] font-mono text-red-500 border-red-400/30 flex-shrink-0 py-0">
-                                      {file.error_count} err{file.error_count !== 1 ? 's' : ''}
-                                    </Badge>
-                                  </div>
-                                  <div className="pl-2 space-y-1">
-                                    {file.errors.map((err, eIdx) => (
-                                      <div key={eIdx} className="flex items-start gap-2 text-[10px] font-mono bg-white/60 dark:bg-black/20 rounded px-2 py-1">
-                                        <span className="text-muted-foreground flex-shrink-0 w-12">L{err.line}:{err.column}</span>
-                                        <Badge variant="outline" className="text-[8px] py-0 h-auto border-red-300 text-red-600 dark:text-red-400 flex-shrink-0">
-                                          {err.code}
-                                        </Badge>
-                                        <span className="text-foreground/70 break-all leading-relaxed">
-                                          {err.message.replace(new RegExp(`^${err.code}\\s*`), '')}
-                                        </span>
+                                {/* Files with errors */}
+                                <div className="space-y-2">
+                                  {phase.lint_report.raw_output.files
+                                    .filter(f => f.error_count > 0)
+                                    .map((file, fIdx) => (
+                                      <div key={fIdx} className="space-y-1">
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-[10px] font-mono text-muted-foreground truncate flex-1 min-w-0">{file.file}</span>
+                                          <Badge variant="outline" className="text-[9px] font-mono text-red-500 border-red-400/30 flex-shrink-0 py-0">
+                                            {file.error_count} err{file.error_count !== 1 ? 's' : ''}
+                                          </Badge>
+                                        </div>
+                                        <div className="pl-2 space-y-1">
+                                          {file.errors.map((err, eIdx) => (
+                                            <div key={eIdx} className="flex items-start gap-2 text-[10px] font-mono bg-white/60 dark:bg-black/20 rounded px-2 py-1">
+                                              <span className="text-muted-foreground flex-shrink-0 w-12">L{err.line}:{err.column}</span>
+                                              <Badge variant="outline" className="text-[8px] py-0 h-auto border-red-300 text-red-600 dark:text-red-400 flex-shrink-0">
+                                                {err.code}
+                                              </Badge>
+                                              <span className="text-foreground/70 break-all leading-relaxed">
+                                                {err.message.replace(new RegExp(`^${err.code}\\s*`), '')}
+                                              </span>
+                                            </div>
+                                          ))}
+                                        </div>
                                       </div>
                                     ))}
-                                  </div>
                                 </div>
-                              ))}
+                              </div>
+                            </CollapsibleContent>
                           </div>
-                        </div>
+                        </Collapsible>
                       )}
 
                       {phaseIdx < phaseResults.length - 1 && <Separator />}
