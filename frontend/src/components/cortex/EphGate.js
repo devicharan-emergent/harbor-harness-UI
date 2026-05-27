@@ -19,6 +19,35 @@ export function EphGate({ value, onConnect, onDisconnect, defaultInput = '' }) {
     if (value) setInput(value);
   }, [value]);
 
+  // Revalidate the connected eph when the tab regains focus. The eph's DB
+  // exists from earlier, but it costs essentially nothing to confirm — and
+  // catches the case where someone destroyed the eph in another tab.
+  useEffect(() => {
+    if (!value) return undefined;
+    const onFocus = () => {
+      if (document.visibilityState !== 'visible') return;
+      // Re-run silently; don't toggle the spinner unless we discover it died.
+      (async () => {
+        try {
+          const data = await checkEphExists(value);
+          if (!data?.exists) {
+            setStatus({ ok: false, message: `Eph "${value}" no longer exists. Reconnect or pick another.`, code: 'not_found' });
+            onDisconnect();
+          }
+        } catch (err) {
+          const e = parseCortexError(err);
+          setStatus({ ok: false, message: `Connection lost: ${e.message}`, code: e.code, status: e.status, recoverable: true });
+        }
+      })();
+    };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onFocus);
+    };
+  }, [value, onDisconnect]);
+
   const handleConnect = async (e) => {
     e?.preventDefault?.();
     const name = input.trim();
@@ -104,9 +133,10 @@ export function EphGate({ value, onConnect, onDisconnect, defaultInput = '' }) {
           ) : (
             <XCircle className="w-3.5 h-3.5 text-red-600 dark:text-red-400 mt-0.5 flex-shrink-0" />
           )}
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <p className="text-red-700 dark:text-red-300 font-medium">
-              {status.code === 'invalid_request' ? 'Invalid eph name' :
+              {status.recoverable ? 'Connection lost' :
+               status.code === 'invalid_request' ? 'Invalid eph name' :
                status.code === 'not_found' ? 'Eph not found' :
                status.status >= 500 ? 'Harness error' : 'Connect failed'}
             </p>
@@ -114,6 +144,17 @@ export function EphGate({ value, onConnect, onDisconnect, defaultInput = '' }) {
               {status.message}
             </p>
           </div>
+          {status.recoverable && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs flex-shrink-0"
+              onClick={() => handleConnect()}
+              data-testid="cortex-eph-reconnect-btn"
+            >
+              Reconnect
+            </Button>
+          )}
         </div>
       )}
     </div>

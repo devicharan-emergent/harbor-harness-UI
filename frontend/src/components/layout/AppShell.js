@@ -71,7 +71,13 @@ export default function AppShell() {
       {/* Footer with data source, health indicator, theme toggle, and version */}
       <div className="pt-3 mt-3 border-t border-[hsl(var(--border)/0.5)] space-y-2 flex-shrink-0">
         <DataSourceIndicator />
-        <ApiHealthIndicator />
+        {/*
+         * The harness-eval health chip is irrelevant on the Cortex Agents
+         * page — that page reads cortex_<eph> directly, not the eval API.
+         * A red "degraded" chip would make the page look broken when it's
+         * fine. Hide on /cortex/* to avoid that confusion.
+         */}
+        {!location.pathname.startsWith('/cortex/') && <ApiHealthIndicator />}
         <EnvSwitcher />
         <UserMenu />
         <div className="flex items-center justify-between px-2.5">

@@ -1,0 +1,204 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Cortex Agent",
+  "description": "Agent definition stored in cortex_<eph>.agent_definitions. Envelope + enums are enforced; dynamic bags (model.params, toolsets[].params, overrides, context.auto_compact, hooks) are intentionally permissive — cortex does full validation at eval time.",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "additionalProperties": true,
+  "properties": {
+    "apiVersion": {
+      "type": "string",
+      "description": "API version. Use 'agents.v1'.",
+      "default": "agents.v1",
+      "examples": ["agents.v1"]
+    },
+    "kind": {
+      "type": "string",
+      "description": "Resource kind. Must be 'Agent'.",
+      "const": "Agent"
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["id", "name", "version"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique agent id. Must equal the agent_id row key it is saved under (the backend rejects a mismatch)."
+        },
+        "name": { "type": "string", "description": "Human-readable name." },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Agent version, integer >= 1."
+        },
+        "description": { "type": "string", "description": "Optional human description." },
+        "agent_type": {
+          "type": "string",
+          "description": "Agent category, e.g. EmergentAssistant.",
+          "examples": ["EmergentAssistant", "SupportAgent"]
+        },
+        "is_autonomous": {
+          "type": "boolean",
+          "description": "If true, ask_human is auto-answered ('assume default and continue')."
+        },
+        "tags": { "type": "array", "items": { "type": "string" }, "description": "Labels." }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "required": ["model"],
+      "additionalProperties": true,
+      "properties": {
+        "model": {
+          "type": "object",
+          "required": ["provider", "id"],
+          "additionalProperties": true,
+          "properties": {
+            "provider": {
+              "type": "string",
+              "description": "LLM provider.",
+              "enum": ["anthropic", "openai", "vertex_ai", "gemini"]
+            },
+            "id": {
+              "type": "string",
+              "description": "Model id, e.g. claude-opus-4-7, claude-sonnet-4-6, gpt-5-2."
+            },
+            "display_name": { "type": "string", "description": "Human-readable model name." },
+            "family": { "type": "string", "description": "Model family for routing, e.g. claude, gemini." },
+            "temperature": {
+              "type": ["number", "null"],
+              "minimum": 0,
+              "maximum": 1,
+              "description": "0..1, or omit/null. NOTE: some models (opus 4.7) reject temperature — leave unset."
+            },
+            "max_tokens": { "type": "integer", "minimum": 1, "description": "Max output tokens." },
+            "context_window": { "type": "integer", "minimum": 1, "description": "Context window size in tokens." },
+            "provider_config": {
+              "type": "object",
+              "description": "Per-model provider override (custom endpoint).",
+              "additionalProperties": true,
+              "properties": {
+                "base_url": { "type": "string" },
+                "api_key_env": { "type": "string" }
+              }
+            },
+            "params": {
+              "type": "object",
+              "description": "Provider-specific params (dynamic). e.g. anthropic: thinking{type,display}, effort, task_budget{total}, options. Validated by cortex at eval time.",
+              "additionalProperties": true
+            }
+          }
+        },
+        "prompt": {
+          "type": "object",
+          "description": "System prompt source. Specify EXACTLY ONE of inline / name / prompt_id.",
+          "additionalProperties": true,
+          "properties": {
+            "inline": { "type": "string", "description": "Inline system prompt text." },
+            "name": { "type": "string", "description": "Named prompt template." },
+            "prompt_id": { "type": "string", "description": "LangSmith prompt id." }
+          },
+          "oneOf": [
+            { "required": ["inline"], "not": { "anyOf": [{ "required": ["name"] }, { "required": ["prompt_id"] }] } },
+            { "required": ["name"], "not": { "anyOf": [{ "required": ["inline"] }, { "required": ["prompt_id"] }] } },
+            { "required": ["prompt_id"], "not": { "anyOf": [{ "required": ["inline"] }, { "required": ["name"] }] } }
+          ]
+        },
+        "initial_message_prompt_id": {
+          "type": "string",
+          "description": "Prompt id for the first user message (optional)."
+        },
+        "toolsets": {
+          "type": "array",
+          "description": "Tool sources. Discriminated on 'type'.",
+          "items": {
+            "type": "object",
+            "required": ["type", "name"],
+            "additionalProperties": true,
+            "properties": {
+              "type": {
+                "type": "string",
+                "description": "Tool set type.",
+                "enum": ["builtin", "mcp", "subagent"]
+              },
+              "name": { "type": "string", "description": "Unique tool set name." },
+              "description": { "type": "string" },
+              "required": {
+                "type": "boolean",
+                "description": "If true, discovery failure fails agent init (default true)."
+              },
+              "transport": {
+                "type": "string",
+                "description": "MCP only. Transport type.",
+                "enum": ["stdio", "http"]
+              },
+              "url": { "type": "string", "description": "MCP http transport server URL." },
+              "command": { "type": "string", "description": "MCP stdio command." },
+              "args": { "type": "array", "items": { "type": "string" }, "description": "MCP stdio args." },
+              "env": { "type": "object", "additionalProperties": { "type": "string" }, "description": "MCP env." },
+              "whitelisted_tool_names": { "type": "array", "items": { "type": "string" }, "description": "MCP allowed tools." },
+              "skill_packs": { "type": "array", "items": { "type": "string" } },
+              "timeout": { "type": "string", "description": "Go duration, e.g. 5m." },
+              "max_iterations": { "type": "integer", "description": "Subagent only." },
+              "background": { "type": "boolean", "description": "Subagent only." },
+              "is_user_defined": { "type": "boolean", "description": "Subagent only." },
+              "user_prompt_id": { "type": "string", "description": "Subagent only." },
+              "input_schema": { "type": "object", "additionalProperties": true, "description": "Subagent tool input schema override." },
+              "strategy": { "type": "string", "description": "Subagent spawn strategy." }
+            }
+          }
+        },
+        "overrides": {
+          "type": "object",
+          "description": "Tool/subagent property overrides (dynamic).",
+          "additionalProperties": true
+        },
+        "policy": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "max_iterations": { "type": "integer", "minimum": 0, "description": "Max loop iterations." },
+            "timeout": { "type": "string", "description": "Max execution time (Go duration, e.g. 2h)." },
+            "max_budget_usd": { "type": "number", "minimum": 0, "description": "Max spend in USD." },
+            "scale_factor": { "type": "number", "minimum": 0, "description": "Resource scaling multiplier." }
+          }
+        },
+        "context": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "squashing_strategy": {
+              "type": "string",
+              "description": "Context squashing strategy.",
+              "enum": ["none", "simple", "anthropic_window_based_strategy"]
+            },
+            "threshold": {
+              "type": ["number", "null"],
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Fraction of context limit that triggers compaction (default 0.8)."
+            },
+            "preserve_last_n": { "type": ["integer", "null"], "minimum": 0, "description": "Recent tool results kept intact (default 10)." },
+            "truncation_length": { "type": ["integer", "null"], "minimum": 0, "description": "Max chars per truncated observation (default 150)." },
+            "overflow_threshold": { "type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "Fraction that triggers stop when auto-compact off." },
+            "auto_compact": { "type": "array", "description": "Auto-compact strategy configs (dynamic).", "items": { "type": "object", "additionalProperties": true } },
+            "upgrade": { "type": "object", "additionalProperties": true, "description": "Upgrade spec (dynamic)." },
+            "range_threshold": { "type": "object", "additionalProperties": true, "description": "Cache-aware range gate (dynamic)." },
+            "prefilled_memory": { "type": "array", "description": "Prefilled context entries (dynamic).", "items": { "type": "object", "additionalProperties": true } }
+          }
+        },
+        "hooks": {
+          "type": "object",
+          "description": "Lifecycle hooks (dynamic).",
+          "additionalProperties": true
+        },
+        "intervention_rule_ids": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Allow-list of intervention rule ids."
+        }
+      }
+    }
+  }
+}

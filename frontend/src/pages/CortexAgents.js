@@ -8,6 +8,7 @@ import { Boxes } from 'lucide-react';
 import { getAgent, parseCortexError } from '@/services/cortexApi';
 import { rewriteMetadataId, blankAgentYaml } from '@/lib/agentYaml';
 import { toast } from 'sonner';
+import { createAgent as cortexCreateAgent } from '@/services/cortexApi';
 
 const LS_KEY = 'acm_cortex_eph';
 
@@ -35,6 +36,13 @@ export default function CortexAgents() {
   const [editorAgentId, setEditorAgentId] = useState('');
   const [editorYaml, setEditorYaml] = useState('');
   const [listRefreshKey, setListRefreshKey] = useState(0);
+  // Agents the user has just deleted — kept in a hidden set so the list
+  // updates immediately. Cleared on next refetch or on Undo (which re-POSTs
+  // the agent back from the in-memory yaml_content we saved before delete).
+  const [optimisticHidden, setOptimisticHidden] = useState([]);
+  // Last-loaded yaml of the selected agent — used both for the diff and as
+  // the source for an Undo-delete restore.
+  const [lastLoadedYaml, setLastLoadedYaml] = useState('');
 
   // Persist eph + sync URL whenever it changes (URL is shareable).
   useEffect(() => {
@@ -108,13 +116,37 @@ export default function CortexAgents() {
     setEditorAgentId(saved.agent_id);
   }, []);
 
-  const handleDeleted = useCallback(() => {
-    setListRefreshKey((k) => k + 1);
+  const handleDeleted = useCallback((deletedId) => {
+    // Optimistic hide + Undo toast that re-POSTs the agent we just deleted.
+    setOptimisticHidden((prev) => [...prev, deletedId]);
     setMode('idle');
     setSelectedAgentId(null);
     setEditorAgentId('');
     setEditorYaml('');
-  }, []);
+    const restoreYaml = lastLoadedYaml || blankAgentYaml(deletedId);
+    toast.success(`Deleted ${deletedId}`, {
+      action: {
+        label: 'Undo',
+        onClick: async () => {
+          try {
+            await cortexCreateAgent(eph, deletedId, restoreYaml);
+            toast.success(`Restored ${deletedId}`);
+          } catch (err) {
+            toast.error(`Could not restore ${deletedId}`);
+          } finally {
+            setOptimisticHidden((prev) => prev.filter((x) => x !== deletedId));
+            setListRefreshKey((k) => k + 1);
+          }
+        },
+      },
+      onAutoClose: () => {
+        // Drop from hidden set after the toast goes — list refetch will
+        // confirm the deletion server-side.
+        setOptimisticHidden((prev) => prev.filter((x) => x !== deletedId));
+        setListRefreshKey((k) => k + 1);
+      },
+    });
+  }, [eph, lastLoadedYaml]);
 
   const handleCancelCreate = useCallback(() => {
     setMode('idle');
@@ -168,6 +200,7 @@ export default function CortexAgents() {
                 onNew={handleNew}
                 onDuplicate={handleDuplicate}
                 refreshKey={listRefreshKey}
+                optimisticHidden={optimisticHidden}
               />
             </div>
             <div className="min-h-0">
@@ -185,6 +218,7 @@ export default function CortexAgents() {
                   onSaved={handleSaved}
                   onDeleted={handleDeleted}
                   onCancelCreate={handleCancelCreate}
+                  onLoaded={({ yaml_content }) => setLastLoadedYaml(yaml_content)}
                 />
               )}
             </div>

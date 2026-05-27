@@ -16,6 +16,9 @@ import {
 } from '@/services/cortexApi';
 import { validateAgentEnvelope, blankAgentYaml } from '@/lib/agentYaml';
 import { AgentQuickFields } from '@/components/cortex/AgentQuickFields';
+import { DiffConfirmModal } from '@/components/cortex/DiffConfirmModal';
+import { ensureAgentMonacoSchema, AGENT_MODEL_URI } from '@/lib/agentMonaco';
+import { locateServerError } from '@/lib/locateServerError';
 
 // Editor mode is derived from props:
 //   - `mode === 'create'`: agentId is what the user types in the id input; metadata.id locked to it.
@@ -33,6 +36,9 @@ export function AgentEditor({
   onSaved,
   onDeleted,
   onCancelCreate,
+  // Called whenever the editor loads an agent's yaml from the server (used by
+  // the parent to power the Undo-delete restore flow).
+  onLoaded,
 }) {
   const isEdit = mode === 'edit';
   const [agentId, setAgentId] = useState(initialAgentId);
@@ -45,6 +51,29 @@ export function AgentEditor({
   const [lastResponse, setLastResponse] = useState(null); // { status, payload }
   // Tracks dirty-ness vs. last-saved content for the Save button.
   const lastSavedRef = useRef(initialYaml);
+  // Diff-before-save confirm.
+  const [diffOpen, setDiffOpen] = useState(false);
+  // Refs to the Monaco editor + monaco namespace so we can install markers
+  // pointing at a 400's offending line.
+  const editorRef = useRef(null);
+  const monacoRef = useRef(null);
+
+  const handleEditorMount = useCallback((editor, monaco) => {
+    editorRef.current = editor;
+    monacoRef.current = monaco;
+    ensureAgentMonacoSchema(monaco);
+    // Cmd/Ctrl+S inside the editor → trigger save flow (intercepts the
+    // browser default Save Page dialog).
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+      const ev = new CustomEvent('cortex-agent-save-shortcut');
+      window.dispatchEvent(ev);
+    });
+    // Esc inside the editor → discard create/duplicate (parent decides).
+    editor.addCommand(monaco.KeyCode.Escape, () => {
+      const ev = new CustomEvent('cortex-agent-esc-shortcut');
+      window.dispatchEvent(ev);
+    });
+  }, []);
 
   // Re-fetch the latest YAML when entering edit mode for a new agent.
   useEffect(() => {
@@ -60,6 +89,7 @@ export function AgentEditor({
         setYamlText(data?.yaml_content || '');
         lastSavedRef.current = data?.yaml_content || '';
         setLastResponse({ status: 200, payload: data });
+        onLoaded?.({ agent_id: initialAgentId, yaml_content: data?.yaml_content || '' });
       } catch (err) {
         if (cancelled) return;
         const e = parseCortexError(err);
@@ -91,6 +121,13 @@ export function AgentEditor({
   const canSave = !saving && !loadingFetch && validation.ok && Boolean(agentId.trim()) &&
     (isEdit ? dirty : true);
 
+  // Map the most recent server error to a quick-field path so the matching
+  // row can be tinted. Cleared on dirty edits.
+  const serverErrorFieldPath = useMemo(() => {
+    if (!serverError) return null;
+    return locateServerError(serverError.message, yamlText).fieldPath;
+  }, [serverError, yamlText]);
+
   const handleSave = useCallback(async () => {
     if (!ephName || !agentId.trim()) return;
     setSaving(true);
@@ -101,16 +138,76 @@ export function AgentEditor({
         : await createAgent(ephName, agentId, yamlText);
       lastSavedRef.current = yamlText;
       setLastResponse({ status: isEdit ? 200 : 201, payload: data });
+      // Clear any stale Monaco markers from a previous failed save.
+      if (monacoRef.current && editorRef.current?.getModel) {
+        monacoRef.current.editor.setModelMarkers(editorRef.current.getModel(), 'cortex-server', []);
+      }
       toast.success(isEdit ? 'Agent updated' : 'Agent created');
+      setDiffOpen(false);
       onSaved?.({ agent_id: agentId, yaml_content: yamlText, ...data });
     } catch (err) {
       const e = parseCortexError(err);
       setServerError(e);
       setLastResponse({ status: e.status, payload: e.raw });
+      // Located validation — install a Monaco marker on the offending line
+      // whenever we can pin one from the backend's message.
+      const monaco = monacoRef.current;
+      const model = editorRef.current?.getModel?.();
+      if (monaco && model) {
+        const loc = locateServerError(e.message, yamlText);
+        if (loc.line) {
+          monaco.editor.setModelMarkers(model, 'cortex-server', [{
+            severity: monaco.MarkerSeverity.Error,
+            startLineNumber: loc.line,
+            startColumn: loc.column || 1,
+            endLineNumber: loc.line,
+            endColumn: (model.getLineContent(loc.line) || '').length + 1 || 1,
+            message: e.message,
+            source: 'cortex',
+          }]);
+          // Reveal the offending line so the squiggle is visible.
+          editorRef.current.revealLineInCenter(loc.line);
+        } else {
+          monaco.editor.setModelMarkers(model, 'cortex-server', []);
+        }
+      }
     } finally {
       setSaving(false);
     }
   }, [ephName, agentId, yamlText, isEdit, onSaved]);
+
+  // Open the diff confirm rather than POSTing immediately — never write to a
+  // live config blind.
+  const requestSave = useCallback(() => {
+    if (!canSave) return;
+    setDiffOpen(true);
+  }, [canSave]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Global beforeunload guard when there are unsaved edits.
+  useEffect(() => {
+    const handler = (e) => {
+      if (dirty || (!isEdit && yamlText.trim())) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [dirty, isEdit, yamlText]);
+
+  // Keyboard shortcuts fired from inside Monaco.
+  useEffect(() => {
+    const onSaveShortcut = () => requestSave();
+    const onEsc = () => {
+      if (!isEdit) onCancelCreate?.();
+    };
+    window.addEventListener('cortex-agent-save-shortcut', onSaveShortcut);
+    window.addEventListener('cortex-agent-esc-shortcut', onEsc);
+    return () => {
+      window.removeEventListener('cortex-agent-save-shortcut', onSaveShortcut);
+      window.removeEventListener('cortex-agent-esc-shortcut', onEsc);
+    };
+  }, [requestSave, isEdit, onCancelCreate]);
 
   const handleDelete = useCallback(async () => {
     if (!ephName || !agentId) return;
@@ -189,13 +286,14 @@ export function AgentEditor({
           )}
           <Button
             size="sm"
-            className="h-7 text-xs gap-1.5"
-            onClick={handleSave}
+            className={`h-7 text-xs gap-1.5 ${isEdit && dirty ? 'ring-2 ring-amber-400/60 ring-offset-1 ring-offset-background' : ''}`}
+            onClick={requestSave}
             disabled={!canSave}
             data-testid="cortex-agent-save-btn"
+            title={isEdit ? (dirty ? 'Save changes (Cmd/Ctrl+S)' : 'No changes to save') : 'Create (Cmd/Ctrl+S)'}
           >
             {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-            {isEdit ? 'Save changes' : 'Create'}
+            {isEdit ? (dirty ? 'Save changes' : 'Saved') : 'Create'}
           </Button>
         </div>
       </div>
@@ -219,28 +317,34 @@ export function AgentEditor({
           yamlText={yamlText}
           agentId={agentId}
           onChange={setYamlText}
+          errorPath={serverErrorFieldPath}
         />
       )}
 
       {/* Editor */}
       <div className="flex-1 min-h-0">
         {(!yamlText && !isEdit) ? (
-          <div className="flex items-center justify-center h-full p-6">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setYamlText(blankAgentYaml(agentId || 'my_agent'))}
-              data-testid="cortex-agent-seed-template-btn"
-            >
-              Insert starter template
-            </Button>
+          <div className="flex flex-col items-center justify-center h-full p-6 gap-3" data-testid="cortex-agent-empty-create">
+            <p className="text-xs text-muted-foreground">Start from a template or paste your own YAML.</p>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setYamlText(blankAgentYaml(agentId || 'my_agent'))}
+                data-testid="cortex-agent-seed-template-btn"
+              >
+                Minimal valid agent
+              </Button>
+            </div>
           </div>
         ) : (
           <Editor
             height="100%"
             defaultLanguage="yaml"
+            path={AGENT_MODEL_URI}
             value={yamlText}
             onChange={(v) => setYamlText(v ?? '')}
+            onMount={handleEditorMount}
             theme="vs-dark"
             options={{
               minimap: { enabled: false },
@@ -249,6 +353,8 @@ export function AgentEditor({
               scrollBeyondLastLine: false,
               tabSize: 2,
               automaticLayout: true,
+              // Hover from the YAML LSP / schema descriptions.
+              hover: { enabled: true },
             }}
           />
         )}
@@ -321,11 +427,20 @@ export function AgentEditor({
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete agent?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will permanently remove <span className="font-mono">{agentId}</span> from
-              <span className="font-mono"> cortex_{ephName}.agent_definitions</span>.
-              Past eval jobs that referenced it remain unaffected.
+            <AlertDialogTitle>Delete agent <span className="font-mono">{agentId}</span>?</AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2">
+              <span className="block">
+                This removes the DB override for <span className="font-mono">{agentId}</span> in
+                <span className="font-mono"> cortex_{ephName}.agent_definitions</span>.
+              </span>
+              <span className="block">
+                <strong>Consequence:</strong> Cortex falls back to the filesystem-bundled
+                <span className="font-mono"> {agentId}</span> YAML on the next eval run. If no bundled
+                agent ships under that id, future runs that reference it will fail.
+              </span>
+              <span className="block text-muted-foreground">
+                Past eval jobs that already executed are unaffected.
+              </span>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -337,11 +452,23 @@ export function AgentEditor({
               data-testid="cortex-agent-delete-confirm-btn"
             >
               {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-2" /> : null}
-              Delete
+              Delete override
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Diff-before-save confirm */}
+      <DiffConfirmModal
+        open={diffOpen}
+        onClose={() => setDiffOpen(false)}
+        oldYaml={lastSavedRef.current}
+        newYaml={yamlText}
+        agentId={agentId}
+        isCreate={!isEdit}
+        saving={saving}
+        onConfirm={handleSave}
+      />
     </div>
   );
 }

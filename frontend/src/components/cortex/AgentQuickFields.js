@@ -10,6 +10,7 @@ import { ChevronDown, Sliders, FileCode } from 'lucide-react';
 import {
   parseAgentDoc, updateAgentYaml, batchUpdateAgentYaml, getAgentValue, getPromptSource,
 } from '@/lib/agentYamlAdapter';
+import { MODELS_BY_PROVIDER } from '@/lib/cortexModels';
 
 const MODEL_PROVIDERS = ['anthropic', 'openai', 'vertex_ai', 'gemini'];
 const SQUASH_STRATEGIES = ['none', 'simple', 'anthropic_window_based_strategy'];
@@ -21,18 +22,24 @@ const PROMPT_SOURCES = [
 
 // Small helper renderers ------------------------------------------------
 
-function TextField({ label, value, onChange, placeholder, readOnly, testid, mono }) {
+function TextField({ label, value, onChange, placeholder, readOnly, testid, mono, datalistId, datalistOptions, error }) {
   return (
     <div className="space-y-1">
-      <Label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">{label}</Label>
+      <Label className={`text-[10px] uppercase tracking-wider font-medium ${error ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>{label}</Label>
       <Input
         value={value ?? ''}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         readOnly={readOnly}
-        className={`h-7 text-xs ${mono ? 'font-mono' : ''}`}
+        list={datalistId}
+        className={`h-7 text-xs ${mono ? 'font-mono' : ''} ${error ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
         data-testid={testid}
       />
+      {datalistId && datalistOptions && (
+        <datalist id={datalistId}>
+          {datalistOptions.map((opt) => <option key={opt} value={opt} />)}
+        </datalist>
+      )}
     </div>
   );
 }
@@ -93,11 +100,16 @@ function SelectField({ label, value, options, onChange, placeholder, testid }) {
 // Fields explicitly NOT form-ified (per spec, dynamic shapes):
 //   model.params, spec.toolsets[].params, spec.overrides, context.auto_compact,
 //   spec.hooks. We show a hint chip listing them so users know to edit raw.
+// Props:
+//   errorPath: optional dotted path (e.g. ['metadata','id']) — when set, the
+//     matching quick-field row gets a red border so the user knows where the
+//     server's 400 lives.
 export function AgentQuickFields({
   yamlText,
   agentId,           // locks metadata.id in edit mode
   onChange,          // (newYamlText) => void
   defaultOpen = true,
+  errorPath = null,
 }) {
   const { parsed, errors } = useMemo(() => parseAgentDoc(yamlText), [yamlText]);
   // If parse is broken, render collapsed by default so the form doesn't blank.
@@ -118,6 +130,11 @@ export function AgentQuickFields({
     }
     onChange(batchUpdateAgentYaml(yamlText, ops));
   };
+
+  // Helper to compare a quick-field path against the server error path.
+  const pathErr = (segs) => Array.isArray(errorPath) &&
+    errorPath.length === segs.length &&
+    errorPath.every((s, i) => s === segs[i]);
 
   // Reads ----------------------------------------------------------------
 
@@ -172,12 +189,14 @@ export function AgentQuickFields({
                 readOnly
                 mono
                 testid="qf-metadata-id"
+                error={pathErr(['metadata', 'id'])}
               />
               <TextField
                 label="metadata.name"
                 value={metaName}
                 onChange={(v) => set(['metadata', 'name'], v)}
                 testid="qf-metadata-name"
+                error={pathErr(['metadata', 'name'])}
               />
               <NumberField
                 label="metadata.version"
@@ -206,6 +225,9 @@ export function AgentQuickFields({
                 mono
                 placeholder="e.g. claude-sonnet-4-5"
                 testid="qf-model-id"
+                datalistId="qf-model-id-options"
+                datalistOptions={MODELS_BY_PROVIDER[provider] || []}
+                error={pathErr(['spec', 'model', 'id'])}
               />
               <NumberField
                 label="model.max_tokens"
