@@ -61,18 +61,24 @@ export function AgentEditor({
   const handleEditorMount = useCallback((editor, monaco) => {
     editorRef.current = editor;
     monacoRef.current = monaco;
-    ensureAgentMonacoSchema(monaco);
-    // Cmd/Ctrl+S inside the editor → trigger save flow (intercepts the
-    // browser default Save Page dialog).
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-      const ev = new CustomEvent('cortex-agent-save-shortcut');
-      window.dispatchEvent(ev);
-    });
-    // Esc inside the editor → discard create/duplicate (parent decides).
-    editor.addCommand(monaco.KeyCode.Escape, () => {
-      const ev = new CustomEvent('cortex-agent-esc-shortcut');
-      window.dispatchEvent(ev);
-    });
+    try {
+      // Fire-and-forget; failures are logged inside.
+      ensureAgentMonacoSchema(monaco);
+    } catch (e) {
+      // Belt-and-suspenders: never let schema setup crash the editor.
+      console.warn('[AgentEditor] ensureAgentMonacoSchema threw', e);
+    }
+    try {
+      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+        window.dispatchEvent(new CustomEvent('cortex-agent-save-shortcut'));
+      });
+      editor.addCommand(monaco.KeyCode.Escape, () => {
+        window.dispatchEvent(new CustomEvent('cortex-agent-esc-shortcut'));
+      });
+    } catch (e) {
+      // Shortcuts are best-effort; Save button still works without them.
+      console.warn('[AgentEditor] keybinding setup failed', e);
+    }
   }, []);
 
   // Re-fetch the latest YAML when entering edit mode for a new agent.

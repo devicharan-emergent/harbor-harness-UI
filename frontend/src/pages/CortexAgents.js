@@ -4,6 +4,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { EphGate } from '@/components/cortex/EphGate';
 import { AgentList } from '@/components/cortex/AgentList';
 import { AgentEditor } from '@/components/cortex/AgentEditor';
+import { CortexEditorErrorBoundary } from '@/components/cortex/CortexEditorErrorBoundary';
 import { Boxes } from 'lucide-react';
 import { getAgent, parseCortexError } from '@/services/cortexApi';
 import { rewriteMetadataId, blankAgentYaml } from '@/lib/agentYaml';
@@ -209,17 +210,19 @@ export default function CortexAgents() {
                   Select an agent or click "New" to begin.
                 </div>
               ) : (
-                <AgentEditor
-                  key={`${mode}-${editorAgentId}`}
-                  ephName={eph}
-                  mode={mode}
-                  initialAgentId={editorAgentId}
-                  initialYaml={editorYaml}
-                  onSaved={handleSaved}
-                  onDeleted={handleDeleted}
-                  onCancelCreate={handleCancelCreate}
-                  onLoaded={({ yaml_content }) => setLastLoadedYaml(yaml_content)}
-                />
+                <CortexEditorErrorBoundary>
+                  <AgentEditor
+                    key={`${mode}-${editorAgentId}`}
+                    ephName={eph}
+                    mode={mode}
+                    initialAgentId={editorAgentId}
+                    initialYaml={editorYaml}
+                    onSaved={handleSaved}
+                    onDeleted={handleDeleted}
+                    onCancelCreate={handleCancelCreate}
+                    onLoaded={({ yaml_content }) => setLastLoadedYaml(yaml_content)}
+                  />
+                </CortexEditorErrorBoundary>
               )}
             </div>
           </div>
