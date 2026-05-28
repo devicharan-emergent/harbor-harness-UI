@@ -17,7 +17,7 @@ import {
 import { validateAgentEnvelope, blankAgentYaml } from '@/lib/agentYaml';
 import { AgentQuickFields } from '@/components/cortex/AgentQuickFields';
 import { DiffConfirmModal } from '@/components/cortex/DiffConfirmModal';
-import { ensureAgentMonacoSchema, AGENT_MODEL_URI } from '@/lib/agentMonaco';
+import { ensureAgentMonacoSchema, AGENT_MODEL_URI, bootstrapMonacoLoader } from '@/lib/agentMonaco';
 import { locateServerError } from '@/lib/locateServerError';
 
 // Editor mode is derived from props:
@@ -44,6 +44,18 @@ export function AgentEditor({
   const [agentId, setAgentId] = useState(initialAgentId);
   const [yamlText, setYamlText] = useState(initialYaml);
   const [loadingFetch, setLoadingFetch] = useState(false);
+  // Gate the Monaco editor render until @monaco-editor/react's loader is
+  // wired to the locally-bundled monaco-editor. Prevents the editor from
+  // fetching monaco from the public CDN (the opaque "Script error." source).
+  const [monacoReady, setMonacoReady] = useState(false);
+  const [monacoErr, setMonacoErr] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    bootstrapMonacoLoader()
+      .then(() => { if (alive) setMonacoReady(true); })
+      .catch((err) => { if (alive) setMonacoErr(err); });
+    return () => { alive = false; };
+  }, []);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -342,6 +354,29 @@ export function AgentEditor({
                 Minimal valid agent
               </Button>
             </div>
+          </div>
+        ) : !monacoReady ? (
+          <div
+            className="flex items-center justify-center h-full text-xs text-muted-foreground"
+            data-testid="cortex-agent-editor-bootstrapping"
+          >
+            {monacoErr ? (
+              <div className="flex flex-col items-center gap-2 text-center max-w-md px-6">
+                <AlertCircle className="w-5 h-5 text-red-500" />
+                <p className="text-red-600 dark:text-red-400 font-medium">Editor failed to load</p>
+                <p className="text-[11px] font-mono text-muted-foreground break-words">
+                  {String(monacoErr?.message || monacoErr)}
+                </p>
+                <p className="text-[10px] text-muted-foreground">
+                  Reloading the page usually clears this.
+                </p>
+              </div>
+            ) : (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                Loading editor…
+              </>
+            )}
           </div>
         ) : (
           <Editor

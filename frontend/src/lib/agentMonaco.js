@@ -1,100 +1,68 @@
-// monaco-yaml schema bootstrap — opt-in.
+// Monaco bootstrap for the Cortex Agent editor.
 //
-// Why the dynamic-import is itself gated:
-// react-scripts 5.0.1's webpack 5 config doesn't reliably emit the worker
-// chunk that `new URL('monaco-yaml/yaml.worker.js', import.meta.url)`
-// requires. When the chunk 404s the failure surfaces as an opaque
-// "Script error." with no usable filename — uncatchable by try/catch and
-// poisonous to the dev overlay. Loading `monaco-yaml` at all installs the
-// MonacoEnvironment hook globally, so even a try/caught configure call
-// already runs the bad code path.
+// Why this file exists:
+// `@monaco-editor/react` defaults to fetching `monaco-editor` from a public
+// CDN (jsdelivr) using an AMD loader. On our preview infra, that cross-origin
+// script load surfaces every error from monaco as an opaque "Script error."
+// with no filename, lineno, or message — uncatchable by try/catch, poisonous
+// to the CRA dev overlay, and impossible to diagnose.
 //
-// Until we serve the worker assets same-origin (or pin the CORS header on a
-// CDN we control), the schema-aware LSP stays opt-in:
-//   localStorage.setItem('acm_cortex_enable_yaml_lsp','1') && reload
+// We already ship `monaco-editor` as an npm dep, so we redirect the loader
+// at the locally-bundled module via `loader.config({ monaco })`. Once that's
+// done, no CDN load happens and any monaco error has a real same-origin
+// stack trace.
 //
-// In the OFF path everything is a no-op — Monaco loads as plain YAML, and
-// the validation layers that already cover the real cases stay intact:
-//   - client envelope check     (validateAgentEnvelope)
-//   - quick-fields enum dropdowns
-//   - server 400 → quick-field red border + Monaco squiggle (located)
+// We also install a same-origin no-op Web Worker as `MonacoEnvironment`
+// so monaco never spawns a cross-origin worker URL (which would have the
+// same opaque-error problem). For our use case — plain YAML text editing,
+// no JSON/TS/JS/CSS language services — the worker is unused; the editor
+// just runs on the main thread.
 
-import agentSchema from './agentSchema.json';
+import agentSchema from './agentSchema.json'; // eslint-disable-line no-unused-vars
 
 export const AGENT_MODEL_URI = 'inmemory://model/agent.yaml';
 
-let installed = false;
+let pending = null;
 
-function lspEnabled() {
-  try {
-    return window.localStorage.getItem('acm_cortex_enable_yaml_lsp') === '1';
-  } catch { return false; }
-}
-
-// Same-origin blob shim — used only when the opt-in flag is set.
-function blobShimUrl(realUrl) {
-  const abs = new URL(realUrl, window.location.href).toString();
-  const src = `importScripts(${JSON.stringify(abs)});`;
-  return URL.createObjectURL(new Blob([src], { type: 'application/javascript' }));
-}
-
-function makeWorker(realUrl, label) {
-  try {
-    const sameOrigin = (() => {
-      try { return new URL(realUrl, window.location.href).origin === window.location.origin; }
-      catch { return false; }
-    })();
-    const w = new Worker(sameOrigin ? realUrl : blobShimUrl(realUrl));
-    w.addEventListener('message', function onAlive() {
-      console.info(`[acm] yaml LSP worker booted (${label}, ${sameOrigin ? 'same-origin' : 'blob-shim'})`);
-      w.removeEventListener('message', onAlive);
-    }, { once: false });
-    return w;
-  } catch (e) {
-    console.warn('[agentMonaco] worker construction failed', label, e);
-    return null;
-  }
-}
-
-export async function ensureAgentMonacoSchema(monaco) {
-  if (installed || !monaco) return;
-  installed = true;
-
-  if (!lspEnabled()) {
-    // Default path. Stay completely silent — no monaco-yaml import, no
-    // MonacoEnvironment install, no workers.
-    return;
-  }
-
-  console.info('[acm] yaml LSP opt-in flag detected — bootstrapping');
-  try {
-    if (typeof window !== 'undefined' && !window.MonacoEnvironment) {
-      window.MonacoEnvironment = {
-        getWorker(_moduleId, label) {
-          const url = label === 'yaml'
-            ? new URL('monaco-yaml/yaml.worker.js', import.meta.url).toString()
-            : new URL('monaco-editor/esm/vs/editor/editor.worker.js', import.meta.url).toString();
-          return makeWorker(url, label);
+// Idempotent. Returns a promise that resolves once @monaco-editor/react's
+// loader is wired to the locally-bundled monaco-editor. Safe to call from
+// many places; the import + init only run once.
+export function bootstrapMonacoLoader() {
+  if (pending) return pending;
+  pending = (async () => {
+    // Step 1: same-origin inline noop worker.
+    if (typeof self !== 'undefined' && !self.MonacoEnvironment) {
+      self.MonacoEnvironment = {
+        getWorker() {
+          const src = 'self.onmessage = () => {};';
+          const blob = new Blob([src], { type: 'application/javascript' });
+          return new Worker(URL.createObjectURL(blob));
         },
       };
     }
-    const mod = await import('monaco-yaml');
-    if (mod?.configureMonacoYaml) {
-      mod.configureMonacoYaml(monaco, {
-        enableSchemaRequest: false,
-        hover: true,
-        completion: true,
-        validate: true,
-        format: false,
-        schemas: [{
-          uri: 'inmemory://schema/agent.json',
-          fileMatch: [AGENT_MODEL_URI],
-          schema: agentSchema,
-        }],
-      });
-      console.info('[acm] yaml LSP configured');
-    }
-  } catch (e) {
-    console.warn('[agentMonaco] LSP bootstrap failed', e);
-  }
+    // Step 2: redirect @monaco-editor/react at the local monaco-editor.
+    const [{ loader }, monaco] = await Promise.all([
+      import('@monaco-editor/react'),
+      import('monaco-editor'),
+    ]);
+    loader.config({ monaco });
+    await loader.init();
+    // eslint-disable-next-line no-console
+    console.info('[acm] monaco bound to local monaco-editor (no CDN, no cross-origin workers)');
+  })().catch((err) => {
+    // Reset so a later retry can attempt again (e.g. user navigates away
+    // and back). Re-throw for the caller's catch chain.
+    pending = null;
+    // eslint-disable-next-line no-console
+    console.error('[acm] monaco loader bootstrap failed', err);
+    throw err;
+  });
+  return pending;
 }
+
+// Kept for callsite compatibility with the earlier opt-in LSP path. The
+// schema-aware YAML language server (`monaco-yaml`) is intentionally not
+// enabled here — it brought in cross-origin worker URLs that re-introduced
+// the opaque error. Client envelope checks + server 400 mapping cover the
+// validation needs we have today.
+export async function ensureAgentMonacoSchema(_monaco) { /* no-op */ }
