@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Editor from '@monaco-editor/react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,7 +10,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Loader2, Save, Trash2, AlertCircle, CheckCircle2, ChevronDown, Info, FileCode } from 'lucide-react';
+import { Loader2, Save, Trash2, AlertCircle, CheckCircle2, ChevronDown, Info, FileCode, Rocket } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   getAgent, createAgent, updateAgent, deleteAgent, parseCortexError,
@@ -40,6 +41,7 @@ export function AgentEditor({
   // the parent to power the Undo-delete restore flow).
   onLoaded,
 }) {
+  const navigate = useNavigate();
   const isEdit = mode === 'edit';
   const [agentId, setAgentId] = useState(initialAgentId);
   const [yamlText, setYamlText] = useState(initialYaml);
@@ -277,6 +279,33 @@ export function AgentEditor({
         </div>
 
         <div className="ml-auto flex items-center gap-2">
+          {isEdit && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs gap-1.5"
+              onClick={() => {
+                // Warn if there are unsaved edits — leaving the page would
+                // drop them silently. beforeunload doesn't catch React
+                // Router navigates, so we confirm here.
+                if (dirty && !window.confirm(
+                  'You have unsaved YAML changes. Open in eval anyway? Your edits won\'t be sent to this run.',
+                )) return;
+                const qs = new URLSearchParams({
+                  run: '1',
+                  eph: ephName,
+                  agent: agentId,
+                }).toString();
+                navigate(`/evals?${qs}`);
+              }}
+              disabled={saving || deleting || !ephName || !agentId}
+              data-testid="cortex-agent-open-in-eval-btn"
+              title="Open the Run Evaluation modal pre-filled with this agent + eph"
+            >
+              <Rocket className="w-3.5 h-3.5" />
+              Open in eval
+            </Button>
+          )}
           {isEdit && (
             <Button
               size="sm"

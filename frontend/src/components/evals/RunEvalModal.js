@@ -220,7 +220,11 @@ function ProblemPreview({ ds }) {
 }
 
 // ── Main Modal ────────────────────────────────────────────────────────
-export function RunEvalModal({ open, onClose }) {
+// `initialEph` + `initialAgentName` are used by deep-link entry points
+// (e.g. Cortex Agents → "Open in eval"). When set, the modal opens with
+// the eph picker + agent override pre-filled, so the user only has to
+// choose problems + a group id and submit.
+export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName = '' }) {
   const navigate = useNavigate();
   const { cortexUrl: envCortexUrl } = useEnv();
   const [step, setStep] = useState(1); // 1: problems, 2: configure, 3: review
@@ -316,12 +320,17 @@ export function RunEvalModal({ open, onClose }) {
       setSelectedProblems([]);
       setSelectedPreview(null);
       setSearchQuery('');
-      setAgentNameOverride('');
-      setEphName('');
+      // Seed eph + agent_name from props when the caller deep-linked us
+      // (e.g. Cortex Agents editor). Empty defaults fall back to a clean
+      // modal state otherwise.
+      setAgentNameOverride(initialAgentName || '');
+      setEphName(initialEph || '');
+      setSubmitEph(initialEph || '');
+      setSubmitEphReadiness(null);
       setAgentVerified(null);
       setAgentCheckMsg('');
     }
-  }, [open]);
+  }, [open, initialEph, initialAgentName]);
 
   // Re-set verification status whenever the user edits either input
   useEffect(() => {

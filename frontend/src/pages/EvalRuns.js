@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { getEvalStats, listEvalJobs, listGroupJobs, getEvalAggregate } from '@/services/evalApi';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -142,6 +142,28 @@ export default function EvalRuns() {
   const [page, setPage] = useState(0);
   const pageSize = 100;
   const [evalModalOpen, setEvalModalOpen] = useState(false);
+  // Deep-link entry: /evals?run=1&eph=<eph>&agent=<agent_id> auto-opens the
+  // RunEvalModal pre-filled. Sourced once on mount from the URL; the params
+  // are then stripped so closing + reopening starts clean.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [deepLinkInitial, setDeepLinkInitial] = useState({ eph: '', agent: '' });
+  useEffect(() => {
+    if (searchParams.get('run') === '1') {
+      const eph = (searchParams.get('eph') || '').trim();
+      const agent = (searchParams.get('agent') || '').trim();
+      setDeepLinkInitial({ eph, agent });
+      setEvalModalOpen(true);
+      const next = new URLSearchParams(searchParams);
+      next.delete('run');
+      next.delete('eph');
+      next.delete('agent');
+      setSearchParams(next, { replace: true });
+    }
+    // Run once on mount — the URL params are consumed and stripped, so we
+    // don't want this to re-trigger if the user later edits the URL or
+    // setSearchParams above bumps the dep.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [expandedGroups, setExpandedGroups] = useState({});
   const [filters, setFilters] = useState(EMPTY_FILTERS);
 
@@ -497,7 +519,15 @@ export default function EvalRuns() {
 
       <RunEvalModal
         open={evalModalOpen}
-        onClose={() => { setEvalModalOpen(false); fetchJobs(); fetchStats(); }}
+        onClose={() => {
+          setEvalModalOpen(false);
+          // Drop the deep-link seed so the next manual open starts clean.
+          setDeepLinkInitial({ eph: '', agent: '' });
+          fetchJobs();
+          fetchStats();
+        }}
+        initialEph={deepLinkInitial.eph}
+        initialAgentName={deepLinkInitial.agent}
       />
     </div>
   );
