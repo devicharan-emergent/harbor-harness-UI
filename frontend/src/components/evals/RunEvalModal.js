@@ -652,11 +652,13 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
             <div className="space-y-4 py-2">
               {/* Eph picker (replaces free-text URL — the whole point of this flow) */}
               <div>
-                <Label className="text-sm font-semibold">Target eph *</Label>
+                <Label className="text-sm font-semibold">Target eph</Label>
                 <p className="text-[11px] text-muted-foreground mt-0.5 mb-2">
                   Pick the ephemeral deployment to evaluate against. The backend derives
-                  emergent + cortex URLs from this name and gates submission on live
-                  service readiness — no URLs to paste, no silent rot.
+                  emergent + cortex URLs from this name.
+                  <span className="ml-1 text-amber-600 dark:text-amber-400">
+                    Readiness check temporarily disabled — submission proceeds without preflight.
+                  </span>
                 </p>
                 <EphPicker
                   value={submitEph}
@@ -935,13 +937,12 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 onClick={() => goToStep(step + 1)}
                 disabled={
                   (step === 1 && selectedProblems.length === 0) ||
-                  (step === 2 && (
-                    !groupId.trim() ||
-                    // Eph-driven mode: must be probed and ready. Advanced mode
-                    // can skip the eph picker entirely.
-                    (!advancedMode && !submitEphReadiness?.ready) ||
-                    (advancedMode && submitEph && !submitEphReadiness?.ready)
-                  ))
+                  (step === 2 && !groupId.trim())
+                  // NOTE: eph readiness gate temporarily disabled per product
+                  // ask. Submission still routes through /jobs-with-es when
+                  // an eph is set; we just no longer block Next/Submit on
+                  // the readiness probe. Re-enable by restoring the
+                  // `submitEphReadiness?.ready` conditions when ready.
                 }
                 data-testid="eval-next-step"
               >
@@ -952,13 +953,11 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 onClick={handleSubmit}
                 disabled={
                   submitting || totalJobs === 0 ||
-                  agentVerified === false ||
-                  (!advancedMode && !submitEphReadiness?.ready) ||
-                  (advancedMode && submitEph && !submitEphReadiness?.ready)
+                  agentVerified === false
+                  // NOTE: eph readiness gate temporarily disabled (see Next btn).
                 }
                 title={
                   agentVerified === false ? 'Agent name failed verification — fix it or clear the eph check' :
-                  (!advancedMode && !submitEphReadiness?.ready) ? 'Select an eph and confirm it is ready before submitting' :
                   undefined
                 }
                 data-testid="submit-eval-button"

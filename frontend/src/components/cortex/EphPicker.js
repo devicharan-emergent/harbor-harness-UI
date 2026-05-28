@@ -28,6 +28,15 @@ export function EphPicker({ value, onChange, onReadiness, defaultValue = '' }) {
   // Keep input synced if parent updates `value` programmatically.
   useEffect(() => { if (value && value !== input) setInput(value); }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Propagate input edits to the parent live (so the submission carries the
+  // typed eph even without a Check-readiness click). Skipped when the user
+  // hasn't actually changed the value vs. what the parent already has.
+  const handleInputChange = (e) => {
+    const next = e.target.value;
+    setInput(next);
+    onChange?.(next.trim());
+  };
+
   const probe = useCallback(async (name) => {
     if (!name) return;
     setProbing(true);
@@ -85,7 +94,7 @@ export function EphPicker({ value, onChange, onReadiness, defaultValue = '' }) {
         <div className="flex-1 min-w-[260px] max-w-md">
           <Input
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={handleInputChange}
             placeholder="Enter eph name (e.g. preview-7)"
             className="h-8 text-xs font-mono"
             disabled={probing}
