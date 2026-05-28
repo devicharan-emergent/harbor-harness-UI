@@ -1,21 +1,23 @@
-// monaco-yaml schema bootstrap with same-origin blob-shim worker loader.
+// monaco-yaml schema bootstrap — opt-in.
 //
-// Background: CRA + webpack 5 emits the YAML LSP as a separate worker chunk
-// served from the page's CDN. On Emergent's preview infra the request path
-// trampolines such that `new Worker(workerUrl)` can fail with an opaque
-// CORS-tainted "Script error." Solution: wrap the real URL in a same-origin
-// Blob that simply `importScripts`s it. The Blob is same-origin, so the
-// browser stops poisoning the error; CORS still needs to permit
-// importScripts on the CDN asset (`Access-Control-Allow-Origin` on the
-// .worker.js response), which is the one infra dep.
+// Why the dynamic-import is itself gated:
+// react-scripts 5.0.1's webpack 5 config doesn't reliably emit the worker
+// chunk that `new URL('monaco-yaml/yaml.worker.js', import.meta.url)`
+// requires. When the chunk 404s the failure surfaces as an opaque
+// "Script error." with no usable filename — uncatchable by try/catch and
+// poisonous to the dev overlay. Loading `monaco-yaml` at all installs the
+// MonacoEnvironment hook globally, so even a try/caught configure call
+// already runs the bad code path.
 //
-// Boot signal: we intercept getWorker and listen for the worker's first
-// postMessage so we log a single `[acm] yaml LSP worker booted` line. If
-// you never see that line after the editor mounts, the LSP is dead and the
-// schema is NOT validating (regardless of what the global error filter
-// might have swallowed). Don't assume — verify.
+// Until we serve the worker assets same-origin (or pin the CORS header on a
+// CDN we control), the schema-aware LSP stays opt-in:
+//   localStorage.setItem('acm_cortex_enable_yaml_lsp','1') && reload
 //
-// Disable with: localStorage.setItem('acm_cortex_disable_yaml_lsp','1')
+// In the OFF path everything is a no-op — Monaco loads as plain YAML, and
+// the validation layers that already cover the real cases stay intact:
+//   - client envelope check     (validateAgentEnvelope)
+//   - quick-fields enum dropdowns
+//   - server 400 → quick-field red border + Monaco squiggle (located)
 
 import agentSchema from './agentSchema.json';
 
@@ -23,16 +25,13 @@ export const AGENT_MODEL_URI = 'inmemory://model/agent.yaml';
 
 let installed = false;
 
-function lspDisabled() {
+function lspEnabled() {
   try {
-    return window.localStorage.getItem('acm_cortex_disable_yaml_lsp') === '1';
+    return window.localStorage.getItem('acm_cortex_enable_yaml_lsp') === '1';
   } catch { return false; }
 }
 
-// Build a same-origin Blob worker that importScripts the real (possibly
-// cross-origin) URL. Returns the blob URL; caller is responsible for the
-// Worker constructor. We don't revoke the URL — the Worker holds it for its
-// lifetime and revoking too early kills the worker on Safari.
+// Same-origin blob shim — used only when the opt-in flag is set.
 function blobShimUrl(realUrl) {
   const abs = new URL(realUrl, window.location.href).toString();
   const src = `importScripts(${JSON.stringify(abs)});`;
@@ -41,22 +40,15 @@ function blobShimUrl(realUrl) {
 
 function makeWorker(realUrl, label) {
   try {
-    // Same-origin direct load first — cheapest if it works.
-    const isSameOrigin = (() => {
-      try {
-        const u = new URL(realUrl, window.location.href);
-        return u.origin === window.location.origin;
-      } catch { return false; }
+    const sameOrigin = (() => {
+      try { return new URL(realUrl, window.location.href).origin === window.location.origin; }
+      catch { return false; }
     })();
-    if (isSameOrigin) {
-      const w = new Worker(realUrl);
-      attachBootLog(w, label, 'same-origin');
-      return w;
-    }
-    // Cross-origin (CDN) → blob shim.
-    const shim = blobShimUrl(realUrl);
-    const w = new Worker(shim);
-    attachBootLog(w, label, 'blob-shim');
+    const w = new Worker(sameOrigin ? realUrl : blobShimUrl(realUrl));
+    w.addEventListener('message', function onAlive() {
+      console.info(`[acm] yaml LSP worker booted (${label}, ${sameOrigin ? 'same-origin' : 'blob-shim'})`);
+      w.removeEventListener('message', onAlive);
+    }, { once: false });
     return w;
   } catch (e) {
     console.warn('[agentMonaco] worker construction failed', label, e);
@@ -64,35 +56,17 @@ function makeWorker(realUrl, label) {
   }
 }
 
-// Log first message from the worker. We don't read the payload — Monaco's
-// workers send opaque LSP messages — we only care that *something* came
-// back, which proves the worker booted and can talk to the main thread.
-function attachBootLog(worker, label, via) {
-  if (!worker || !worker.addEventListener) return;
-  let logged = false;
-  const onAlive = () => {
-    if (logged) return;
-    logged = true;
-    console.info(`[acm] yaml LSP worker booted (${label}, ${via})`);
-    worker.removeEventListener('message', onAlive);
-    worker.removeEventListener('error', onErr);
-  };
-  const onErr = (e) => {
-    if (logged) return;
-    console.warn(`[acm] yaml LSP worker errored before first message (${label}, ${via})`, e?.message || e);
-  };
-  worker.addEventListener('message', onAlive);
-  worker.addEventListener('error', onErr);
-}
-
 export async function ensureAgentMonacoSchema(monaco) {
   if (installed || !monaco) return;
   installed = true;
-  if (lspDisabled()) {
-    console.info('[acm] yaml LSP disabled via localStorage flag');
+
+  if (!lspEnabled()) {
+    // Default path. Stay completely silent — no monaco-yaml import, no
+    // MonacoEnvironment install, no workers.
     return;
   }
 
+  console.info('[acm] yaml LSP opt-in flag detected — bootstrapping');
   try {
     if (typeof window !== 'undefined' && !window.MonacoEnvironment) {
       window.MonacoEnvironment = {
@@ -118,7 +92,7 @@ export async function ensureAgentMonacoSchema(monaco) {
           schema: agentSchema,
         }],
       });
-      console.info('[acm] yaml LSP configured (worker boot is async — look for "booted" log next)');
+      console.info('[acm] yaml LSP configured');
     }
   } catch (e) {
     console.warn('[agentMonaco] LSP bootstrap failed', e);
