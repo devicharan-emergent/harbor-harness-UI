@@ -425,8 +425,14 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
           if (expImage) experiments.image = expImage;
           if (expModelName) experiments.model_name = expModelName;
           // cortex_url only flows through in advanced mode AND when there's no
-          // eph selected — eph-driven submission derives URLs server-side.
+          // eph selected — eph-driven submission derives URLs from the eph name.
           if (advancedMode && !submitEph && expCortexUrl) experiments.cortex_url = expCortexUrl;
+        }
+        // Eph-driven path: derive per-eval cortex_url from the eph name so
+        // the harness sees it on every eval item. Mirrors the same project
+        // suffix used by EnvSwitcher.
+        if (submitEph) {
+          experiments.cortex_url = `https://cortex-${submitEph}-tit7tznrtq-uc.a.run.app`;
         }
         if (breakpointEnabled && breakpointMins > 0) {
           experiments.breakpoint_duration_mins = breakpointMins;
@@ -445,7 +451,16 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
 
       const payload = { user_id: userId, group_run_id: groupRunId, evals };
       if (trimmedOverride) payload.agent_name = trimmedOverride;
-      if (submitEph) payload.eph_name = submitEph;
+      // Eph-driven: derive both emergent_agents_url + cortex_url from the
+      // eph name (same Cloud Run project suffix as EnvSwitcher). The
+      // backend used to do this server-side via a readiness preflight; we
+      // now construct on the client so the /jobs-with-es contract is
+      // satisfied without depending on the readiness stub.
+      if (submitEph) {
+        payload.eph_name = submitEph;
+        payload.emergent_agents_url = `https://emergent-agents-${submitEph}-tit7tznrtq-uc.a.run.app`;
+        payload.cortex_url = `https://cortex-${submitEph}-tit7tznrtq-uc.a.run.app`;
+      }
 
       // Route through /jobs-with-es when an eph is set so the backend can
       // derive emergent_agents_url + cortex_url and re-validate readiness.
