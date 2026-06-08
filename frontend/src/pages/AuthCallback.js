@@ -30,7 +30,18 @@ export default function AuthCallback() {
         window.history.replaceState({}, '', window.location.pathname);
         navigate('/', { replace: true, state: { user: data } });
       } catch (err) {
-        setError(err?.response?.data?.detail || 'Authentication failed');
+        // Backend 403 returns { detail: { error, message } } when the email
+        // isn't on the allow-list; fall back to a generic message for any
+        // other failure. Hop to /login with the message in query so a hard
+        // reload still shows the explanation.
+        const d = err?.response?.data?.detail;
+        const message = (typeof d === 'object' && d?.message)
+          ? d.message
+          : (typeof d === 'string' ? d : 'Authentication failed');
+        // Scrub the session_id hash so it isn't reused on retry.
+        window.history.replaceState({}, '', window.location.pathname);
+        navigate(`/login?err=${encodeURIComponent(message)}`, { replace: true });
+        setError(message);
       }
     })();
   }, [navigate, setUser]);

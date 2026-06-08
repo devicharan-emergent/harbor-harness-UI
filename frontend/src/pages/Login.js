@@ -1,11 +1,16 @@
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { LogIn, Sparkles } from 'lucide-react';
+import { LogIn, Sparkles, AlertCircle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useSearchParams } from 'react-router-dom';
 
 export default function Login() {
   const { user, loading } = useAuth();
+  const [searchParams] = useSearchParams();
+  // Surfaced by AuthCallback when the backend rejects the email (e.g.
+  // 403 email_not_allowed). Passed via ?err=... so a hard refresh still
+  // shows the message instead of a blank login.
+  const errMessage = searchParams.get('err');
 
   if (loading) {
     return (
@@ -35,6 +40,15 @@ export default function Login() {
           </p>
         </CardHeader>
         <CardContent className="pt-4 space-y-3">
+          {errMessage && (
+            <div
+              className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
+              data-testid="login-error-banner"
+            >
+              <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+              <span className="leading-relaxed">{errMessage}</span>
+            </div>
+          )}
           <Button
             onClick={signIn}
             className="w-full h-11 text-sm"
@@ -45,6 +59,9 @@ export default function Login() {
           </Button>
           <p className="text-[11px] text-center text-muted-foreground">
             You'll be redirected to Emergent&apos;s secure sign-in.
+          </p>
+          <p className="text-[10px] text-center text-muted-foreground">
+            Access restricted to Emergent team members (@emergent.* email addresses).
           </p>
         </CardContent>
       </Card>

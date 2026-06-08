@@ -72,6 +72,12 @@ async def _get_session_user(request: Request) -> Optional[Dict[str, Any]]:
     user_doc = await db.users.find_one(
         {"user_id": session_doc["user_id"]}, {"_id": 0}
     )
+    # Enforce the allow-list on every resolve so sessions seeded before the
+    # gate landed — or sessions for users whose email later fell out of the
+    # allow-list — fail closed instead of silently working.
+    if user_doc and not _is_allowed_email(user_doc.get("email")):
+        await db.user_sessions.delete_many({"user_id": session_doc["user_id"]})
+        return None
     return user_doc
 
 
@@ -99,6 +105,43 @@ def _pinned_user_id_for(email: str) -> Optional[str]:
     return None
 
 
+# ── Email allow-list ────────────────────────────────────────────────────
+# Only emails whose domain begins with the literal "emergent" are allowed
+# to authenticate. Covers @emergent.sh, @emergent.com, @emergentagent.com,
+# any future @emergent-* TLD, etc. No env override, no test-account
+# exemption — every login (including dev seeding) must use a real
+# @emergent* address.
+def _is_allowed_email(email: Optional[str]) -> bool:
+    if not email or "@" not in email:
+        return False
+    domain = email.rsplit("@", 1)[1].strip().lower()
+    return domain.startswith("emergent")
+
+
+async def _enforce_email_allowlist_or_die(email: Optional[str]) -> None:
+    """Reject + log if the email is not on the allow-list. Used at /auth/session
+    (block fresh logins) AND at every session resolve (kill existing sessions
+    seeded before the gate landed, or sessions for users whose email changed).
+    """
+    if not _is_allowed_email(email):
+        # Best-effort cleanup so the blocked email can't keep using a stale
+        # cookie. Idempotent — safe if the row doesn't exist.
+        if email:
+            try:
+                user_doc = await db.users.find_one({"email": email}, {"_id": 0, "user_id": 1})
+                if user_doc:
+                    await db.user_sessions.delete_many({"user_id": user_doc["user_id"]})
+            except Exception:
+                pass
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "email_not_allowed",
+                "message": "Access restricted to Emergent team members. Sign in with an @emergent.* email address.",
+            },
+        )
+
+
 @api_router.post("/auth/session")
 async def auth_session(body: AuthSessionRequest, response: Response):
     """Exchange a one-time Emergent session_id for a persistent session cookie."""
@@ -113,6 +156,9 @@ async def auth_session(body: AuthSessionRequest, response: Response):
     email = data.get("email")
     if not email:
         raise HTTPException(status_code=400, detail="Emergent auth missing email")
+
+    # Allow-list gate: only @emergent* email domains may sign in.
+    await _enforce_email_allowlist_or_die(email)
 
     pinned = _pinned_user_id_for(email)
 

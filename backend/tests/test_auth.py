@@ -42,7 +42,7 @@ def seeded_session(mongo):
     session_token = f"test_session_{uuid.uuid4().hex}"
     mongo.users.insert_one({
         "user_id": user_id,
-        "email": f"TEST_{user_id[:8]}@example.com",
+        "email": f"TEST_{user_id[:8]}@emergent.com",
         "name": "Test User",
         "picture": "",
         "created_at": datetime.now(timezone.utc),
