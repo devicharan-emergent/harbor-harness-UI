@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, Copy, XCircle, Loader2, CheckCircle, Clock, AlertTriangle, Cpu, ActivitySquare, Ban, FileText, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react';
 import { formatDistanceToNow, formatDuration, intervalToDuration } from 'date-fns';
 import { LintRuleBreakdown } from '@/components/evals/LintRuleBreakdown';
+import { OpenInChatButton } from '@/components/evals/OpenInChatButton';
 
 const STATUS_ICONS = {
   queued: Clock,
@@ -175,6 +176,7 @@ export default function JobDetail() {
             <Copy className="w-3.5 h-3.5 mr-1.5" />
             Copy ID
           </Button>
+          <OpenInChatButton jobId={job.id} status={job.status} className="h-8" />
           {isActive && (
             <>
             <Button

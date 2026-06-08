@@ -86,6 +86,30 @@ export const cancelEvalJob = async (jobId) => {
 };
 
 /**
+ * Prepare a harbor eval for viewing in the chat UI.
+ * POST /api/eval/jobs/{job_id}/prepare-for-ui → harness POST /api/v1/evals/{eval_id}/prepare-for-ui
+ * Idempotent. Backfills the agent-service rows the chat UI needs.
+ * Returns: { eval_id, cortex_job_id, eph, db, repaired: string[] }
+ * `repaired` is either a subset of ["payload.task","use_cortex","usages"]
+ * or exactly ["already_healthy"].
+ */
+export const prepareEvalForUI = async (jobId) => {
+  const response = await evalApiClient.post(`/jobs/${jobId}/prepare-for-ui`);
+  return response.data;
+};
+
+/**
+ * Build the chat URL from a prepare-for-ui response. Mirrors the spec's
+ * lookup: default-dev cortex (empty eph) → app.dev.emergentagent.com;
+ * eph-bound cortex → {eph}.dev.apps.emergentagent.com.
+ */
+export const buildChatURL = (eph, cortexJobId) => {
+  if (!cortexJobId) return null;
+  if (!eph) return `https://app.dev.emergentagent.com/?job_id=${cortexJobId}`;
+  return `https://${eph}.dev.apps.emergentagent.com/?job_id=${cortexJobId}`;
+};
+
+/**
  * Get queue stats by status
  * GET /api/eval/stats
  * Returns: { queued: 5, generating: 2, running: 3, completed: 100, failed: 2, cancelled: 1 }

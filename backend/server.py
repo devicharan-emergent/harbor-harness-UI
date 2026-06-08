@@ -672,6 +672,32 @@ async def proxy_cancel_eval_job(job_id: str, created_by: Optional[str] = None):
     except httpx.HTTPError as e:
         raise HTTPException(status_code=500, detail=f"Eval API error: {str(e)}")
 
+
+@api_router.post("/eval/jobs/{job_id}/prepare-for-ui")
+async def proxy_prepare_eval_for_ui(job_id: str):
+    """Proxy → harness POST /api/v1/evals/{eval_id}/prepare-for-ui.
+
+    Backfills the agent-service rows needed to view a harbor eval in the
+    chat UI. Idempotent. Returns the harness response body verbatim so
+    the UI can read `cortex_job_id`, `eph`, and `repaired`. Surfaces
+    harness 4xx/5xx errors with their original status code + JSON detail
+    so the UI can render the spec'd toast messages.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as hclient:
+            response = await hclient.post(
+                f"{EVAL_API_BASE}/api/v1/evals/{job_id}/prepare-for-ui",
+            )
+            if response.status_code >= 400:
+                try:
+                    detail = response.json()
+                except Exception:
+                    detail = {"message": response.text or "harness error"}
+                raise HTTPException(status_code=response.status_code, detail=detail)
+            return response.json()
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Eval API error: {str(e)}")
+
 @api_router.get("/eval/stats")
 async def proxy_eval_stats():
     """Proxy: Get eval queue stats - transforms array to object format"""
