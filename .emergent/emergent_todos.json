@@ -1,26 +1,26 @@
 [
   {
-    "content": "Backend: Add dataset CRUD proxy endpoints (POST, PUT, DELETE)",
-    "status": "in_progress"
+    "content": "Discover all GET routes in the backend API",
+    "status": "completed"
   },
   {
-    "content": "Frontend: Build Datasets page with list/create/edit/delete + type-specific forms",
-    "status": "pending"
+    "content": "Create performance test script for all GET routes",
+    "status": "completed"
   },
   {
-    "content": "Frontend: Add nav link for Datasets page in sidebar",
-    "status": "pending"
+    "content": "Test all routes against preview backend provider",
+    "status": "completed"
   },
   {
-    "content": "Frontend: Update RunEvalModal - add agent selection step with fan-out + 1:1 mapping",
-    "status": "pending"
+    "content": "Test all routes against caddy backend provider",
+    "status": "completed"
   },
   {
-    "content": "Frontend: Show agent association on EvalRuns table + JobDetail page",
-    "status": "pending"
+    "content": "Test all routes against cloudflare backend provider",
+    "status": "completed"
   },
   {
-    "content": "Test batch eval + dataset CRUD end-to-end",
-    "status": "pending"
+    "content": "Report performance results using Performance_result tool",
+    "status": "completed"
   }
 ]

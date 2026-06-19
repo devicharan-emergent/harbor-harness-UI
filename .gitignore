@@ -84,3 +84,6 @@ credentials.json
 
 # Local-only docs that must never ship to production
 memory/test_credentials.md
+.env
+.env.*
+*.env
