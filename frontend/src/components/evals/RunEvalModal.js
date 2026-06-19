@@ -17,6 +17,7 @@ import { Loader2, Rocket, FileText, Search, ChevronRight, Check, AlertCircle, X 
 import { parseApiError } from '@/lib/errorUtils';
 import { useEnv } from '@/components/layout/EnvSwitcher';
 import { EphPicker } from '@/components/cortex/EphPicker';
+import { useCreatedBy } from '@/contexts/AuthContext';
 
 const DATASET_TYPES = [
   { value: 'all', label: 'All Types' },
@@ -247,7 +248,13 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
   const [storageGb, setStorageGb] = useState(10);
   const [headed, setHeaded] = useState(true);
   const [forceBuild, setForceBuild] = useState(false);
-  const [userId, setUserId] = useState('acm-user');
+  // Default the eval owner to the signed-in user (overridable). A placeholder
+  // default caused credit-balance 404s downstream.
+  const loggedInUserId = useCreatedBy();
+  const [userId, setUserId] = useState('');
+  useEffect(() => {
+    if (loggedInUserId) setUserId(prev => prev || loggedInUserId);
+  }, [loggedInUserId]);
 
   // Experiment config
   const [showExpConfig, setShowExpConfig] = useState(false);
