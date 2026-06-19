@@ -21,7 +21,7 @@
     "backend": "100% (11/11 passthrough tests pass)",
     "frontend": "100% (RunEvalModal submit -> POST body has created_by; /evals + /schedules GETs carry ?created_by; /datasets zero leaks)"
   },
-  "test_credentials": "Seeded user_id=0ee59a27-db9c-4647-aeee-f72173fcd757 with session_token 'pw_iter19_20260430' (valid 7 days from 2026-04-30). Also still valid from iter18: 'pw_iter18_1777566255170'. The original 'pw_test_1034c53aab0f4e8d94e9ff3a692f9da5' was invalidated by iter18's logout test.",
+  "test_credentials": "Seeded user_id=ui-preview-debug with session_token 'pw_iter19_20260430' (valid 7 days from 2026-04-30). Also still valid from iter18: 'pw_iter18_1777566255170'. The original 'pw_test_1034c53aab0f4e8d94e9ff3a692f9da5' was invalidated by iter18's logout test.",
   "seed_data_creation": "Inserted user_sessions row for session_token='pw_iter19_20260430'. One real eval job was submitted through the UI labeled 'TEST_iter19_created_by-2026-04-30T18-00-05-204Z-zpny' as part of the end-to-end validation. Consider deleting this batch from the harness if cleanup is desired.",
   "retest_needed": false,
   "main_agent_can_self_test": true,
