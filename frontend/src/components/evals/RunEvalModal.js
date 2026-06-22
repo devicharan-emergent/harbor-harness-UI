@@ -247,7 +247,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
   const [storageGb, setStorageGb] = useState(10);
   const [headed, setHeaded] = useState(true);
   const [forceBuild, setForceBuild] = useState(false);
-  const [userId, setUserId] = useState('acm-user');
+  const [userId, setUserId] = useState('6e01d102-2641-44a2-89b8-039927baefde');
 
   // Experiment config
   const [showExpConfig, setShowExpConfig] = useState(false);
