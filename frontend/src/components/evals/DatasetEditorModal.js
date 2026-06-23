@@ -20,6 +20,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { createDataset, updateDataset } from '@/services/evalApi';
+import { ModelNamePicker } from './ModelNamePicker';
 import { parseApiError } from '@/lib/errorUtils';
 import { toast } from 'sonner';
 import {
@@ -1313,13 +1314,19 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
                     </div>
                     <div>
                       <Label className="text-xs">Model Name</Label>
-                      <Input
-                        value={modelName}
-                        onChange={(e) => setModelName(e.target.value)}
-                        placeholder="Optional — e.g. gpt-5.2"
-                        className="mt-1 text-sm font-mono"
-                        data-testid="attr-model-name"
-                      />
+                      <div className="mt-1">
+                        <ModelNamePicker
+                          value={modelName}
+                          onChange={setModelName}
+                          testId="attr-model-name"
+                        />
+                      </div>
+                      <p className="text-[10px] text-muted-foreground mt-1">
+                        Optional. Stored on the dataset as{' '}
+                        <code className="font-mono">attributes.model_name</code>.
+                        Pick a preset, leave default (blank) for the agent&apos;s default,
+                        or choose Custom… to enter a free-text model id.
+                      </p>
                     </div>
                     <p className="text-[10px] text-muted-foreground">
                       Required: <span className="font-mono">agent_name</span>.

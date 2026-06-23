@@ -17,6 +17,7 @@ import { Loader2, Rocket, FileText, Search, ChevronRight, Check, AlertCircle, X 
 import { parseApiError } from '@/lib/errorUtils';
 import { useEnv } from '@/components/layout/EnvSwitcher';
 import { EphPicker } from '@/components/cortex/EphPicker';
+import { ModelNamePicker } from './ModelNamePicker';
 
 const DATASET_TYPES = [
   { value: 'all', label: 'All Types' },
@@ -295,6 +296,13 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
   // Free-text agent_name override — sent at the batch level when set.
   const [agentNameOverride, setAgentNameOverride] = useState('');
 
+  // testing_agent_bench per-run model_name override. Pre-fills from the
+  // selected dataset's `attributes.model_name` when entering Step 2, but
+  // any user edit (incl. clearing) wins and is sent in the per-eval body.
+  // We never mutate the dataset itself.
+  const [modelNameOverride, setModelNameOverride] = useState('');
+  const [modelOverrideTouched, setModelOverrideTouched] = useState(false);
+
   // Eph (ephemeral cortex deployment) name + existence check state.
   // Only used for the "Check" button beside the agent name input.
   const [ephName, setEphName] = useState('');
@@ -354,6 +362,8 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
       setSubmitEphReadiness(null);
       setAgentVerified(null);
       setAgentCheckMsg('');
+      setModelNameOverride('');
+      setModelOverrideTouched(false);
     }
   }, [open, initialEph, initialAgentName]);
 
@@ -362,6 +372,20 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
     setAgentVerified(null);
     setAgentCheckMsg('');
   }, [agentNameOverride, ephName]);
+
+  // Pre-fill the per-run model override from the first selected
+  // testing_agent_bench dataset's `attributes.model_name` when entering
+  // Step 2. We only pre-fill once per modal open AND only if the user
+  // hasn't touched the override field yet — clearing is meaningful and
+  // must not be re-populated.
+  useEffect(() => {
+    if (step !== 2 || !isTestingAgentMode || modelOverrideTouched) return;
+    const first = selectedProblems[0];
+    const seed = first?.attributes?.model_name || '';
+    if (seed && !modelNameOverride) {
+      setModelNameOverride(seed);
+    }
+  }, [step, isTestingAgentMode, modelOverrideTouched, selectedProblems, modelNameOverride]);
 
   const handleCheckAgent = async () => {
     const eph = ephName.trim();
@@ -490,9 +514,17 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
             golden_output: golden,
             group_run_id: groupRunId,
           };
-          if (attrs.model_name && String(attrs.model_name).trim()) {
-            body.model_name = String(attrs.model_name).trim();
-          }
+          // Model name resolution:
+          //  - If the user edited the override field at all in this open
+          //    session (`modelOverrideTouched`), the override wins —
+          //    including an empty value (= "use agent's default", key
+          //    OMITTED from the body, never sent as "").
+          //  - Otherwise fall back to the dataset's stored
+          //    `attributes.model_name`. Omit when blank.
+          const resolvedModel = modelOverrideTouched
+            ? modelNameOverride.trim()
+            : String(attrs.model_name || '').trim();
+          if (resolvedModel) body.model_name = resolvedModel;
           if (userId.trim()) body.user_id = userId.trim();
           const result = await submitTestingAgentEval(body);
           if (Array.isArray(result?.jobs)) totalJobs.push(...result.jobs);
@@ -942,6 +974,29 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                     placeholder="e.g. testing-agent-v3-gpt-5-2-codex"
                     className="font-mono text-sm"
                     data-testid="eval-testing-agent-name-override"
+                  />
+                </div>
+              )}
+
+              {/* Model name override — testing_agent_mode only */}
+              {isTestingAgentMode && (
+                <div>
+                  <Label className="text-sm font-semibold">Model Name</Label>
+                  <p className="text-[11px] text-muted-foreground mt-0.5 mb-2">
+                    Pre-filled from the selected dataset&apos;s{' '}
+                    <code className="font-mono">attributes.model_name</code>.
+                    Edit to override for this run only — the dataset is not
+                    modified. Leave on{' '}
+                    <span className="font-mono">(default)</span> to use the
+                    agent&apos;s default model (key is omitted from the payload).
+                  </p>
+                  <ModelNamePicker
+                    value={modelNameOverride}
+                    onChange={(v) => {
+                      setModelNameOverride(v);
+                      setModelOverrideTouched(true);
+                    }}
+                    testId="eval-testing-model-override"
                   />
                 </div>
               )}
