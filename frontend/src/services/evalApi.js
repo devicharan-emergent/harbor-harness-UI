@@ -16,6 +16,7 @@ const evalApiClient = axios.create({
 // cortex agent checks, stats, and health are shared resources and stay as-is.
 attachOwnership(evalApiClient, [
   /\/jobs(\/|$|-with-es$)/,
+  /\/testing-agent-evals(\/|$)/,
   /\/groups\/[^/]+\/jobs(\/|$)/,
 ]);
 
@@ -41,6 +42,18 @@ export const submitEvalJobs = async (payload) => {
  */
 export const submitEvalJobsWithEs = async (payload) => {
   const response = await evalApiClient.post('/jobs-with-es', payload, { skipOwnership: false });
+  return response.data;
+};
+
+/**
+ * Submit a single testing_agent_bench eval (forks a prod job).
+ * POST /api/eval/testing-agent-evals  →  harness /api/v1/testing-agent-evals
+ * Body: { prod_job_id, agent_name, hitl_input, golden_output, model_name?,
+ *         group_run_id, user_id?, created_by (injected) }
+ * Returns: { jobs: [{ id, problem, status, k8s_job_name, created_at }] }
+ */
+export const submitTestingAgentEval = async (payload) => {
+  const response = await evalApiClient.post('/testing-agent-evals', payload);
   return response.data;
 };
 

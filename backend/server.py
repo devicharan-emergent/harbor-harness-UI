@@ -558,6 +558,36 @@ async def proxy_submit_eval_with_es(body: dict):
         "POST", "/api/v1/internal/evals-with-es", json=body,
     )
 
+
+@api_router.post("/eval/testing-agent-evals")
+async def proxy_submit_testing_agent_eval(body: dict):
+    """Proxy → harness POST /api/v1/testing-agent-evals.
+
+    Pass-through for the testing_agent_bench fork flow. The harness takes
+    flat HITL/golden inputs (no dataset_id) and returns 202 with a `jobs`
+    array. `created_by` is injected client-side via the axios interceptor;
+    we forward the body as-is.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as hclient:
+            response = await hclient.post(
+                f"{EVAL_API_BASE}/api/v1/testing-agent-evals", json=body,
+            )
+            if response.status_code >= 400:
+                try:
+                    err = response.json()
+                except Exception:
+                    err = {"message": response.text}
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=err.get("message", str(err)),
+                )
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Eval API error: {str(e)}")
+
 @api_router.post("/eval/jobs")
 async def proxy_submit_eval(body: dict):
     """Proxy: Submit eval jobs to external Eval API.

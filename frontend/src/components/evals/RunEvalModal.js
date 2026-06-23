@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
-import { listDatasets, listDatasetsByType, getDatasetForProblem, submitEvalJobs, submitEvalJobsWithEs, checkAgentExists } from '@/services/evalApi';
+import { listDatasets, listDatasetsByType, getDatasetForProblem, submitEvalJobs, submitEvalJobsWithEs, submitTestingAgentEval, checkAgentExists } from '@/services/evalApi';
 import { toast } from 'sonner';
 import { Loader2, Rocket, FileText, Search, ChevronRight, Check, AlertCircle, X } from 'lucide-react';
 import { parseApiError } from '@/lib/errorUtils';
@@ -23,6 +23,7 @@ const DATASET_TYPES = [
   { value: 'scratch_bench_phased', label: 'Scratch Bench (Phased)' },
   { value: 'bug_bench', label: 'Bug Bench' },
   { value: 'test_report_bench', label: 'Test Report Bench' },
+  { value: 'testing_agent_bench', label: 'Testing Agent Bench' },
 ];
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -260,6 +261,30 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
   // readiness preflight. Free-text cortex_url stays behind ?advanced=1 only.
   const [searchParams] = useSearchParams();
   const advancedMode = useMemo(() => searchParams.get('advanced') === '1', [searchParams]);
+
+  // testing_agent_bench fork-eval mode. When every selected problem is
+  // testing_agent_bench, we hide infra fields (CPUs/Memory/Storage, Target
+  // eph, Template, batch agent override) and POST one body per problem to
+  // a different harness endpoint (/api/v1/testing-agent-evals). Mixed
+  // selections (some testing_agent_bench + some scratch/bug) are blocked
+  // at submit-time with an inline error.
+  const testingAgentSelections = useMemo(
+    () => selectedProblems.filter((p) => p.dataset_type === 'testing_agent_bench'),
+    [selectedProblems]
+  );
+  const isTestingAgentMode = useMemo(
+    () =>
+      selectedProblems.length > 0 &&
+      testingAgentSelections.length === selectedProblems.length,
+    [selectedProblems.length, testingAgentSelections.length]
+  );
+  const hasMixedTypes = useMemo(
+    () =>
+      testingAgentSelections.length > 0 &&
+      testingAgentSelections.length !== selectedProblems.length,
+    [testingAgentSelections.length, selectedProblems.length]
+  );
+
   const [submitEph, setSubmitEph] = useState('');
   // null = not yet probed; otherwise the readiness object from the API.
   const [submitEphReadiness, setSubmitEphReadiness] = useState(null);
@@ -402,12 +427,81 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
       toast.error('Select at least one problem');
       return;
     }
+    if (hasMixedTypes) {
+      toast.error(
+        'Cannot mix testing_agent_bench with other dataset types. Submit them as separate batches.'
+      );
+      return;
+    }
     if (!groupId.trim()) {
       toast.error('Group Run ID is required');
       return;
     }
     setSubmitting(true);
     try {
+      // Harness requires `group_run_id` to be unique per submission. Append
+      // an ISO timestamp + short random suffix so users can reuse the same
+      // human-friendly label (e.g. "nightly") across runs without
+      // collisions even on rapid double-clicks.
+      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+      const rand = Math.random().toString(36).slice(2, 6);
+      const groupRunId = `${groupId.trim()}-${ts}-${rand}`;
+
+      // ── testing_agent_bench fork-eval branch ───────────────────
+      if (isTestingAgentMode) {
+        const totalJobs = [];
+        for (const ds of selectedProblems) {
+          // The dataset list endpoint trims problem_statement /
+          // natural_language_tests / attributes; hydrate per-problem.
+          let full = ds;
+          if (!ds.problem_statement || !ds.natural_language_tests || !ds.attributes) {
+            try {
+              full = (await getDatasetForProblem(ds.name)) || ds;
+            } catch {
+              full = ds;
+            }
+          }
+          const attrs = full.attributes || {};
+          const agent = (attrs.agent_name || '').trim();
+          const hitl = full.problem_statement || '';
+          const golden = full.natural_language_tests || '';
+          const prodJobId = (attrs.prod_job_id || full.instance_id || '').trim();
+          if (!agent) {
+            throw new Error(
+              `Dataset ${full.name || ds.name}: attributes.agent_name is required`
+            );
+          }
+          if (!hitl.trim() || !golden.trim()) {
+            throw new Error(
+              `Dataset ${full.name || ds.name}: HITL input and golden output are required`
+            );
+          }
+          if (!prodJobId) {
+            throw new Error(
+              `Dataset ${full.name || ds.name}: prod_job_id (or instance_id) is required`
+            );
+          }
+          const body = {
+            prod_job_id: prodJobId,
+            agent_name: agent,
+            hitl_input: hitl,
+            golden_output: golden,
+            group_run_id: groupRunId,
+          };
+          if (attrs.model_name && String(attrs.model_name).trim()) {
+            body.model_name = String(attrs.model_name).trim();
+          }
+          if (userId.trim()) body.user_id = userId.trim();
+          const result = await submitTestingAgentEval(body);
+          if (Array.isArray(result?.jobs)) totalJobs.push(...result.jobs);
+        }
+        toast.success(`Submitted ${totalJobs.length || selectedProblems.length} testing-agent eval(s)`);
+        onClose();
+        navigate('/evals');
+        return;
+      }
+
+      // ── Standard scratch/bug/test-report batch ─────────────────
       const trimmedOverride = agentNameOverride.trim();
 
       const evals = selectedProblems.map(problem => {
@@ -440,14 +534,6 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
         if (Object.keys(experiments).length > 0) evalItem.experiments = experiments;
         return evalItem;
       });
-
-      // Harness requires `group_run_id` to be unique per submission. Append
-      // an ISO timestamp + short random suffix so users can reuse the same
-      // human-friendly label (e.g. "nightly") across runs without
-      // collisions even on rapid double-clicks.
-      const ts = new Date().toISOString().replace(/[:.]/g, '-');
-      const rand = Math.random().toString(36).slice(2, 6);
-      const groupRunId = `${groupId.trim()}-${ts}-${rand}`;
 
       const payload = { user_id: userId, group_run_id: groupRunId, evals };
       if (trimmedOverride) payload.agent_name = trimmedOverride;
@@ -559,6 +645,21 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 </div>
               )}
 
+              {hasMixedTypes && (
+                <div
+                  className="flex items-start gap-2 rounded-md border border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300 px-3 py-2 text-[11px]"
+                  data-testid="step1-mixed-types-warning"
+                >
+                  <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                  <span>
+                    Mixed dataset types selected.{' '}
+                    <strong>testing_agent_bench</strong> uses a different harness
+                    endpoint and can't be batched with scratch/bug/test-report
+                    problems. Deselect one type to continue.
+                  </span>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-3" style={{ minHeight: '300px' }}>
                 <ScrollArea className="h-[350px] border rounded-lg">
                   {loadingDatasets ? (
@@ -665,24 +766,54 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
           {/* ── Step 2: Configure ──────────────────────────────── */}
           {step === 2 && (
             <div className="space-y-4 py-2">
-              {/* Eph picker (replaces free-text URL — the whole point of this flow) */}
-              <div>
-                <Label className="text-sm font-semibold">Target eph</Label>
-                <p className="text-[11px] text-muted-foreground mt-0.5 mb-2">
-                  Pick the ephemeral deployment to evaluate against. The backend derives
-                  emergent + cortex URLs from this name.
-                  <span className="ml-1 text-amber-600 dark:text-amber-400">
-                    Readiness check temporarily disabled — submission proceeds without preflight.
+              {hasMixedTypes && (
+                <div
+                  className="flex items-start gap-2 rounded-md border border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300 px-3 py-2 text-[11px]"
+                  data-testid="mixed-types-warning"
+                >
+                  <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                  <span>
+                    You&apos;ve mixed <strong>testing_agent_bench</strong> problems with other
+                    dataset types. Submit them as separate batches — testing_agent_bench
+                    forks a prod job and uses a different harness endpoint.
                   </span>
-                </p>
-                <EphPicker
-                  value={submitEph}
-                  onChange={(name) => { setSubmitEph(name); setSubmitEphReadiness(null); }}
-                  onReadiness={setSubmitEphReadiness}
-                />
-              </div>
+                </div>
+              )}
+              {isTestingAgentMode && (
+                <div
+                  className="flex items-start gap-2 rounded-md border border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-300 px-3 py-2 text-[11px]"
+                  data-testid="testing-agent-mode-banner"
+                >
+                  <Rocket className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                  <span>
+                    <strong>Testing Agent Bench mode.</strong> The harness will fork
+                    each prod job and run the testing agent against the dataset&apos;s
+                    HITL input + golden output. Infra config is sourced from the
+                    forked prod job, so only Group Run ID and User ID are needed.
+                  </span>
+                </div>
+              )}
 
-              {/* Group Run ID */}
+              {/* Eph picker (hidden in testing_agent_mode) */}
+              {!isTestingAgentMode && (
+                <div>
+                  <Label className="text-sm font-semibold">Target eph</Label>
+                  <p className="text-[11px] text-muted-foreground mt-0.5 mb-2">
+                    Pick the ephemeral deployment to evaluate against. The backend derives
+                    emergent + cortex URLs from this name.
+                    <span className="ml-1 text-amber-600 dark:text-amber-400">
+                      Readiness check temporarily disabled — submission proceeds without preflight.
+                    </span>
+                  </p>
+                  <EphPicker
+                    value={submitEph}
+                    onChange={(name) => { setSubmitEph(name); setSubmitEphReadiness(null); }}
+                    onReadiness={setSubmitEphReadiness}
+                  />
+                </div>
+              )}
+
+              {/* Group Run ID — always shown */}
               <div>
                 <Label className="text-sm font-semibold">Group Run ID *</Label>
                 <p className="text-[11px] text-muted-foreground mt-0.5 mb-2">
@@ -698,22 +829,24 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 />
               </div>
 
-              {/* Template */}
-              <div>
-                <Label className="text-sm font-semibold">Template Name</Label>
-                <p className="text-[11px] text-muted-foreground mt-0.5 mb-2">Optional: start from a pre-built template snapshot</p>
-                <Input
-                  value={templateName}
-                  onChange={e => setTemplateName(e.target.value)}
-                  placeholder="e.g. task_manager, ecom_store"
-                  className="font-mono text-sm"
-                  data-testid="eval-template-name"
-                />
-              </div>
+              {!isTestingAgentMode && (
+                <>
+                  {/* Template */}
+                  <div>
+                    <Label className="text-sm font-semibold">Template Name</Label>
+                    <p className="text-[11px] text-muted-foreground mt-0.5 mb-2">Optional: start from a pre-built template snapshot</p>
+                    <Input
+                      value={templateName}
+                      onChange={e => setTemplateName(e.target.value)}
+                      placeholder="e.g. task_manager, ecom_store"
+                      className="font-mono text-sm"
+                      data-testid="eval-template-name"
+                    />
+                  </div>
 
-              {/* Agent name override (free-text) + existence check */}
-              <div>
-                <Label className="text-sm font-semibold">Agent name</Label>
+                  {/* Agent name override (free-text) + existence check */}
+                  <div>
+                    <Label className="text-sm font-semibold">Agent name</Label>
                 <p className="text-[11px] text-muted-foreground mt-0.5 mb-2">
                   Optional. Type any agent name the harness/cortex recognizes
                   (e.g. <code className="font-mono">full_stack_app_builder_cloud_v8_sonnet_4_5</code>).
@@ -774,12 +907,30 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                   </div>
                 )}
               </div>
+                </>
+              )}
 
+              {/* User ID — always shown */}
+              <div>
+                <Label className="text-sm font-semibold">User ID</Label>
+                <p className="text-[11px] text-muted-foreground mt-0.5 mb-2">
+                  UUID forwarded to the harness as <code className="font-mono">user_id</code>.
+                </p>
+                <Input
+                  value={userId}
+                  onChange={e => setUserId(e.target.value)}
+                  className="font-mono text-xs"
+                  data-testid="eval-user-id"
+                />
+              </div>
+
+              {!isTestingAgentMode && (
+                <>
               <Separator />
 
               <div className="space-y-3">
                 <Label className="text-sm font-semibold">Resources</Label>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-3 gap-3">
                   <div>
                     <Label className="text-xs">CPUs</Label>
                     <Input type="number" value={cpus} onChange={e => setCpus(Number(e.target.value))} min={1} max={8} data-testid="eval-cpus" />
@@ -791,10 +942,6 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                   <div>
                     <Label className="text-xs">Storage (GB)</Label>
                     <Input type="number" value={storageGb} onChange={e => setStorageGb(Number(e.target.value))} min={5} max={50} data-testid="eval-storage" />
-                  </div>
-                  <div>
-                    <Label className="text-xs">User ID</Label>
-                    <Input value={userId} onChange={e => setUserId(e.target.value)} className="font-mono text-xs" data-testid="eval-user-id" />
                   </div>
                 </div>
                 <div className="flex items-center gap-6">
@@ -856,6 +1003,8 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                   </div>
                 )}
               </div>
+                </>
+              )}
             </div>
           )}
 
@@ -916,11 +1065,21 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                   <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-xs">
                     <div><span className="text-muted-foreground">Group:</span> <span className="font-mono">{groupId}</span></div>
                     <div><span className="text-muted-foreground">User:</span> <span className="font-mono">{userId}</span></div>
-                    <div><span className="text-muted-foreground">CPUs:</span> <span className="font-mono">{cpus}</span></div>
-                    <div><span className="text-muted-foreground">Memory:</span> <span className="font-mono">{memoryMb} MB</span></div>
-                    <div><span className="text-muted-foreground">Storage:</span> <span className="font-mono">{storageGb} GB</span></div>
-                    <div><span className="text-muted-foreground">Headed:</span> <span className="font-mono">{headed ? 'Yes' : 'No'}</span></div>
-                    <div><span className="text-muted-foreground">Force Build:</span> <span className="font-mono">{forceBuild ? 'Yes' : 'No'}</span></div>
+                    {isTestingAgentMode ? (
+                      <div className="col-span-2">
+                        <span className="text-muted-foreground">Mode:</span>{' '}
+                        <span className="font-mono text-violet-600 dark:text-violet-400">testing_agent_bench</span>
+                        <span className="text-muted-foreground"> — infra from forked prod jobs</span>
+                      </div>
+                    ) : (
+                      <>
+                        <div><span className="text-muted-foreground">CPUs:</span> <span className="font-mono">{cpus}</span></div>
+                        <div><span className="text-muted-foreground">Memory:</span> <span className="font-mono">{memoryMb} MB</span></div>
+                        <div><span className="text-muted-foreground">Storage:</span> <span className="font-mono">{storageGb} GB</span></div>
+                        <div><span className="text-muted-foreground">Headed:</span> <span className="font-mono">{headed ? 'Yes' : 'No'}</span></div>
+                        <div><span className="text-muted-foreground">Force Build:</span> <span className="font-mono">{forceBuild ? 'Yes' : 'No'}</span></div>
+                      </>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -951,7 +1110,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
               <Button
                 onClick={() => goToStep(step + 1)}
                 disabled={
-                  (step === 1 && selectedProblems.length === 0) ||
+                  (step === 1 && (selectedProblems.length === 0 || hasMixedTypes)) ||
                   (step === 2 && !groupId.trim())
                   // NOTE: eph readiness gate temporarily disabled per product
                   // ask. Submission still routes through /jobs-with-es when
@@ -959,6 +1118,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                   // the readiness probe. Re-enable by restoring the
                   // `submitEphReadiness?.ready` conditions when ready.
                 }
+                title={hasMixedTypes ? 'Cannot mix testing_agent_bench with other dataset types' : undefined}
                 data-testid="eval-next-step"
               >
                 Next <ChevronRight className="w-4 h-4 ml-1" />
