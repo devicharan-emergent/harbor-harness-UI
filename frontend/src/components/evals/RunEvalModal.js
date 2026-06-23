@@ -449,6 +449,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
 
       // ── testing_agent_bench fork-eval branch ───────────────────
       if (isTestingAgentMode) {
+        const trimmedOverride = agentNameOverride.trim();
         const totalJobs = [];
         for (const ds of selectedProblems) {
           // The dataset list endpoint trims problem_statement /
@@ -462,13 +463,14 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
             }
           }
           const attrs = full.attributes || {};
-          const agent = (attrs.agent_name || '').trim();
+          // Override (if set) wins over the dataset's stored agent_name.
+          const agent = trimmedOverride || (attrs.agent_name || '').trim();
           const hitl = full.problem_statement || '';
           const golden = full.natural_language_tests || '';
           const prodJobId = (attrs.prod_job_id || full.instance_id || '').trim();
           if (!agent) {
             throw new Error(
-              `Dataset ${full.name || ds.name}: attributes.agent_name is required`
+              `Dataset ${full.name || ds.name}: agent_name is required (set on the dataset or via the override)`
             );
           }
           if (!hitl.trim() || !golden.trim()) {
@@ -923,6 +925,26 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                   data-testid="eval-user-id"
                 />
               </div>
+
+              {/* Agent name override — testing_agent_mode only */}
+              {isTestingAgentMode && (
+                <div>
+                  <Label className="text-sm font-semibold">Agent Name (override)</Label>
+                  <p className="text-[11px] text-muted-foreground mt-0.5 mb-2">
+                    Optional. When set, overrides each dataset&apos;s
+                    {' '}<code className="font-mono">attributes.agent_name</code>
+                    {' '}for this submission only — useful for A/B testing a
+                    different testing agent against the same HITL + golden.
+                  </p>
+                  <Input
+                    value={agentNameOverride}
+                    onChange={e => setAgentNameOverride(e.target.value)}
+                    placeholder="e.g. testing-agent-v3-gpt-5-2-codex"
+                    className="font-mono text-sm"
+                    data-testid="eval-testing-agent-name-override"
+                  />
+                </div>
+              )}
 
               {!isTestingAgentMode && (
                 <>
