@@ -113,19 +113,32 @@ export function parseProblemPhases(xml) {
 
 // Parse natural_language_tests into an array of arrays of test case strings.
 // One outer entry per phase; inner array contains each <test_case> body.
+// Also tolerates legacy `<test>…</test>` (singular, no wrapper) — some
+// hand-written CSVs and external tools emit that shape. We only fall back
+// to <test> when no <test_case> nodes were found in the phase body, so
+// canonical files are unaffected.
 export function parseTestsPhases(xml) {
   if (!xml || typeof xml !== 'string') return [];
   const phaseRe = /<phase\b[^>]*>([\s\S]*?)<\/phase>/gi;
-  const testRe = /<test_case\b[^>]*>([\s\S]*?)<\/test_case>/gi;
+  const testCaseRe = /<test_case\b[^>]*>([\s\S]*?)<\/test_case>/gi;
+  // \b after `test` matches `>` / space / `/` but not `_` — so this regex
+  // doesn't accidentally also fire on `<test_case>`.
+  const testFallbackRe = /<test\b[^>]*>([\s\S]*?)<\/test\s*>/gi;
   const out = [];
   let pm;
   while ((pm = phaseRe.exec(xml)) !== null) {
     const body = pm[1];
     const tests = [];
     let tm;
-    while ((tm = testRe.exec(body)) !== null) {
+    while ((tm = testCaseRe.exec(body)) !== null) {
       const t = decodeEntities(tm[1]).trim();
       if (t) tests.push(t);
+    }
+    if (tests.length === 0) {
+      while ((tm = testFallbackRe.exec(body)) !== null) {
+        const t = decodeEntities(tm[1]).trim();
+        if (t) tests.push(t);
+      }
     }
     out.push(tests);
   }

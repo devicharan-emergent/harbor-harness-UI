@@ -719,10 +719,32 @@ _XML_FIELDS_BY_TYPE = {
 _BARE_AMP = re.compile(
     r"&(?!(?:amp|lt|gt|quot|apos|#[0-9]+|#x[0-9a-fA-F]+);)"
 )
+# Legacy/external tools emit `<test>...</test>` (singular, no <test_cases>
+# wrapper) instead of the canonical `<test_case>...</test_case>` shape the
+# editor/preview parser looks for. Harness XML validation accepts either
+# but the FE only renders `<test_case>` nodes — so rewrite on import.
+_OPEN_TEST_TAG_SIMPLE = re.compile(r"<test\b(?P<rest>(?:\s[^>]*)?)>")
+_CLOSE_TEST_TAG = re.compile(r"</test\s*>")
 
 
 def _escape_xml_amps(s: str) -> str:
     return _BARE_AMP.sub("&amp;", s) if s else s
+
+
+def _normalize_test_tags(s: str) -> str:
+    """Rewrite legacy `<test>…</test>` → `<test_case>…</test_case>`.
+
+    Some external tools / hand-written CSVs use the shorter tag. The XML
+    validator accepts it but the editor/preview only parses `<test_case>`.
+    The negative lookahead in `<test\b` ensures we don't accidentally match
+    `<test_case>` (since `_` is a word char, `\b` after `test` matches the
+    `>` / space / `/` boundary only).
+    """
+    if not s or "<test" not in s:
+        return s
+    s = _OPEN_TEST_TAG_SIMPLE.sub(lambda m: f"<test_case{m.group('rest')}>", s)
+    s = _CLOSE_TEST_TAG.sub("</test_case>", s)
+    return s
 
 
 def _csv_row_to_item(row: dict, dataset_type: str) -> dict:
@@ -752,9 +774,9 @@ def _csv_row_to_item(row: dict, dataset_type: str) -> dict:
     ps = row.get("problem_statement", "") or ""
     nlt = row.get("natural_language_tests", "") or ""
     if "problem_statement" in xml_fields:
-        ps = _escape_xml_amps(ps)
+        ps = _escape_xml_amps(_normalize_test_tags(ps))
     if "natural_language_tests" in xml_fields:
-        nlt = _escape_xml_amps(nlt)
+        nlt = _escape_xml_amps(_normalize_test_tags(nlt))
 
     item = {
         "dataset_type": dataset_type,
@@ -835,6 +857,32 @@ async def import_datasets_csv(
         payload = r.json()
     except ValueError:
         payload = {"message": r.text or "harness error"}
+    # Translate the cryptic Postgres unique-constraint error on `name` into
+    # a plain-English, actionable hint. The harness DELETE is a SOFT delete
+    # — the row is hidden from list/get but its `name` value still occupies
+    # the unique index, so a re-import with the same `name` always fails
+    # 23505 (`datasets_name_key`). The FE result banner shows whatever is
+    # in `errors[].error`, so rewriting here gives users a clear next step.
+    raw_errors = payload.get("errors") if isinstance(payload, dict) else None
+    if isinstance(raw_errors, list):
+        # Build instance_id → row-name map for the items we just sent so
+        # the message can echo back the exact name that collided.
+        sent_name_by_iid = {
+            it.get("instance_id"): (it.get("name") or "")
+            for it in items if it.get("instance_id")
+        }
+        for e in raw_errors:
+            err_text = (e or {}).get("error") or ""
+            if "datasets_name_key" in err_text or "SQLSTATE 23505" in err_text:
+                iid = e.get("instance_id") or ""
+                clashing_name = sent_name_by_iid.get(iid) or "(auto-generated)"
+                e["error"] = (
+                    f"name {clashing_name!r} is already reserved by an existing "
+                    f"or previously-deleted row (harness retains soft-deleted names "
+                    f"on the unique index). Pick a different `name` in the CSV, OR "
+                    f"leave the `name` column blank to auto-generate "
+                    f"`<dataset_type>/<instance_id>`."
+                )
     return JSONResponse(status_code=r.status_code, content=payload)
 
 
