@@ -443,8 +443,29 @@ export default function DatasetsPage() {
                         />
                       </TableCell>
                       <TableCell className="max-w-[300px]">
-                        <div className="font-mono text-xs font-medium truncate">{ds.name || `${ds.dataset_type}/${ds.instance_id}`}</div>
-                        <div className="text-[10px] text-muted-foreground/60 font-mono mt-0.5">{ds.id}</div>
+                        {(() => {
+                          // Always render `<dataset_type>/<name>` and force
+                          // whitespace in the name → `_` so rows entered with
+                          // free-form names (e.g. "Travel Concierge Bench")
+                          // line up visually with auto-named rows like
+                          // "scratch_bench_phased/a1_travel_concierge". Strip
+                          // any leading "<type>/" the backend already prepended
+                          // so we don't double up.
+                          const rawName = ds.name || ds.instance_id || '';
+                          const stripped = ds.dataset_type && rawName.startsWith(`${ds.dataset_type}/`)
+                            ? rawName.slice(ds.dataset_type.length + 1)
+                            : rawName;
+                          const slug = stripped.trim().replace(/\s+/g, '_');
+                          const label = ds.dataset_type
+                            ? `${ds.dataset_type}/${slug || ds.instance_id || ''}`
+                            : (slug || ds.instance_id || '—');
+                          return (
+                            <>
+                              <div className="font-mono text-xs font-medium truncate" title={label}>{label}</div>
+                              <div className="text-[10px] text-muted-foreground/60 font-mono mt-0.5 truncate" title={ds.id}>{ds.id}</div>
+                            </>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell>
                         <Badge
