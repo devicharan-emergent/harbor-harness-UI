@@ -595,6 +595,7 @@ async def proxy_submit_testing_agent_eval(body: dict):
 # Harness stays JSON-only — all flattening + serialization lives here.
 import csv
 import io
+import asyncio
 from fastapi import UploadFile, File, Query
 from fastapi.responses import Response
 
@@ -814,11 +815,18 @@ async def export_datasets_csv(
     rows: list[dict] = []
     async with httpx.AsyncClient(timeout=60.0) as hclient:
         if instance_id:
-            for iid in instance_id:
+            # Parallelise the per-instance fetches so large multi-selects
+            # don't N×RTT to the harness. Order is preserved by indexing
+            # back into the original instance_id list.
+            async def _one(iid: str):
                 r = await hclient.get(
                     f"{EVAL_API_BASE}/api/v1/datasets/types/{dataset_type}"
                     f"/instances/{iid}",
                 )
+                return iid, r
+
+            results = await asyncio.gather(*(_one(iid) for iid in instance_id))
+            for iid, r in results:
                 if r.status_code in (404, 500):
                     # Upstream harness returns 500 (not 404) for unknown
                     # single-instance lookups. Map both to a clean 404 so

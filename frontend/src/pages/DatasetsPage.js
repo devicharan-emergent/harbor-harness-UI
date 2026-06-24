@@ -221,19 +221,34 @@ export default function DatasetsPage() {
     }
     setExporting(true);
     try {
-      // One CSV per dataset_type — keeps the per-type column shape clean.
-      for (const t of types) {
-        const { blob, filename } = await exportDatasetsCsv(t, selectedByType[t]);
-        triggerBlobDownload(blob, filename);
-      }
-      const total = Object.values(selectedByType).reduce((s, arr) => s + arr.length, 0);
-      toast.success(
-        types.length === 1
-          ? `Exported ${total} row(s) → ${types[0]}.csv`
-          : `Exported ${total} row(s) across ${types.length} type(s)`,
+      // Parallelise per-type downloads. One CSV file per dataset_type
+      // (the export endpoint is type-scoped and the column shape differs).
+      const results = await Promise.allSettled(
+        types.map((t) => exportDatasetsCsv(t, selectedByType[t])),
       );
-    } catch (err) {
-      toast.error(parseApiError(err, 'Export failed'));
+      const ok = [];
+      const failed = [];
+      results.forEach((res, i) => {
+        if (res.status === 'fulfilled') {
+          triggerBlobDownload(res.value.blob, res.value.filename);
+          ok.push(types[i]);
+        } else {
+          failed.push({ type: types[i], err: res.reason });
+        }
+      });
+      const total = ok.reduce((s, t) => s + selectedByType[t].length, 0);
+      if (ok.length && !failed.length) {
+        toast.success(
+          ok.length === 1
+            ? `Exported ${total} row(s) → ${ok[0]}.csv`
+            : `Exported ${total} row(s) across ${ok.length} type(s)`,
+        );
+      } else if (ok.length && failed.length) {
+        toast.warning(`Exported ${ok.length}/${types.length} type(s); ${failed.length} failed`);
+      }
+      failed.forEach(({ type, err }) => {
+        toast.error(`${type}: ${parseApiError(err, 'Export failed')}`);
+      });
     } finally {
       setExporting(false);
     }
@@ -272,22 +287,28 @@ export default function DatasetsPage() {
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <span tabIndex={selectedCount === 0 ? 0 : -1}>
-                  <Button
-                    onClick={handleExport}
-                    variant="outline"
-                    size="sm"
-                    disabled={selectedCount === 0 || exporting}
-                    data-testid="datasets-export-csv-btn"
-                  >
-                    {exporting ? (
-                      <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                    ) : (
-                      <Download className="w-3.5 h-3.5 mr-1.5" />
-                    )}
-                    Export {selectedCount > 0 ? `(${selectedCount})` : ''}
-                  </Button>
-                </span>
+                {/* Render a non-disabled button when the action is unavailable so
+                    hover (mouse) reaches the tooltip trigger — `<button disabled>`
+                    swallows pointer events. We guard the click handler instead. */}
+                <Button
+                  onClick={selectedCount === 0 ? undefined : handleExport}
+                  variant="outline"
+                  size="sm"
+                  aria-disabled={selectedCount === 0 || exporting}
+                  className={
+                    (selectedCount === 0 || exporting)
+                      ? 'opacity-50 cursor-not-allowed'
+                      : ''
+                  }
+                  data-testid="datasets-export-csv-btn"
+                >
+                  {exporting ? (
+                    <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                  ) : (
+                    <Download className="w-3.5 h-3.5 mr-1.5" />
+                  )}
+                  Export {selectedCount > 0 ? `(${selectedCount})` : ''}
+                </Button>
               </TooltipTrigger>
               <TooltipContent>
                 {selectedCount === 0 ? 'Select one or more rows to export' : `Export ${selectedCount} selected row(s) as CSV`}
