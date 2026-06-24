@@ -596,6 +596,7 @@ async def proxy_submit_testing_agent_eval(body: dict):
 import csv
 import io
 import asyncio
+import re
 import zipfile
 from fastapi import UploadFile, File, Query
 from fastapi.responses import Response, JSONResponse
@@ -701,6 +702,29 @@ _CSV_TEMPLATES = {
 }
 
 
+# Which (dataset_type, field) pairs the harness validates as XML. For these
+# fields we auto-escape bare ampersands (`&` not already part of an entity)
+# to `&amp;` before forwarding to the harness, because Excel/Sheets exports
+# never escape and analysts otherwise hit cryptic XML-syntax errors on every
+# row that contains "R&D", "Q&A", "Buy & Sell", etc.
+_XML_FIELDS_BY_TYPE = {
+    "scratch_bench_phased": {"problem_statement", "natural_language_tests"},
+    "bug_bench":            {"natural_language_tests"},
+    "test_report_bench":    {"natural_language_tests"},
+    # testing_agent_bench, wingman_bench: both fields are plain text — leave
+    # `&` alone so user copy doesn't get mangled.
+}
+
+# `&` followed by anything that is NOT a known XML entity name + `;`.
+_BARE_AMP = re.compile(
+    r"&(?!(?:amp|lt|gt|quot|apos|#[0-9]+|#x[0-9a-fA-F]+);)"
+)
+
+
+def _escape_xml_amps(s: str) -> str:
+    return _BARE_AMP.sub("&amp;", s) if s else s
+
+
 def _csv_row_to_item(row: dict, dataset_type: str) -> dict:
     """Flatten a single CSV row into a harness bulk-create item. Every
     non-empty column outside the common set lands in `attributes`."""
@@ -724,11 +748,19 @@ def _csv_row_to_item(row: dict, dataset_type: str) -> dict:
                     detail=f"max_iterations must be an integer (got {attributes['max_iterations']!r}): {e}",
                 )
 
+    xml_fields = _XML_FIELDS_BY_TYPE.get(dataset_type, set())
+    ps = row.get("problem_statement", "") or ""
+    nlt = row.get("natural_language_tests", "") or ""
+    if "problem_statement" in xml_fields:
+        ps = _escape_xml_amps(ps)
+    if "natural_language_tests" in xml_fields:
+        nlt = _escape_xml_amps(nlt)
+
     item = {
         "dataset_type": dataset_type,
         "instance_id": (row.get("instance_id") or "").strip(),
-        "problem_statement": row.get("problem_statement", ""),
-        "natural_language_tests": row.get("natural_language_tests", ""),
+        "problem_statement": ps,
+        "natural_language_tests": nlt,
         "attributes": attributes,
     }
     for opt in ("name", "description", "base_image", "agent_name"):
