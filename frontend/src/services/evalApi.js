@@ -265,6 +265,70 @@ export const deleteDataset = async (datasetId) => {
 };
 
 /**
+ * Bulk-import datasets from one or more CSV files of the selected type.
+ * POST /api/eval/datasets/import?dataset_type=<type>  (multipart `files`)
+ * Returns: { created: [iid], skipped: [iid], errors: [{ index, instance_id, error }] }
+ * The backend stamps `dataset_type` on every row; the CSV must NOT carry that column.
+ */
+export const importDatasetsCsv = async (datasetType, files) => {
+  const fd = new FormData();
+  for (const f of files) fd.append('files', f);
+  const response = await evalApiClient.post('/datasets/import', fd, {
+    params: { dataset_type: datasetType },
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120000,
+  });
+  return response.data;
+};
+
+/**
+ * Export dataset(s) of a type to CSV. Pass `instanceIds` (array) to export
+ * just that subset (in order); omit/empty to export every active row of the
+ * type. Resolves to `{ blob, filename }` so callers can trigger a download.
+ * GET /api/eval/datasets/export?dataset_type=&instance_id=&instance_id=...
+ */
+export const exportDatasetsCsv = async (datasetType, instanceIds = []) => {
+  const params = new URLSearchParams({ dataset_type: datasetType });
+  for (const iid of instanceIds) params.append('instance_id', iid);
+  const response = await evalApiClient.get(`/datasets/export?${params.toString()}`, {
+    responseType: 'blob',
+    timeout: 120000,
+  });
+  const cd = response.headers['content-disposition'] || '';
+  const match = /filename="?([^"]+)"?/.exec(cd);
+  const filename = match ? match[1] : `${datasetType}.csv`;
+  return { blob: response.data, filename };
+};
+
+/**
+ * Download the starter template CSV for a dataset_type (header + 1-2 filled
+ * example rows the user can edit). Resolves to `{ blob, filename }`.
+ * GET /api/eval/datasets/template?dataset_type=<type>
+ */
+export const getDatasetTemplateCsv = async (datasetType) => {
+  const response = await evalApiClient.get('/datasets/template', {
+    params: { dataset_type: datasetType },
+    responseType: 'blob',
+  });
+  const cd = response.headers['content-disposition'] || '';
+  const match = /filename="?([^"]+)"?/.exec(cd);
+  const filename = match ? match[1] : `${datasetType}_template.csv`;
+  return { blob: response.data, filename };
+};
+
+/** Trigger a browser download for a Blob+filename pair. */
+export const triggerBlobDownload = (blob, filename) => {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
+/**
  * Get aggregate metrics for a group (time per problem, test pass rates)
  * GET /api/eval/jobs/aggregate?group_id=X
  * Returns: { group_id, problems: [{ problem, job_count, completed_count, duration_avg_secs, duration_p75_secs, duration_p90_secs, test_cases_passed, test_cases_total, test_case_pass_rate }] }
