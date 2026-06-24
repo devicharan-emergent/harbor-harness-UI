@@ -472,12 +472,20 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
       const groupRunId = `${groupId.trim()}-${ts}-${rand}`;
 
       // ── testing_agent_bench fork-eval branch ───────────────────
+      // Single batched POST with `items[]` — one entry per selected
+      // dataset. `group_run_id` / `user_id` / `created_by` are shared
+      // top-level (the backend rejects duplicate group_run_id across
+      // requests, so looping would 409 on the 2nd dataset).
       if (isTestingAgentMode) {
-        const trimmedOverride = agentNameOverride.trim();
-        const totalJobs = [];
+        const trimmedAgentOverride = agentNameOverride.trim();
+        // Resolve the per-batch model_name once:
+        //  - If the user touched the override field, that value wins for
+        //    every item (incl. blank → key omitted on every item).
+        //  - Otherwise each item falls back to its own dataset's
+        //    `attributes.model_name`.
+        const items = [];
         for (const ds of selectedProblems) {
-          // The dataset list endpoint trims problem_statement /
-          // natural_language_tests / attributes; hydrate per-problem.
+          // Hydrate full dataset if list endpoint trimmed fields.
           let full = ds;
           if (!ds.problem_statement || !ds.natural_language_tests || !ds.attributes) {
             try {
@@ -487,8 +495,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
             }
           }
           const attrs = full.attributes || {};
-          // Override (if set) wins over the dataset's stored agent_name.
-          const agent = trimmedOverride || (attrs.agent_name || '').trim();
+          const agent = trimmedAgentOverride || (attrs.agent_name || '').trim();
           const hitl = full.problem_statement || '';
           const golden = full.natural_language_tests || '';
           const prodJobId = (attrs.prod_job_id || full.instance_id || '').trim();
@@ -507,29 +514,26 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
               `Dataset ${full.name || ds.name}: prod_job_id (or instance_id) is required`
             );
           }
-          const body = {
+          const item = {
             prod_job_id: prodJobId,
             agent_name: agent,
             hitl_input: hitl,
             golden_output: golden,
-            group_run_id: groupRunId,
           };
-          // Model name resolution:
-          //  - If the user edited the override field at all in this open
-          //    session (`modelOverrideTouched`), the override wins —
-          //    including an empty value (= "use agent's default", key
-          //    OMITTED from the body, never sent as "").
-          //  - Otherwise fall back to the dataset's stored
-          //    `attributes.model_name`. Omit when blank.
           const resolvedModel = modelOverrideTouched
             ? modelNameOverride.trim()
             : String(attrs.model_name || '').trim();
-          if (resolvedModel) body.model_name = resolvedModel;
-          if (userId.trim()) body.user_id = userId.trim();
-          const result = await submitTestingAgentEval(body);
-          if (Array.isArray(result?.jobs)) totalJobs.push(...result.jobs);
+          if (resolvedModel) item.model_name = resolvedModel;
+          items.push(item);
         }
-        toast.success(`Submitted ${totalJobs.length || selectedProblems.length} testing-agent eval(s)`);
+        const batchBody = {
+          group_run_id: groupRunId,
+          items,
+        };
+        if (userId.trim()) batchBody.user_id = userId.trim();
+        const result = await submitTestingAgentEval(batchBody);
+        const jobCount = Array.isArray(result?.jobs) ? result.jobs.length : items.length;
+        toast.success(`Submitted ${jobCount} testing-agent eval(s)`);
         onClose();
         navigate('/evals');
         return;
