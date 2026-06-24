@@ -4,8 +4,7 @@ import {
   listDatasetsByType,
   deleteDataset,
   getDatasetInstance,
-  exportDatasetsCsv,
-  triggerBlobDownload,
+  exportDatasetsCSV,
 } from '@/services/evalApi';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -22,7 +21,7 @@ import { Loader2, Search, Plus, Pencil, Trash2, RefreshCw, Database, X, ChevronL
 import { toast } from 'sonner';
 import { DatasetEditorModal } from '@/components/evals/DatasetEditorModal';
 import { DatasetPreviewModal } from '@/components/evals/DatasetPreviewModal';
-import { ImportCsvDialog, IMPORT_DATASET_TYPES } from '@/components/evals/ImportCsvDialog';
+import { ImportDatasetsModal } from '@/components/evals/ImportDatasetsModal';
 import { parseApiError } from '@/lib/errorUtils';
 
 const DATASET_TYPES = [
@@ -160,7 +159,7 @@ export default function DatasetsPage() {
   };
 
   // Selection helpers (keys = `${dataset_type}/${instance_id}`)
-  const keyOf = (ds) => `${ds.dataset_type}/${ds.instance_id}`;
+  const keyOf = (ds) => `${ds.dataset_type}/${ds.instance_id || ds.id}`;
 
   const filteredDatasets = datasets.filter(ds => {
     if (!searchQuery) return true;
@@ -172,6 +171,13 @@ export default function DatasetsPage() {
       (ds.problem_statement || '').toLowerCase().includes(q)
     );
   });
+
+  // Reset selection whenever the underlying dataset list changes (page/type
+  // switch); keeping stale ids would let the user "Export Selected" rows
+  // they can't see anymore.
+  useEffect(() => {
+    setSelectedKeys(new Set());
+  }, [typeFilter, page]);
 
   const allVisibleSelected = filteredDatasets.length > 0 && filteredDatasets.every(ds => selectedKeys.has(keyOf(ds)));
   const someVisibleSelected = filteredDatasets.some(ds => selectedKeys.has(keyOf(ds))) && !allVisibleSelected;
@@ -199,65 +205,61 @@ export default function DatasetsPage() {
 
   const clearSelection = () => setSelectedKeys(new Set());
 
-  // Selected rows grouped by dataset_type (export endpoint is per-type).
-  const selectedByType = useMemo(() => {
-    const byType = {};
-    datasets.forEach(ds => {
-      const k = keyOf(ds);
-      if (selectedKeys.has(k)) {
-        (byType[ds.dataset_type] = byType[ds.dataset_type] || []).push(ds.instance_id);
-      }
-    });
-    return byType;
-  }, [datasets, selectedKeys]);
+  // Selected rows visible on the current page, grouped by type. The
+  // export endpoint is per-type and CSV columns differ per type, so the
+  // FE forces selection to a single type before allowing Export Selected.
+  const selectedRows = useMemo(
+    () => filteredDatasets.filter(d => selectedKeys.has(keyOf(d))),
+    [filteredDatasets, selectedKeys],
+  );
 
-  const selectedCount = selectedKeys.size;
+  const selectedType = useMemo(() => {
+    if (selectedRows.length === 0) return null;
+    const types = new Set(selectedRows.map(r => r.dataset_type));
+    return types.size === 1 ? selectedRows[0].dataset_type : 'mixed';
+  }, [selectedRows]);
 
-  const handleExport = async () => {
-    const types = Object.keys(selectedByType);
-    if (types.length === 0) {
-      toast.error('Select at least one row to export');
-      return;
-    }
+  const selectedCount = selectedRows.length;
+
+  const runExport = async (datasetType, instanceIds, label) => {
     setExporting(true);
     try {
-      // Parallelise per-type downloads. One CSV file per dataset_type
-      // (the export endpoint is type-scoped and the column shape differs).
-      const results = await Promise.allSettled(
-        types.map((t) => exportDatasetsCsv(t, selectedByType[t])),
-      );
-      const ok = [];
-      const failed = [];
-      results.forEach((res, i) => {
-        if (res.status === 'fulfilled') {
-          triggerBlobDownload(res.value.blob, res.value.filename);
-          ok.push(types[i]);
-        } else {
-          failed.push({ type: types[i], err: res.reason });
-        }
-      });
-      const total = ok.reduce((s, t) => s + selectedByType[t].length, 0);
-      if (ok.length && !failed.length) {
-        toast.success(
-          ok.length === 1
-            ? `Exported ${total} row(s) → ${ok[0]}.csv`
-            : `Exported ${total} row(s) across ${ok.length} type(s)`,
-        );
-      } else if (ok.length && failed.length) {
-        toast.warning(`Exported ${ok.length}/${types.length} type(s); ${failed.length} failed`);
-      }
-      failed.forEach(({ type, err }) => {
-        toast.error(`${type}: ${parseApiError(err, 'Export failed')}`);
-      });
+      const { filename } = await exportDatasetsCSV(datasetType, instanceIds);
+      toast.success(`Downloaded ${filename}`, { description: label });
+    } catch (err) {
+      toast.error(parseApiError(err, 'Failed to export datasets'));
     } finally {
       setExporting(false);
     }
   };
 
-  const handleImported = (importedType) => {
-    // Auto-switch the type filter so the user immediately sees their new rows.
-    setTypeFilter(importedType);
-    setPage(0);
+  const handleExportSelected = () => {
+    if (selectedRows.length === 0 || selectedType === 'mixed') return;
+    const iids = selectedRows.map(r => r.instance_id).filter(Boolean);
+    runExport(selectedType, iids, `${iids.length} selected`);
+  };
+
+  const handleExportAll = () => {
+    runExport(
+      typeFilter,
+      [],
+      typeFilter === 'all' ? 'All types (zip)' : `Every active ${typeFilter} row`,
+    );
+  };
+
+  const handleExportRow = (ds) => {
+    if (!ds.instance_id) {
+      toast.error('Row has no instance_id — cannot export');
+      return;
+    }
+    runExport(ds.dataset_type, [ds.instance_id], ds.name || ds.instance_id);
+  };
+
+  const handleImported = () => {
+    // Refresh the table in place so newly-created rows show up. Don't
+    // auto-switch type filter — the user picked the type in the dialog
+    // already; switching the page filter on top would just be noisy if
+    // they were browsing "All Types" and importing into a specific one.
     clearSelection();
     fetchDatasets();
   };
@@ -275,46 +277,60 @@ export default function DatasetsPage() {
             <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
             Refresh
           </Button>
-          <Button
-            onClick={() => setImportOpen(true)}
-            variant="outline"
-            size="sm"
-            data-testid="datasets-import-csv-btn"
-          >
-            <Upload className="w-3.5 h-3.5 mr-1.5" />
-            Import CSV
-          </Button>
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
                 {/* Render a non-disabled button when the action is unavailable so
                     hover (mouse) reaches the tooltip trigger — `<button disabled>`
-                    swallows pointer events. We guard the click handler instead. */}
+                    swallows pointer events. Click handler is guarded instead. */}
                 <Button
-                  onClick={selectedCount === 0 ? undefined : handleExport}
+                  onClick={(selectedRows.length === 0 || selectedType === 'mixed') ? undefined : handleExportSelected}
                   variant="outline"
                   size="sm"
-                  aria-disabled={selectedCount === 0 || exporting}
+                  aria-disabled={selectedRows.length === 0 || selectedType === 'mixed' || exporting}
                   className={
-                    (selectedCount === 0 || exporting)
+                    (selectedRows.length === 0 || selectedType === 'mixed' || exporting)
                       ? 'opacity-50 cursor-not-allowed'
                       : ''
                   }
-                  data-testid="datasets-export-csv-btn"
+                  data-testid="export-selected-btn"
                 >
-                  {exporting ? (
-                    <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                  ) : (
-                    <Download className="w-3.5 h-3.5 mr-1.5" />
-                  )}
-                  Export {selectedCount > 0 ? `(${selectedCount})` : ''}
+                  <Download className="w-3.5 h-3.5 mr-1.5" />
+                  Export Selected{selectedRows.length > 0 ? ` (${selectedRows.length})` : ''}
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                {selectedCount === 0 ? 'Select one or more rows to export' : `Export ${selectedCount} selected row(s) as CSV`}
+                {selectedRows.length === 0
+                  ? 'Tick rows in the table to export them as CSV'
+                  : selectedType === 'mixed'
+                    ? 'Selection spans multiple dataset types — pick rows of a single type to export'
+                    : `Download ${selectedRows.length} ${selectedType} row(s) as CSV`}
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
+          <Button
+            onClick={handleExportAll}
+            variant="outline"
+            size="sm"
+            disabled={exporting}
+            data-testid="export-all-btn"
+          >
+            {exporting ? (
+              <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+            ) : (
+              <Download className="w-3.5 h-3.5 mr-1.5" />
+            )}
+            {typeFilter === 'all' ? 'Export All (zip)' : 'Export All'}
+          </Button>
+          <Button
+            onClick={() => setImportOpen(true)}
+            variant="outline"
+            size="sm"
+            data-testid="import-datasets-btn"
+          >
+            <Upload className="w-3.5 h-3.5 mr-1.5" />
+            Upload CSV
+          </Button>
           <Button onClick={() => { setEditingDataset(null); setEditorOpen(true); }} size="sm" data-testid="new-dataset-btn">
             <Plus className="w-3.5 h-3.5 mr-1.5" />
             New Dataset
@@ -397,15 +413,15 @@ export default function DatasetsPage() {
                       <Checkbox
                         checked={allVisibleSelected || (someVisibleSelected ? 'indeterminate' : false)}
                         onCheckedChange={toggleAllVisible}
-                        aria-label="Select all visible datasets"
-                        data-testid="datasets-select-all"
+                        aria-label="Select all on this page"
+                        data-testid="select-all-checkbox"
                       />
                     </TableHead>
                     <TableHead className="text-xs">Name / Instance</TableHead>
                     <TableHead className="text-xs">Type</TableHead>
                     <TableHead className="text-xs">Version</TableHead>
                     <TableHead className="text-xs">Description</TableHead>
-                    <TableHead className="text-xs w-[100px]">Actions</TableHead>
+                    <TableHead className="text-xs w-[130px]">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -422,8 +438,8 @@ export default function DatasetsPage() {
                         <Checkbox
                           checked={checked}
                           onCheckedChange={() => toggleRow(ds)}
-                          aria-label={`Select ${ds.instance_id}`}
-                          data-testid={`dataset-select-${ds.instance_id || ds.id}`}
+                          aria-label={`Select ${ds.name || ds.instance_id}`}
+                          data-testid={`select-row-${ds.instance_id || ds.id}`}
                         />
                       </TableCell>
                       <TableCell className="max-w-[300px]">
@@ -448,6 +464,23 @@ export default function DatasetsPage() {
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7"
+                                  onClick={() => handleExportRow(ds)}
+                                  disabled={exporting || !ds.instance_id}
+                                  data-testid={`download-dataset-${ds.instance_id || ds.id}`}
+                                >
+                                  <Download className="w-3.5 h-3.5" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Download as CSV</TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
                           <TooltipProvider>
                             <Tooltip>
                               <TooltipTrigger asChild>
@@ -539,11 +572,11 @@ export default function DatasetsPage() {
         dataset={editingDataset}
       />
 
-      {/* CSV Import Dialog */}
-      <ImportCsvDialog
+      {/* CSV Bulk Import Modal */}
+      <ImportDatasetsModal
         open={importOpen}
+        defaultType={typeFilter !== 'all' ? typeFilter : 'bug_bench'}
         onClose={() => setImportOpen(false)}
-        defaultType={typeFilter}
         onImported={handleImported}
       />
 

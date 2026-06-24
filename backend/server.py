@@ -596,8 +596,9 @@ async def proxy_submit_testing_agent_eval(body: dict):
 import csv
 import io
 import asyncio
+import zipfile
 from fastapi import UploadFile, File, Query
-from fastapi.responses import Response
+from fastapi.responses import Response, JSONResponse
 
 # Columns that map to TOP-LEVEL dataset fields. Everything else on a row
 # (non-empty) goes into the per-row `attributes` object the bulk endpoint
@@ -763,94 +764,55 @@ async def import_datasets_csv(
     indexes into that combined stream. Existing `(dataset_type,
     instance_id)` rows are skipped; per-row failures are reported in
     `errors[]` while valid rows still get created.
+
+    The harness response is passed straight through (status + JSON) so
+    the FE can read `created/skipped/errors[]` at the body root even
+    when harness returns a non-200 (e.g. 207). Wrapping in HTTPException
+    would nest the envelope under `detail` and break the result banner.
     """
     if dataset_type not in _CSV_ATTR_COLS:
-        raise HTTPException(
+        return JSONResponse(
             status_code=400,
-            detail=f"unknown dataset_type '{dataset_type}' "
-                   f"(allowed: {sorted(_CSV_ATTR_COLS.keys())})",
+            content={
+                "error": f"unknown dataset_type '{dataset_type}' "
+                         f"(allowed: {sorted(_CSV_ATTR_COLS.keys())})",
+            },
         )
     items = []
     for f in files:
         try:
             text = (await f.read()).decode("utf-8-sig")
         except UnicodeDecodeError as e:
-            raise HTTPException(
+            return JSONResponse(
                 status_code=400,
-                detail=f"{f.filename}: not valid UTF-8 ({e})",
+                content={"error": f"{f.filename}: not valid UTF-8 ({e})"},
             )
         for row in _csv_rows(text):
             items.append(_csv_row_to_item(row, dataset_type))
     if not items:
-        raise HTTPException(status_code=400, detail="no data rows in uploaded CSV(s)")
+        return JSONResponse(
+            status_code=400,
+            content={"error": "no data rows in uploaded CSV(s)"},
+        )
     async with httpx.AsyncClient(timeout=120.0) as hclient:
         r = await hclient.post(
             f"{EVAL_API_BASE}/api/v1/datasets/bulk",
             json={"datasets": items},
         )
-        try:
-            body = r.json()
-        except Exception:
-            body = {"error": r.text}
-        if r.status_code >= 400:
-            raise HTTPException(status_code=r.status_code, detail=body)
-        return body
+    try:
+        payload = r.json()
+    except ValueError:
+        payload = {"message": r.text or "harness error"}
+    return JSONResponse(status_code=r.status_code, content=payload)
 
 
-@api_router.get("/eval/datasets/export")
-async def export_datasets_csv(
-    dataset_type: str,
-    instance_id: list[str] = Query(default=[]),
-):
-    """Round-trip CSV export. `instance_id` may be repeated to select a
-    subset (preserves request order); omit to export every active row
-    of the type. Output header matches the import format so an
-    export → edit → re-import cycle works (existing rows come back
-    `skipped`)."""
-    if dataset_type not in _CSV_ATTR_COLS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"unknown dataset_type '{dataset_type}'",
-        )
-    rows: list[dict] = []
-    async with httpx.AsyncClient(timeout=60.0) as hclient:
-        if instance_id:
-            # Parallelise the per-instance fetches so large multi-selects
-            # don't N×RTT to the harness. Order is preserved by indexing
-            # back into the original instance_id list.
-            async def _one(iid: str):
-                r = await hclient.get(
-                    f"{EVAL_API_BASE}/api/v1/datasets/types/{dataset_type}"
-                    f"/instances/{iid}",
-                )
-                return iid, r
+def _serialize_datasets_to_csv(rows: list, dataset_type: str) -> str:
+    """Flatten harness Dataset JSON to CSV text — reverses the import flatten.
 
-            results = await asyncio.gather(*(_one(iid) for iid in instance_id))
-            for iid, r in results:
-                if r.status_code in (404, 500):
-                    # Upstream harness returns 500 (not 404) for unknown
-                    # single-instance lookups. Map both to a clean 404 so
-                    # the UI shows a sensible "not found" message.
-                    raise HTTPException(
-                        status_code=404,
-                        detail=f"not found: {dataset_type}/{iid}",
-                    )
-                r.raise_for_status()
-                rows.append(r.json())
-        else:
-            offset = 0
-            while True:
-                r = await hclient.get(
-                    f"{EVAL_API_BASE}/api/v1/datasets/types/{dataset_type}",
-                    params={"limit": 200, "offset": offset},
-                )
-                r.raise_for_status()
-                page = r.json().get("datasets", [])
-                rows.extend(page)
-                if len(page) < 200:
-                    break
-                offset += 200
-
+    - lists (e.g. `tags`, `expected_integrations`) → comma-joined strings
+    - ints/bools → `str(...)`; `None` → ""
+    - `agent_name` top-level wins over the attribute of the same name
+    """
     header = _CSV_COMMON_COLS_ORDER + _CSV_ATTR_COLS[dataset_type]
     buf = io.StringIO()
     w = csv.DictWriter(buf, fieldnames=header, extrasaction="ignore")
@@ -858,34 +820,131 @@ async def export_datasets_csv(
     for d in rows:
         attrs = d.get("attributes") or {}
         rec = {
-            "id": d.get("id", ""),
-            "instance_id": d.get("instance_id", ""),
-            "name": d.get("name", ""),
-            "description": d.get("description", ""),
+            "id": d.get("id", "") or "",
+            "instance_id": d.get("instance_id", "") or "",
+            "name": d.get("name", "") or "",
+            "description": d.get("description", "") or "",
             "tags": ",".join(d.get("tags") or []),
-            "problem_statement": d.get("problem_statement", ""),
-            "natural_language_tests": d.get("natural_language_tests", ""),
-            "base_image": d.get("base_image", ""),
+            "problem_statement": d.get("problem_statement", "") or "",
+            "natural_language_tests": d.get("natural_language_tests", "") or "",
+            "base_image": d.get("base_image", "") or "",
             # Top-level agent_name wins over attribute fallback.
-            "agent_name": d.get("agent_name", "") or attrs.get("agent_name", ""),
+            "agent_name": d.get("agent_name") or attrs.get("agent_name", "") or "",
         }
         for col in _CSV_ATTR_COLS[dataset_type]:
             v = attrs.get(col, "")
             if isinstance(v, list):
-                v = ",".join(map(str, v))
+                v = ",".join(str(x) for x in v)
             elif v is None:
                 v = ""
             else:
                 v = str(v)
             rec[col] = v
         w.writerow(rec)
+    return buf.getvalue()
 
-    if len(rows) == 1:
-        fname = f"{dataset_type}_{rows[0].get('instance_id', 'export')}.csv"
+
+async def _fetch_datasets_for_export(
+    hclient: httpx.AsyncClient,
+    dataset_type: str,
+    instance_ids: list,
+) -> list:
+    """Pull a subset (by instance_id) or every active row of `dataset_type`.
+
+    Per-instance lookups run in parallel and order is preserved by indexing
+    back into the requested `instance_ids` list. Any non-2xx on a single
+    lookup is collapsed into a clean 404 so the FE doesn't see a generic
+    500 leak from the harness for missing rows.
+    """
+    rows: list = []
+    if instance_ids:
+        async def _one(iid: str):
+            r = await hclient.get(
+                f"{EVAL_API_BASE}/api/v1/datasets/types/{dataset_type}"
+                f"/instances/{quote(iid, safe='')}",
+            )
+            return iid, r
+        results = await asyncio.gather(*(_one(iid) for iid in instance_ids))
+        for iid, r in results:
+            if r.status_code != 200:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"not found: {dataset_type}/{iid}",
+                )
+            rows.append(r.json())
+    else:
+        offset = 0
+        page_size = 200
+        while True:
+            r = await hclient.get(
+                f"{EVAL_API_BASE}/api/v1/datasets/types/{dataset_type}",
+                params={"limit": page_size, "offset": offset},
+            )
+            r.raise_for_status()
+            page = (r.json() or {}).get("datasets", []) or []
+            rows.extend(page)
+            if len(page) < page_size:
+                break
+            offset += page_size
+    return rows
+
+
+@api_router.get("/eval/datasets/export")
+async def export_datasets_csv(
+    dataset_type: str = Query(..., description="known dataset_type or 'all'"),
+    instance_id: list[str] = Query(default=[]),
+):
+    """Download dataset(s) of one type as CSV (or every type as a zip).
+
+    - `dataset_type=<type>` + `instance_id=...&instance_id=...`: subset CSV
+      in the requested order; missing iid → 404.
+    - `dataset_type=<type>` (no instance_id): every active row of that type.
+    - `dataset_type=all` (no instance_id): one CSV per known type, packaged
+      as a single `datasets_export.zip`. Mixing `all` with instance_id → 400.
+
+    Header order matches the import format so an export → edit → re-import
+    cycle works (existing rows come back as `skipped`)."""
+    if dataset_type == "all":
+        if instance_id:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "instance_id is not allowed with dataset_type=all"},
+            )
+        zip_buf = io.BytesIO()
+        async with httpx.AsyncClient(timeout=120.0) as hclient:
+            with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                # Sequential per-type to avoid blowing the harness; each
+                # type already paginates internally.
+                for t in _CSV_ATTR_COLS:
+                    rows = await _fetch_datasets_for_export(hclient, t, [])
+                    csv_text = _serialize_datasets_to_csv(rows, t)
+                    # Write empty types as header-only so users see they
+                    # were checked (empty type ≠ skipped type).
+                    zf.writestr(f"{t}.csv", csv_text)
+        return Response(
+            content=zip_buf.getvalue(),
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": 'attachment; filename="datasets_export.zip"',
+            },
+        )
+
+    if dataset_type not in _CSV_ATTR_COLS:
+        return JSONResponse(
+            status_code=400,
+            content={"error": f"unknown dataset_type '{dataset_type}'"},
+        )
+
+    async with httpx.AsyncClient(timeout=120.0) as hclient:
+        rows = await _fetch_datasets_for_export(hclient, dataset_type, instance_id)
+
+    csv_text = _serialize_datasets_to_csv(rows, dataset_type)
+    if len(rows) == 1 and rows[0].get("instance_id"):
+        fname = f"{dataset_type}_{rows[0]['instance_id']}.csv"
     else:
         fname = f"{dataset_type}.csv"
     return Response(
-        content=buf.getvalue(),
+        content=csv_text,
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )

@@ -267,65 +267,72 @@ export const deleteDataset = async (datasetId) => {
 /**
  * Bulk-import datasets from one or more CSV files of the selected type.
  * POST /api/eval/datasets/import?dataset_type=<type>  (multipart `files`)
- * Returns: { created: [iid], skipped: [iid], errors: [{ index, instance_id, error }] }
- * The backend stamps `dataset_type` on every row; the CSV must NOT carry that column.
+ * Returns the harness envelope verbatim:
+ *   { created: [iid], skipped: [iid], errors: [{ index, instance_id, error }] }
+ *
+ * IMPORTANT: do NOT set Content-Type here. Setting it to
+ * 'multipart/form-data' strips axios's auto-generated `; boundary=…`
+ * parameter and FastAPI then can't parse the multipart body. Pass
+ * `undefined` so the instance default (`application/json`) is removed
+ * and axios+browser set the correct multipart Content-Type w/ boundary.
  */
-export const importDatasetsCsv = async (datasetType, files) => {
+export const importDatasetsCSV = async (datasetType, files) => {
   const fd = new FormData();
   for (const f of files) fd.append('files', f);
-  const response = await evalApiClient.post('/datasets/import', fd, {
-    params: { dataset_type: datasetType },
-    headers: { 'Content-Type': 'multipart/form-data' },
-    timeout: 120000,
-  });
+  const response = await evalApiClient.post(
+    `/datasets/import?dataset_type=${encodeURIComponent(datasetType)}`,
+    fd,
+    {
+      headers: { 'Content-Type': undefined },
+      timeout: 120000,
+    },
+  );
   return response.data;
 };
 
 /**
- * Export dataset(s) of a type to CSV. Pass `instanceIds` (array) to export
- * just that subset (in order); omit/empty to export every active row of the
- * type. Resolves to `{ blob, filename }` so callers can trigger a download.
- * GET /api/eval/datasets/export?dataset_type=&instance_id=&instance_id=...
+ * Download dataset(s) as CSV (or a multi-type zip when datasetType="all").
+ * GET /api/eval/datasets/export?dataset_type=T[&instance_id=…&instance_id=…]
+ *
+ * Self-triggers a browser download using the server-provided
+ * Content-Disposition filename. Throws on non-2xx so callers can surface
+ * a toast. Re-parses the blob error body back to JSON so `parseApiError`
+ * gets the real message instead of "[object Blob]".
  */
-export const exportDatasetsCsv = async (datasetType, instanceIds = []) => {
+export const exportDatasetsCSV = async (datasetType, instanceIds = []) => {
   const params = new URLSearchParams({ dataset_type: datasetType });
   for (const iid of instanceIds) params.append('instance_id', iid);
-  const response = await evalApiClient.get(`/datasets/export?${params.toString()}`, {
-    responseType: 'blob',
-    timeout: 120000,
-  });
-  const cd = response.headers['content-disposition'] || '';
-  const match = /filename="?([^"]+)"?/.exec(cd);
-  const filename = match ? match[1] : `${datasetType}.csv`;
-  return { blob: response.data, filename };
-};
+  let response;
+  try {
+    response = await evalApiClient.get(`/datasets/export?${params.toString()}`, {
+      responseType: 'blob',
+      timeout: 120000,
+    });
+  } catch (err) {
+    const blob = err?.response?.data;
+    if (blob && typeof blob.text === 'function') {
+      try {
+        const txt = await blob.text();
+        try { err.response.data = JSON.parse(txt); }
+        catch { err.response.data = { message: txt }; }
+      } catch { /* keep original */ }
+    }
+    throw err;
+  }
+  const cd = response.headers['content-disposition'] || response.headers['Content-Disposition'] || '';
+  const m = /filename\*?=(?:UTF-8'')?["']?([^"';]+)["']?/i.exec(cd);
+  const fallback = datasetType === 'all' ? 'datasets_export.zip' : `${datasetType}.csv`;
+  const filename = (m && decodeURIComponent(m[1])) || fallback;
 
-/**
- * Download the starter template CSV for a dataset_type (header + 1-2 filled
- * example rows the user can edit). Resolves to `{ blob, filename }`.
- * GET /api/eval/datasets/template?dataset_type=<type>
- */
-export const getDatasetTemplateCsv = async (datasetType) => {
-  const response = await evalApiClient.get('/datasets/template', {
-    params: { dataset_type: datasetType },
-    responseType: 'blob',
-  });
-  const cd = response.headers['content-disposition'] || '';
-  const match = /filename="?([^"]+)"?/.exec(cd);
-  const filename = match ? match[1] : `${datasetType}_template.csv`;
-  return { blob: response.data, filename };
-};
-
-/** Trigger a browser download for a Blob+filename pair. */
-export const triggerBlobDownload = (blob, filename) => {
-  const url = URL.createObjectURL(blob);
+  const url = URL.createObjectURL(response.data);
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
   document.body.appendChild(a);
   a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return { filename };
 };
 
 /**
