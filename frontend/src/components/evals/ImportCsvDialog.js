@@ -167,6 +167,11 @@ export function ImportCsvDialog({
         toast.info('Import returned no changes');
       }
       onImported?.(datasetType);
+      // Clear the file list so re-clicking Upload doesn't re-import the
+      // same rows. The result banner stays so the user can still see
+      // created/skipped/errors counts.
+      setFiles([]);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (err) {
       const msg = parseApiError(err, 'Upload failed');
       setErrorMsg(msg);

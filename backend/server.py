@@ -819,7 +819,10 @@ async def export_datasets_csv(
                     f"{EVAL_API_BASE}/api/v1/datasets/types/{dataset_type}"
                     f"/instances/{iid}",
                 )
-                if r.status_code == 404:
+                if r.status_code in (404, 500):
+                    # Upstream harness returns 500 (not 404) for unknown
+                    # single-instance lookups. Map both to a clean 404 so
+                    # the UI shows a sensible "not found" message.
                     raise HTTPException(
                         status_code=404,
                         detail=f"not found: {dataset_type}/{iid}",

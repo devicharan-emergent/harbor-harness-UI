@@ -15,6 +15,7 @@ import EvalRuns from "@/pages/EvalRuns";
 import JobDetail from "@/pages/JobDetail";
 import DatasetsPage from "@/pages/DatasetsPage";
 import JudgeConfigPage from "@/pages/JudgeConfigPage";
+import AgentPromptManagementPage from "@/pages/AgentPromptManagementPage";
 import SchedulesList from "@/pages/SchedulesList";
 import ScheduleEditor from "@/pages/ScheduleEditor";
 import ScheduleDetail from "@/pages/ScheduleDetail";
@@ -59,6 +60,7 @@ const router = createBrowserRouter([
           { path: "/evals/:id", element: <JobDetail /> },
           { path: "/datasets", element: <DatasetsPage /> },
           { path: "/judge-config", element: <JudgeConfigPage /> },
+          { path: "/agent-prompt-management", element: <AgentPromptManagementPage /> },
           { path: "/schedules", element: <SchedulesList /> },
           { path: "/schedules/new", element: <ScheduleEditor /> },
           { path: "/schedules/:id", element: <ScheduleDetail /> },
