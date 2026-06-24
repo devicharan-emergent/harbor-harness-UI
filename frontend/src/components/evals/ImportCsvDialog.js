@@ -74,6 +74,43 @@ const COLUMN_HELP = {
 
 const MAX_TOTAL_BYTES = 32 * 1024 * 1024; // 32 MB client-side cap.
 
+// Render a callout string with two inline markers handled safely as React
+// children (no dangerouslySetInnerHTML — angle brackets inside `code` spans
+// would otherwise be parsed as HTML and silently dropped by the browser):
+//   `text`    → inline-code <code>text</code>
+//   **text**  → bold        <strong>text</strong>
+// Anything else is plain text. Markers are tokenised greedily, longest-first.
+function renderCallout(text) {
+  const tokens = [];
+  const re = /(`[^`]+`|\*\*[^*]+\*\*)/g;
+  let last = 0;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) tokens.push({ type: 'text', value: text.slice(last, m.index) });
+    const tok = m[0];
+    if (tok.startsWith('**')) {
+      tokens.push({ type: 'bold', value: tok.slice(2, -2) });
+    } else {
+      tokens.push({ type: 'code', value: tok.slice(1, -1) });
+    }
+    last = m.index + tok.length;
+  }
+  if (last < text.length) tokens.push({ type: 'text', value: text.slice(last) });
+  return tokens.map((t, i) => {
+    if (t.type === 'code') {
+      return (
+        <code key={i} className="font-mono bg-muted px-1 rounded text-[10px]">
+          {t.value}
+        </code>
+      );
+    }
+    if (t.type === 'bold') {
+      return <strong key={i} className="font-semibold">{t.value}</strong>;
+    }
+    return <span key={i}>{t.value}</span>;
+  });
+}
+
 export function ImportCsvDialog({
   open,
   onClose,
@@ -278,7 +315,7 @@ export function ImportCsvDialog({
                     </p>
                     <ul className="space-y-1 list-disc pl-4 text-[11px] leading-relaxed">
                       {help.callouts.map((c, i) => (
-                        <li key={i} dangerouslySetInnerHTML={{ __html: c.replace(/`([^`]+)`/g, '<code class="font-mono bg-muted px-1 rounded text-[10px]">$1</code>') }} />
+                        <li key={i}>{renderCallout(c)}</li>
                       ))}
                     </ul>
                   </div>
