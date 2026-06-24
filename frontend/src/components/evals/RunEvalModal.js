@@ -304,6 +304,14 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
   const [modelNameOverride, setModelNameOverride] = useState('');
   const [modelOverrideTouched, setModelOverrideTouched] = useState(false);
 
+  // Number of times to repeat the eval. Each run gets a distinct
+  // `group_run_id` suffix `-run-1` / `-run-2` / … so the harness sees N
+  // distinct groups. Default = 1 (no suffix, original behaviour).
+  const NUM_RUNS_MAX = 10;
+  const [numRuns, setNumRuns] = useState(1);
+  // Progress indicator on the Submit button when numRuns > 1.
+  const [runProgress, setRunProgress] = useState(null); // null | { current, total }
+
   // Judge config (singleton, Mongo-backed). Loaded lazily on entering
   // Step 2 in testing_agent_mode; stamped onto the batch body as
   // top-level judge_prompt + judge_model.
@@ -371,6 +379,8 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
       setAgentCheckMsg('');
       setModelNameOverride('');
       setModelOverrideTouched(false);
+      setNumRuns(1);
+      setRunProgress(null);
     }
   }, [open, initialEph, initialAgentName]);
 
@@ -454,6 +464,37 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
     }
   };
 
+  // "Select all (N)" — scoped to the currently-filtered list only.
+  // Blocks (with a toast) when the filtered list would create a mixed
+  // testing_agent_bench + scratch/bug/test_report selection — the user
+  // must apply a type filter first so the harness endpoint is consistent.
+  const filteredAllSelected =
+    filteredDatasets.length > 0 &&
+    filteredDatasets.every(ds => selectedProblems.find(p => p.name === ds.name));
+
+  const handleSelectAllVisible = () => {
+    if (filteredAllSelected) {
+      // Toggle: deselect every currently-visible item.
+      const visibleNames = new Set(filteredDatasets.map(d => d.name));
+      setSelectedProblems(selectedProblems.filter(p => !visibleNames.has(p.name)));
+      return;
+    }
+    // Block mixed-type select-all: testing_agent_bench uses a different
+    // harness endpoint than scratch/bug/test_report, so they can't share
+    // a single batch.
+    const types = new Set(filteredDatasets.map(d => d.dataset_type));
+    const hasTab = types.has('testing_agent_bench');
+    const hasOther = [...types].some(t => t && t !== 'testing_agent_bench');
+    if (hasTab && hasOther) {
+      toast.error('Apply a type filter first, then Select all — testing_agent_bench can\'t be batched with other types.');
+      return;
+    }
+    // Merge filtered into selection, skipping already-selected duplicates.
+    const seen = new Set(selectedProblems.map(p => p.name));
+    const additions = filteredDatasets.filter(d => !seen.has(d.name));
+    setSelectedProblems([...selectedProblems, ...additions]);
+  };
+
   const handlePreview = async (ds) => {
     if (ds.problem_statement) { setSelectedPreview(ds); return; }
     setLoadingPreview(true);
@@ -483,151 +524,156 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
       toast.error('Group Run ID is required');
       return;
     }
+    const runsCount = Math.max(1, Math.min(NUM_RUNS_MAX, Math.trunc(Number(numRuns) || 1)));
     setSubmitting(true);
+    setRunProgress(runsCount > 1 ? { current: 0, total: runsCount } : null);
+
+    // Pre-hydrate testing_agent items ONCE — same problems are reused
+    // across every repeat, so we avoid N round-trips per problem to the
+    // dataset endpoint when the list response trimmed fields.
+    let hydratedItems = null;
+    if (isTestingAgentMode) {
+      try {
+        hydratedItems = await Promise.all(
+          selectedProblems.map(async (ds) => {
+            if (ds.problem_statement && ds.natural_language_tests && ds.attributes) return ds;
+            try {
+              return (await getDatasetForProblem(ds.name)) || ds;
+            } catch {
+              return ds;
+            }
+          })
+        );
+      } catch {
+        hydratedItems = selectedProblems;
+      }
+    }
+
     try {
-      // Harness requires `group_run_id` to be unique per submission. Append
-      // an ISO timestamp + short random suffix so users can reuse the same
-      // human-friendly label (e.g. "nightly") across runs without
-      // collisions even on rapid double-clicks.
+      // The harness requires unique `group_run_id` per submission. Build
+      // a stable base (timestamp + 4-char random) once per Submit click,
+      // then suffix per-run only when N > 1. This keeps the N=1 case
+      // identical to legacy behaviour for downstream tooling.
       const ts = new Date().toISOString().replace(/[:.]/g, '-');
       const rand = Math.random().toString(36).slice(2, 6);
-      const groupRunId = `${groupId.trim()}-${ts}-${rand}`;
+      const baseGroupRunId = `${groupId.trim()}-${ts}-${rand}`;
 
-      // ── testing_agent_bench fork-eval branch ───────────────────
-      // Single batched POST with `items[]` — one entry per selected
-      // dataset. `group_run_id` / `user_id` / `created_by` are shared
-      // top-level (the backend rejects duplicate group_run_id across
-      // requests, so looping would 409 on the 2nd dataset).
-      if (isTestingAgentMode) {
-        const trimmedAgentOverride = agentNameOverride.trim();
-        // Resolve the per-batch model_name once:
-        //  - If the user touched the override field, that value wins for
-        //    every item (incl. blank → key omitted on every item).
-        //  - Otherwise each item falls back to its own dataset's
-        //    `attributes.model_name`.
-        const items = [];
-        for (const ds of selectedProblems) {
-          // Hydrate full dataset if list endpoint trimmed fields.
-          let full = ds;
-          if (!ds.problem_statement || !ds.natural_language_tests || !ds.attributes) {
-            try {
-              full = (await getDatasetForProblem(ds.name)) || ds;
-            } catch {
-              full = ds;
+      let totalJobsSubmitted = 0;
+      const trimmedAgentOverride = agentNameOverride.trim();
+      const trimmedTemplate = templateName.trim();
+
+      for (let i = 1; i <= runsCount; i++) {
+        const groupRunId = runsCount > 1
+          ? `${baseGroupRunId}-run-${i}`
+          : baseGroupRunId;
+        if (runsCount > 1) setRunProgress({ current: i, total: runsCount });
+
+        // ── testing_agent_bench fork-eval branch ───────────────
+        if (isTestingAgentMode) {
+          const items = [];
+          for (const full of hydratedItems) {
+            const attrs = full.attributes || {};
+            const agent = trimmedAgentOverride || (attrs.agent_name || '').trim();
+            const hitl = full.problem_statement || '';
+            const golden = full.natural_language_tests || '';
+            const prodJobId = (attrs.prod_job_id || full.instance_id || '').trim();
+            if (!agent) {
+              throw new Error(
+                `Dataset ${full.name}: agent_name is required (set on the dataset or via the override)`
+              );
             }
+            if (!hitl.trim() || !golden.trim()) {
+              throw new Error(
+                `Dataset ${full.name}: HITL input and golden output are required`
+              );
+            }
+            if (!prodJobId) {
+              throw new Error(
+                `Dataset ${full.name}: prod_job_id (or instance_id) is required`
+              );
+            }
+            const item = {
+              prod_job_id: prodJobId,
+              agent_name: agent,
+              hitl_input: hitl,
+              golden_output: golden,
+            };
+            const resolvedModel = modelOverrideTouched
+              ? modelNameOverride.trim()
+              : String(attrs.model_name || '').trim();
+            if (resolvedModel) item.model_name = resolvedModel;
+            items.push(item);
           }
-          const attrs = full.attributes || {};
-          const agent = trimmedAgentOverride || (attrs.agent_name || '').trim();
-          const hitl = full.problem_statement || '';
-          const golden = full.natural_language_tests || '';
-          const prodJobId = (attrs.prod_job_id || full.instance_id || '').trim();
-          if (!agent) {
-            throw new Error(
-              `Dataset ${full.name || ds.name}: agent_name is required (set on the dataset or via the override)`
-            );
-          }
-          if (!hitl.trim() || !golden.trim()) {
-            throw new Error(
-              `Dataset ${full.name || ds.name}: HITL input and golden output are required`
-            );
-          }
-          if (!prodJobId) {
-            throw new Error(
-              `Dataset ${full.name || ds.name}: prod_job_id (or instance_id) is required`
-            );
-          }
-          const item = {
-            prod_job_id: prodJobId,
-            agent_name: agent,
-            hitl_input: hitl,
-            golden_output: golden,
+          const batchBody = {
+            group_run_id: groupRunId,
+            items,
           };
-          const resolvedModel = modelOverrideTouched
-            ? modelNameOverride.trim()
-            : String(attrs.model_name || '').trim();
-          if (resolvedModel) item.model_name = resolvedModel;
-          items.push(item);
+          if (userId.trim()) batchBody.user_id = userId.trim();
+          if (judgeConfig?.judge_prompt) batchBody.judge_prompt = judgeConfig.judge_prompt;
+          if (judgeConfig?.judge_model) batchBody.judge_model = judgeConfig.judge_model;
+          const result = await submitTestingAgentEval(batchBody);
+          totalJobsSubmitted += Array.isArray(result?.jobs)
+            ? result.jobs.length
+            : items.length;
+          continue;
         }
-        const batchBody = {
-          group_run_id: groupRunId,
-          items,
-        };
-        if (userId.trim()) batchBody.user_id = userId.trim();
-        // Stamp the saved judge config (if any) at the top level. Omit
-        // when the config call failed or we're using the in-memory
-        // defaults — the harness uses its own defaults in that case.
-        if (judgeConfig?.judge_prompt) batchBody.judge_prompt = judgeConfig.judge_prompt;
-        if (judgeConfig?.judge_model) batchBody.judge_model = judgeConfig.judge_model;
-        const result = await submitTestingAgentEval(batchBody);
-        const jobCount = Array.isArray(result?.jobs) ? result.jobs.length : items.length;
-        toast.success(`Submitted ${jobCount} testing-agent eval(s)`);
-        onClose();
-        navigate('/evals');
-        return;
-      }
 
-      // ── Standard scratch/bug/test-report batch ─────────────────
-      const trimmedOverride = agentNameOverride.trim();
+        // ── Standard scratch/bug/test-report batch ──────────────
+        const evals = selectedProblems.map(problem => {
+          const evalItem = {
+            problem: problem.name,
+            cpus,
+            memory: memoryMb,
+            storage: storageGb,
+            headed,
+            force_build: forceBuild,
+          };
+          if (trimmedTemplate) evalItem.template_name = trimmedTemplate;
+          const experiments = {};
+          if (showExpConfig) {
+            if (expImage) experiments.image = expImage;
+            if (expModelName) experiments.model_name = expModelName;
+            if (advancedMode && !submitEph && expCortexUrl) experiments.cortex_url = expCortexUrl;
+          }
+          if (submitEph) {
+            experiments.cortex_url = `https://cortex-${submitEph}-tit7tznrtq-uc.a.run.app`;
+          }
+          if (breakpointEnabled && breakpointMins > 0) {
+            experiments.breakpoint_duration_mins = breakpointMins;
+          }
+          if (Object.keys(experiments).length > 0) evalItem.experiments = experiments;
+          return evalItem;
+        });
 
-      const evals = selectedProblems.map(problem => {
-        const evalItem = {
-          problem: problem.name,
-          cpus,
-          memory: memoryMb,
-          storage: storageGb,
-          headed,
-          force_build: forceBuild,
-        };
-        if (templateName.trim()) evalItem.template_name = templateName.trim();
-        const experiments = {};
-        if (showExpConfig) {
-          if (expImage) experiments.image = expImage;
-          if (expModelName) experiments.model_name = expModelName;
-          // cortex_url only flows through in advanced mode AND when there's no
-          // eph selected — eph-driven submission derives URLs from the eph name.
-          if (advancedMode && !submitEph && expCortexUrl) experiments.cortex_url = expCortexUrl;
-        }
-        // Eph-driven path: derive per-eval cortex_url from the eph name so
-        // the harness sees it on every eval item. Mirrors the same project
-        // suffix used by EnvSwitcher.
+        const payload = { user_id: userId, group_run_id: groupRunId, evals };
+        if (trimmedAgentOverride) payload.agent_name = trimmedAgentOverride;
         if (submitEph) {
-          experiments.cortex_url = `https://cortex-${submitEph}-tit7tznrtq-uc.a.run.app`;
+          payload.eph_name = submitEph;
+          payload.emergent_agents_url = `https://emergent-agents-${submitEph}-tit7tznrtq-uc.a.run.app`;
+          payload.cortex_url = `https://cortex-${submitEph}-tit7tznrtq-uc.a.run.app`;
         }
-        if (breakpointEnabled && breakpointMins > 0) {
-          experiments.breakpoint_duration_mins = breakpointMins;
-        }
-        if (Object.keys(experiments).length > 0) evalItem.experiments = experiments;
-        return evalItem;
-      });
 
-      const payload = { user_id: userId, group_run_id: groupRunId, evals };
-      if (trimmedOverride) payload.agent_name = trimmedOverride;
-      // Eph-driven: derive both emergent_agents_url + cortex_url from the
-      // eph name (same Cloud Run project suffix as EnvSwitcher). The
-      // backend used to do this server-side via a readiness preflight; we
-      // now construct on the client so the /jobs-with-es contract is
-      // satisfied without depending on the readiness stub.
-      if (submitEph) {
-        payload.eph_name = submitEph;
-        payload.emergent_agents_url = `https://emergent-agents-${submitEph}-tit7tznrtq-uc.a.run.app`;
-        payload.cortex_url = `https://cortex-${submitEph}-tit7tznrtq-uc.a.run.app`;
+        const result = submitEph
+          ? await submitEvalJobsWithEs(payload)
+          : await submitEvalJobs(payload);
+        totalJobsSubmitted += result.jobs?.length || evals.length;
       }
 
-      // Route through /jobs-with-es when an eph is set so the backend can
-      // derive emergent_agents_url + cortex_url and re-validate readiness.
-      const result = submitEph
-        ? await submitEvalJobsWithEs(payload)
-        : await submitEvalJobs(payload);
-      const jobCount = result.jobs?.length || evals.length;
-      toast.success(`Submitted ${jobCount} eval job(s)`);
+      toast.success(
+        runsCount > 1
+          ? `Submitted ${totalJobsSubmitted} job(s) across ${runsCount} run(s)`
+          : `Submitted ${totalJobsSubmitted} eval job(s)`
+      );
       onClose();
       navigate('/evals');
     } catch (error) {
       toast.error(parseApiError(error, 'Failed to submit evaluation'));
     } finally {
       setSubmitting(false);
+      setRunProgress(null);
     }
   };
+
 
   const totalJobs = selectedProblems.length;
   const stepLabels = ['Problems', 'Configure', 'Review'];
@@ -697,6 +743,20 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                     data-testid="dataset-search-input"
                   />
                 </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-9 whitespace-nowrap"
+                  onClick={handleSelectAllVisible}
+                  disabled={loadingDatasets || filteredDatasets.length === 0}
+                  data-testid="select-all-datasets"
+                  title={filteredAllSelected ? 'Deselect every dataset currently visible' : 'Select every dataset currently visible'}
+                >
+                  {filteredAllSelected
+                    ? `Clear (${filteredDatasets.length})`
+                    : `Select all (${filteredDatasets.length})`}
+                </Button>
               </div>
 
               {selectedProblems.length > 0 && (
@@ -891,6 +951,32 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                   placeholder="e.g. nightly, sonnet-vs-opus"
                   className="font-mono text-sm"
                   data-testid="eval-group-id"
+                />
+              </div>
+
+              {/* Number of Runs — always shown */}
+              <div>
+                <Label className="text-sm font-semibold">Number of Runs</Label>
+                <p className="text-[11px] text-muted-foreground mt-0.5 mb-2">
+                  How many times to repeat this batch. Each run gets its own{' '}
+                  <code className="font-mono">group_run_id</code> suffix{' '}
+                  (<code className="font-mono">-run-1</code>,{' '}
+                  <code className="font-mono">-run-2</code>, …) so the harness
+                  treats them as distinct groups. Max{' '}
+                  <span className="font-mono">{NUM_RUNS_MAX}</span>.
+                </p>
+                <Input
+                  type="number"
+                  min={1}
+                  max={NUM_RUNS_MAX}
+                  value={numRuns}
+                  onChange={e => {
+                    const n = Number(e.target.value);
+                    if (Number.isNaN(n)) return;
+                    setNumRuns(Math.min(NUM_RUNS_MAX, Math.max(1, Math.trunc(n))));
+                  }}
+                  className="font-mono text-sm w-28"
+                  data-testid="eval-num-runs"
                 />
               </div>
 
@@ -1209,6 +1295,17 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                   <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-xs">
                     <div><span className="text-muted-foreground">Group:</span> <span className="font-mono">{groupId}</span></div>
                     <div><span className="text-muted-foreground">User:</span> <span className="font-mono">{userId}</span></div>
+                    {numRuns > 1 && (
+                      <div className="col-span-2">
+                        <span className="text-muted-foreground">Runs:</span>{' '}
+                        <span className="font-mono">{numRuns}</span>
+                        <span className="text-muted-foreground"> — each gets its own</span>{' '}
+                        <code className="font-mono text-[10px]">group_run_id</code>
+                        <span className="text-muted-foreground"> with</span>{' '}
+                        <code className="font-mono text-[10px]">-run-N</code>{' '}
+                        <span className="text-muted-foreground">suffix ({totalJobs * numRuns} total jobs)</span>
+                      </div>
+                    )}
                     {isTestingAgentMode ? (
                       <div className="col-span-2">
                         <span className="text-muted-foreground">Mode:</span>{' '}
@@ -1282,7 +1379,17 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 data-testid="submit-eval-button"
               >
                 {submitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Rocket className="w-4 h-4 mr-2" />}
-                Submit {totalJobs > 0 && `(${totalJobs} job${totalJobs > 1 ? 's' : ''})`}
+                {runProgress
+                  ? `Submitting ${runProgress.current}/${runProgress.total}…`
+                  : (
+                    <>
+                      Submit {totalJobs > 0 && (
+                        numRuns > 1
+                          ? `(${totalJobs} × ${numRuns} = ${totalJobs * numRuns} jobs)`
+                          : `(${totalJobs} job${totalJobs > 1 ? 's' : ''})`
+                      )}
+                    </>
+                  )}
               </Button>
             )}
           </div>
