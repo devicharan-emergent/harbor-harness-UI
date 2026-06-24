@@ -590,6 +590,326 @@ async def proxy_submit_testing_agent_eval(body: dict):
         raise HTTPException(status_code=500, detail=f"Eval API error: {str(e)}")
 
 
+# ── CSV import / export / template (per dataset_type) ──────────────────
+# Adds bulk-create-by-CSV and round-trippable CSV export to /datasets.
+# Harness stays JSON-only — all flattening + serialization lives here.
+import csv
+import io
+from fastapi import UploadFile, File, Query
+from fastapi.responses import Response
+
+# Columns that map to TOP-LEVEL dataset fields. Everything else on a row
+# (non-empty) goes into the per-row `attributes` object the bulk endpoint
+# expects.
+_CSV_COMMON_COLS = {
+    "id", "name", "instance_id", "description", "tags",
+    "problem_statement", "natural_language_tests", "base_image", "agent_name",
+}
+
+# Ordered list of common columns for export header (id+instance_id first
+# so a quick eyeball of the CSV is identifying).
+_CSV_COMMON_COLS_ORDER = [
+    "id", "instance_id", "name", "description", "tags",
+    "problem_statement", "natural_language_tests", "base_image", "agent_name",
+]
+
+# Attribute columns per dataset_type. MUST exactly match harness attribute
+# field names so the round-trip (export → re-upload) is loss-less and
+# bulk-create skips the existing rows.
+_CSV_ATTR_COLS = {
+    "scratch_bench_phased": [
+        "subagents", "preview_url", "image", "auto_compact_strategy",
+        "model_name", "system_prompt", "thinking_level", "hints", "nudge",
+    ],
+    "bug_bench": [
+        "repo", "eph_job_id", "base_commit", "base_commit_squashed",
+        "pull_number", "issue_number", "request_id", "image",
+    ],
+    "test_report_bench": [
+        "repo", "eph_job_id", "testing_hitl",
+        "Bug_description", "Bug_fix_status",
+        "request_id", "base_commit", "pull_number", "issue_number",
+    ],
+    "testing_agent_bench": ["prod_job_id", "model_name"],
+    "wingman_bench": [
+        "wingman_id", "user_id", "expected_integrations",
+        "max_iterations", "agent_id", "model_name",
+    ],
+}
+
+# Per-type template rows shipped with the "Download template" link so
+# new users get a working example to edit rather than a bare header.
+_CSV_TEMPLATES = {
+    "scratch_bench_phased": [
+        {
+            "instance_id": "example_public_notes",
+            "problem_statement": "<problem>Build a simple public notes app where anyone can post a sticky note without signing in. Do NOT ask questions; build it all in one pass.</problem>",
+            "natural_language_tests": "<phase><test>Visitor can create a note and it appears in the list.</test><test>Notes persist after page reload.</test></phase>",
+            "model_name": "claude-sonnet-4-5",
+        },
+        {
+            "instance_id": "example_notes_phased",
+            "problem_statement": "<problem><phase>Phase 1: list + create notes.</phase><phase>Phase 2: add edit and delete.</phase></problem>",
+            "natural_language_tests": "<phase><test>can create a note</test></phase><phase><test>can edit a note</test><test>can delete a note</test></phase>",
+        },
+    ],
+    "bug_bench": [
+        {
+            "instance_id": "example_save_bug",
+            "problem_statement": "Saving a record shows a success toast but the value is not persisted.",
+            "natural_language_tests": "<test>Open the form, save a value, reload the page — the value is still there.</test>",
+            "repo": "org/example-repo",
+            "eph_job_id": "eph-abc123",
+        },
+    ],
+    "test_report_bench": [
+        {
+            "instance_id": "example_test_report",
+            "problem_statement": "Triage the failing test_report_bench run for the example app.",
+            "natural_language_tests": "<test>Repro the failure, then confirm the fix resolves it.</test>",
+            "repo": "org/example-repo",
+            "eph_job_id": "eph-abc123",
+            "testing_hitl": "The login button does nothing after entering credentials.",
+            "Bug_description": "Login submit handler is wired to a no-op.",
+            "Bug_fix_status": "pending",
+        },
+    ],
+    "testing_agent_bench": [
+        {
+            "instance_id": "example_fork_job",
+            "problem_statement": "Please continue with the task and report what you find.",
+            "natural_language_tests": "1. The login button is unresponsive.\n2. The save button shows a toast but no persistence.",
+            "agent_name": "testing-agent-v3-gpt-5-2-codex",
+            "prod_job_id": "example_fork_job",
+            "model_name": "claude-sonnet-4-5",
+        },
+    ],
+    "wingman_bench": [
+        {
+            "instance_id": "example_wingman_task",
+            "problem_statement": "Connect Slack and post a message to the team channel summarising open PRs.",
+            "natural_language_tests": "<test>A summary message appears in #team-eng.</test>",
+            "wingman_id": "wm-001",
+            "user_id": "u-001",
+            "expected_integrations": "slack,github",
+            "max_iterations": "7",
+            "model_name": "claude-sonnet-4-5",
+        },
+    ],
+}
+
+
+def _csv_row_to_item(row: dict, dataset_type: str) -> dict:
+    """Flatten a single CSV row into a harness bulk-create item. Every
+    non-empty column outside the common set lands in `attributes`."""
+    attributes = {
+        col: val for col, val in row.items()
+        if col and col not in _CSV_COMMON_COLS and val != ""
+    }
+    # Only wingman_bench needs non-string attribute coercion (harness
+    # attributes for the other types are all strings).
+    if dataset_type == "wingman_bench":
+        if "expected_integrations" in attributes:
+            attributes["expected_integrations"] = [
+                s.strip() for s in attributes["expected_integrations"].split(",") if s.strip()
+            ]
+        if "max_iterations" in attributes and str(attributes["max_iterations"]).strip():
+            try:
+                attributes["max_iterations"] = int(attributes["max_iterations"])
+            except (TypeError, ValueError) as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"max_iterations must be an integer (got {attributes['max_iterations']!r}): {e}",
+                )
+
+    item = {
+        "dataset_type": dataset_type,
+        "instance_id": (row.get("instance_id") or "").strip(),
+        "problem_statement": row.get("problem_statement", ""),
+        "natural_language_tests": row.get("natural_language_tests", ""),
+        "attributes": attributes,
+    }
+    for opt in ("name", "description", "base_image", "agent_name"):
+        if (row.get(opt) or "").strip():
+            item[opt] = row[opt]
+    if (row.get("tags") or "").strip():
+        item["tags"] = [t.strip() for t in row["tags"].split(",") if t.strip()]
+    return item
+
+
+def _csv_rows(text: str) -> list:
+    """Yield non-blank rows from a CSV body string. Tolerates the UTF-8 BOM
+    Excel adds by stripping it before parsing."""
+    out = []
+    for raw in csv.DictReader(io.StringIO(text)):
+        row = {(k or "").strip(): (v or "") for k, v in raw.items()}
+        if not any(v.strip() for v in row.values()):
+            continue  # blank line
+        out.append(row)
+    return out
+
+
+@api_router.post("/eval/datasets/import")
+async def import_datasets_csv(
+    dataset_type: str,
+    files: list[UploadFile] = File(...),
+):
+    """Flatten uploaded CSV(s) → harness POST /api/v1/datasets/bulk.
+
+    The selected `dataset_type` is stamped on every row (the CSV must
+    NOT carry that column). Multiple files are concatenated in upload
+    order, then row order — so `errors[].index` in the harness reply
+    indexes into that combined stream. Existing `(dataset_type,
+    instance_id)` rows are skipped; per-row failures are reported in
+    `errors[]` while valid rows still get created.
+    """
+    if dataset_type not in _CSV_ATTR_COLS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"unknown dataset_type '{dataset_type}' "
+                   f"(allowed: {sorted(_CSV_ATTR_COLS.keys())})",
+        )
+    items = []
+    for f in files:
+        try:
+            text = (await f.read()).decode("utf-8-sig")
+        except UnicodeDecodeError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{f.filename}: not valid UTF-8 ({e})",
+            )
+        for row in _csv_rows(text):
+            items.append(_csv_row_to_item(row, dataset_type))
+    if not items:
+        raise HTTPException(status_code=400, detail="no data rows in uploaded CSV(s)")
+    async with httpx.AsyncClient(timeout=120.0) as hclient:
+        r = await hclient.post(
+            f"{EVAL_API_BASE}/api/v1/datasets/bulk",
+            json={"datasets": items},
+        )
+        try:
+            body = r.json()
+        except Exception:
+            body = {"error": r.text}
+        if r.status_code >= 400:
+            raise HTTPException(status_code=r.status_code, detail=body)
+        return body
+
+
+@api_router.get("/eval/datasets/export")
+async def export_datasets_csv(
+    dataset_type: str,
+    instance_id: list[str] = Query(default=[]),
+):
+    """Round-trip CSV export. `instance_id` may be repeated to select a
+    subset (preserves request order); omit to export every active row
+    of the type. Output header matches the import format so an
+    export → edit → re-import cycle works (existing rows come back
+    `skipped`)."""
+    if dataset_type not in _CSV_ATTR_COLS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"unknown dataset_type '{dataset_type}'",
+        )
+    rows: list[dict] = []
+    async with httpx.AsyncClient(timeout=60.0) as hclient:
+        if instance_id:
+            for iid in instance_id:
+                r = await hclient.get(
+                    f"{EVAL_API_BASE}/api/v1/datasets/types/{dataset_type}"
+                    f"/instances/{iid}",
+                )
+                if r.status_code == 404:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"not found: {dataset_type}/{iid}",
+                    )
+                r.raise_for_status()
+                rows.append(r.json())
+        else:
+            offset = 0
+            while True:
+                r = await hclient.get(
+                    f"{EVAL_API_BASE}/api/v1/datasets/types/{dataset_type}",
+                    params={"limit": 200, "offset": offset},
+                )
+                r.raise_for_status()
+                page = r.json().get("datasets", [])
+                rows.extend(page)
+                if len(page) < 200:
+                    break
+                offset += 200
+
+    header = _CSV_COMMON_COLS_ORDER + _CSV_ATTR_COLS[dataset_type]
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=header, extrasaction="ignore")
+    w.writeheader()
+    for d in rows:
+        attrs = d.get("attributes") or {}
+        rec = {
+            "id": d.get("id", ""),
+            "instance_id": d.get("instance_id", ""),
+            "name": d.get("name", ""),
+            "description": d.get("description", ""),
+            "tags": ",".join(d.get("tags") or []),
+            "problem_statement": d.get("problem_statement", ""),
+            "natural_language_tests": d.get("natural_language_tests", ""),
+            "base_image": d.get("base_image", ""),
+            # Top-level agent_name wins over attribute fallback.
+            "agent_name": d.get("agent_name", "") or attrs.get("agent_name", ""),
+        }
+        for col in _CSV_ATTR_COLS[dataset_type]:
+            v = attrs.get(col, "")
+            if isinstance(v, list):
+                v = ",".join(map(str, v))
+            elif v is None:
+                v = ""
+            else:
+                v = str(v)
+            rec[col] = v
+        w.writerow(rec)
+
+    if len(rows) == 1:
+        fname = f"{dataset_type}_{rows[0].get('instance_id', 'export')}.csv"
+    else:
+        fname = f"{dataset_type}.csv"
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+@api_router.get("/eval/datasets/template")
+async def dataset_template_csv(dataset_type: str):
+    """Return a starter CSV: the per-type header plus 1–2 filled example
+    rows the user can edit. Helps new users avoid guessing the per-type
+    required columns and the XML shape of `problem_statement` /
+    `natural_language_tests`."""
+    if dataset_type not in _CSV_ATTR_COLS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"unknown dataset_type '{dataset_type}'",
+        )
+    header = [
+        "instance_id", "name", "description", "tags",
+        "problem_statement", "natural_language_tests",
+        "base_image", "agent_name",
+    ] + _CSV_ATTR_COLS[dataset_type]
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=header, extrasaction="ignore")
+    w.writeheader()
+    for row in _CSV_TEMPLATES.get(dataset_type, [{"instance_id": "example_instance"}]):
+        w.writerow(row)
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="{dataset_type}_template.csv"',
+        },
+    )
+
+
 # ── Verifier config (per-bench, Mongo-backed) ──────────────────────────
 # One singleton doc per bench in collection `judge_config`, with _id = bench
 # type ("testing_agent_bench" or "scratch_bench_phased"). On every submit
