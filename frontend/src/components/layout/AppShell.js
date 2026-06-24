@@ -16,7 +16,7 @@ const navItems = [
   { label: 'Schedules', href: '/schedules', icon: CalendarClock },
   { label: 'Cortex Agents', href: '/cortex/agents', icon: Boxes },
   { label: 'Datasets', href: '/datasets', icon: Database },
-  { label: 'LLM Judge', href: '/judge-config', icon: Scale },
+  { label: 'Verifier Config', href: '/judge-config', icon: Scale },
   { label: 'Compare', href: '/compare', icon: GitCompare },
 ];
 

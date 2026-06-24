@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
-import { listDatasets, listDatasetsByType, getDatasetForProblem, submitEvalJobs, submitEvalJobsWithEs, submitTestingAgentEval, checkAgentExists, getJudgeConfig } from '@/services/evalApi';
+import { listDatasets, listDatasetsByType, getDatasetForProblem, submitEvalJobs, submitEvalJobsWithEs, submitTestingAgentEval, checkAgentExists, getVerifierConfig } from '@/services/evalApi';
 import { toast } from 'sonner';
 import { Loader2, Rocket, FileText, Search, ChevronRight, Check, AlertCircle, X } from 'lucide-react';
 import { parseApiError } from '@/lib/errorUtils';
@@ -312,10 +312,15 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
   // Progress indicator on the Submit button when numRuns > 1.
   const [runProgress, setRunProgress] = useState(null); // null | { current, total }
 
-  // Judge config (singleton, Mongo-backed). Loaded lazily on entering
-  // Step 2 in testing_agent_mode; stamped onto the batch body as
-  // top-level judge_prompt + judge_model.
+  // Verifier configs (per-bench, Mongo-backed singletons). Loaded lazily
+  // on entering Step 2. testing_agent_bench → top-level judge_prompt +
+  // judge_model on the batched submit. scratch_bench_phased → stamped
+  // into each eval's `experiments.browser_prompt` + `browser_model`.
+  // Only stamped when the saved config is NOT the default (so the
+  // harness can use its own built-in defaults when the user hasn't
+  // customized).
   const [judgeConfig, setJudgeConfig] = useState(null);
+  const [scratchVerifier, setScratchVerifier] = useState(null);
   const [judgeConfigOpen, setJudgeConfigOpen] = useState(false);
 
   // Eph (ephemeral cortex deployment) name + existence check state.
@@ -381,6 +386,8 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
       setModelOverrideTouched(false);
       setNumRuns(1);
       setRunProgress(null);
+      setJudgeConfig(null);
+      setScratchVerifier(null);
     }
   }, [open, initialEph, initialAgentName]);
 
@@ -404,20 +411,30 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
     }
   }, [step, isTestingAgentMode, modelOverrideTouched, selectedProblems, modelNameOverride]);
 
-  // Lazy-load the judge config on entering Step 2 in testing_agent_mode.
+  // Lazy-load the bench-appropriate verifier config on entering Step 2.
   // Cached on the modal so users can pop the dialog open without a re-fetch.
   useEffect(() => {
-    if (step !== 2 || !isTestingAgentMode || judgeConfig) return;
-    (async () => {
-      try {
-        const cfg = await getJudgeConfig();
-        setJudgeConfig(cfg);
-      } catch {
-        // Non-fatal — submit will fall back to omitting judge_* keys and
-        // the backend defaults will kick in.
+    if (step !== 2) return;
+    if (isTestingAgentMode && !judgeConfig) {
+      (async () => {
+        try {
+          setJudgeConfig(await getVerifierConfig('testing_agent_bench'));
+        } catch { /* non-fatal — backend defaults will apply */ }
+      })();
+    } else if (!isTestingAgentMode && !scratchVerifier) {
+      // Scratch path: only fetch if at least one selected problem is
+      // scratch_bench_phased (bug_bench / test_report_bench currently
+      // don't use the browser verifier).
+      const hasScratch = selectedProblems.some(p => p.dataset_type === 'scratch_bench_phased');
+      if (hasScratch) {
+        (async () => {
+          try {
+            setScratchVerifier(await getVerifierConfig('scratch_bench_phased'));
+          } catch { /* non-fatal */ }
+        })();
       }
-    })();
-  }, [step, isTestingAgentMode, judgeConfig]);
+    }
+  }, [step, isTestingAgentMode, judgeConfig, scratchVerifier, selectedProblems]);
 
   const handleCheckAgent = async () => {
     const eph = ephName.trim();
@@ -609,8 +626,13 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
             items,
           };
           if (userId.trim()) batchBody.user_id = userId.trim();
-          if (judgeConfig?.judge_prompt) batchBody.judge_prompt = judgeConfig.judge_prompt;
-          if (judgeConfig?.judge_model) batchBody.judge_model = judgeConfig.judge_model;
+          // Only stamp the saved judge config when the user has actually
+          // customized it — otherwise omit so the harness applies its
+          // built-in default.
+          if (judgeConfig && !judgeConfig.is_default) {
+            if (judgeConfig.prompt) batchBody.judge_prompt = judgeConfig.prompt;
+            if (judgeConfig.model) batchBody.judge_model = judgeConfig.model;
+          }
           const result = await submitTestingAgentEval(batchBody);
           totalJobsSubmitted += Array.isArray(result?.jobs)
             ? result.jobs.length
@@ -619,6 +641,10 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
         }
 
         // ── Standard scratch/bug/test-report batch ──────────────
+        // Only stamp the browser verifier when (a) it's been customized
+        // and (b) the eval's dataset is scratch_bench_phased — bug_bench
+        // and test_report_bench don't use the browser verifier yet.
+        const useScratchVerifier = scratchVerifier && !scratchVerifier.is_default;
         const evals = selectedProblems.map(problem => {
           const evalItem = {
             problem: problem.name,
@@ -640,6 +666,10 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
           }
           if (breakpointEnabled && breakpointMins > 0) {
             experiments.breakpoint_duration_mins = breakpointMins;
+          }
+          if (useScratchVerifier && problem.dataset_type === 'scratch_bench_phased') {
+            if (scratchVerifier.prompt) experiments.browser_prompt = scratchVerifier.prompt;
+            if (scratchVerifier.model) experiments.browser_model = scratchVerifier.model;
           }
           if (Object.keys(experiments).length > 0) evalItem.experiments = experiments;
           return evalItem;
@@ -1140,14 +1170,14 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                   >
                     <div className="flex items-center gap-2">
                       <span className="text-muted-foreground">Model:</span>
-                      <code className="font-mono">{judgeConfig?.judge_model || 'gemini-flash-latest'}</code>
+                      <code className="font-mono">{judgeConfig?.model || 'gemini-flash-latest'}</code>
                       {judgeConfig?.is_default !== false && (
                         <Badge variant="outline" className="text-[9px] font-mono">default</Badge>
                       )}
                     </div>
                     <div className="text-muted-foreground">
-                      Prompt: {judgeConfig?.judge_prompt
-                        ? `${judgeConfig.judge_prompt.length} chars · {golden} + {candidate} tokens`
+                      Prompt: {judgeConfig?.prompt
+                        ? `${judgeConfig.prompt.length} chars · {golden} + {candidate} tokens`
                         : 'using harness default'}
                     </div>
                   </div>

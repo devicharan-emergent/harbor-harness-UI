@@ -590,11 +590,13 @@ async def proxy_submit_testing_agent_eval(body: dict):
         raise HTTPException(status_code=500, detail=f"Eval API error: {str(e)}")
 
 
-# ── Judge config (singleton, Mongo-backed) ──────────────────────────────
-# Stored on every testing_agent_bench submit as top-level `judge_prompt` +
-# `judge_model`. The prompt MUST contain {golden} and {candidate} tokens
-# (harness substitutes them server-side); other JSON braces flow through
-# untouched. A single singleton doc with _id="default" backs the editor.
+# ── Verifier config (per-bench, Mongo-backed) ──────────────────────────
+# One singleton doc per bench in collection `judge_config`, with _id = bench
+# type ("testing_agent_bench" or "scratch_bench_phased"). On every submit
+# the frontend stamps the saved prompt/model onto the harness request —
+# different keys per bench (judge_* for testing_agent, browser_* in
+# experiments for scratch). Legacy /eval/judge-config endpoints (kept
+# below) alias to bench=testing_agent_bench so prior clients keep working.
 
 DEFAULT_JUDGE_MODEL = "gemini-flash-latest"
 DEFAULT_JUDGE_PROMPT = """You are evaluating a testing agent against a golden reference.
@@ -616,83 +618,177 @@ Return ONLY a JSON object, no prose:
 
 Every golden bug must appear in exactly one of "covered" or "missed"."""
 
+DEFAULT_BROWSER_MODEL = "gemini-flash-latest"
+DEFAULT_BROWSER_PROMPT = """You are a QA tester. The application under test is available at {preview_url}.
 
-def _validate_judge_prompt(prompt: str) -> None:
-    """Both {golden} and {candidate} must appear at least once — that's
-    what the harness substitutes. Reject otherwise so the user gets the
-    same error client-side and server-side.
-    """
+Open the URL and verify the test case below.
+
+PRINCIPLES:
+- You are an evaluator, not a problem-solver. Your job is to check whether the app works as described. If something is missing or broken, that IS your finding — report it as a failure and move on.
+- If a UI element described in the test (button, icon, link, section) is not present after the page has loaded, you could refresh once and check if it still doesnt exists. You can try 1 logical workaround, if even that doesn't work. Fail that check.
+- Try each action once. If it does not produce the expected result, fail that check. Do not retry the same action or attempt alternative ways to achieve the same outcome.
+- DO NOT LOOP. Never repeat the same interaction to "re-confirm" something you already observed. If toggling or clicking a control once shows the expected change, that is sufficient — record it and move on.
+- If an earlier step fails and later steps depend on it, mark those dependent steps as failed too.
+- Once you have enough evidence to judge every check (passed or failed), emit your verdict immediately. Do not continue interacting with the app.
+
+TEST CASE:
+{test_case}"""
+
+BENCH_VERIFIER_DEFAULTS = {
+    "testing_agent_bench": {
+        "model": DEFAULT_JUDGE_MODEL,
+        "prompt": DEFAULT_JUDGE_PROMPT,
+        "required_tokens": ["{golden}", "{candidate}"],
+    },
+    "scratch_bench_phased": {
+        "model": DEFAULT_BROWSER_MODEL,
+        "prompt": DEFAULT_BROWSER_PROMPT,
+        "required_tokens": ["{preview_url}", "{test_case}"],
+    },
+}
+
+
+def _ensure_known_bench(bench: str) -> None:
+    if bench not in BENCH_VERIFIER_DEFAULTS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"unknown bench '{bench}' (allowed: {sorted(BENCH_VERIFIER_DEFAULTS.keys())})",
+        )
+
+
+def _validate_verifier_prompt(prompt: str, bench: str) -> None:
+    """Each bench has different required substitution tokens — both must
+    appear at least once. Reject otherwise so the client gets the same
+    error server-side. Other curly braces flow through untouched."""
     if not prompt or not prompt.strip():
-        raise HTTPException(status_code=400, detail="judge_prompt cannot be empty")
-    if "{golden}" not in prompt:
-        raise HTTPException(
-            status_code=400,
-            detail="judge_prompt must contain the literal token {golden}",
-        )
-    if "{candidate}" not in prompt:
-        raise HTTPException(
-            status_code=400,
-            detail="judge_prompt must contain the literal token {candidate}",
-        )
+        raise HTTPException(status_code=400, detail="prompt cannot be empty")
+    for tok in BENCH_VERIFIER_DEFAULTS[bench]["required_tokens"]:
+        if tok not in prompt:
+            raise HTTPException(
+                status_code=400,
+                detail=f"prompt must contain the literal token {tok}",
+            )
 
 
-@api_router.get("/eval/judge-config")
-async def get_judge_config():
-    """Read the singleton judge config from Mongo. When nothing has been
-    saved yet, return the defaults with `is_default: true` so the UI can
-    show a "(default — unsaved)" hint.
+async def _read_verifier_doc(bench: str) -> dict:
+    """Read the bench's saved config, falling back to the legacy
+    `_id='default'` doc for testing_agent_bench so existing customizations
+    survive the rename. Returns a normalized {bench_type, prompt, model,
+    is_default, updated_at} shape — defaults filled in when nothing saved.
     """
-    doc = await db.judge_config.find_one({"_id": "default"})
+    defaults = BENCH_VERIFIER_DEFAULTS[bench]
+    doc = await db.judge_config.find_one({"_id": bench})
+    if not doc and bench == "testing_agent_bench":
+        # Pre-iter-28 docs were stored under _id="default" with the
+        # `judge_prompt` / `judge_model` field names. Adopt those as the
+        # current testing_agent_bench config until the user re-saves.
+        doc = await db.judge_config.find_one({"_id": "default"})
     if not doc:
         return {
-            "judge_prompt": DEFAULT_JUDGE_PROMPT,
-            "judge_model": DEFAULT_JUDGE_MODEL,
+            "bench_type": bench,
+            "prompt": defaults["prompt"],
+            "model": defaults["model"],
             "is_default": True,
             "updated_at": None,
         }
     return {
-        "judge_prompt": doc.get("judge_prompt", DEFAULT_JUDGE_PROMPT),
-        "judge_model": doc.get("judge_model", DEFAULT_JUDGE_MODEL),
+        "bench_type": bench,
+        # Accept both new ("prompt"/"model") and legacy ("judge_prompt"
+        # /"judge_model") field names.
+        "prompt": doc.get("prompt") or doc.get("judge_prompt") or defaults["prompt"],
+        "model": doc.get("model") or doc.get("judge_model") or defaults["model"],
         "is_default": False,
         "updated_at": doc.get("updated_at"),
     }
 
 
-@api_router.put("/eval/judge-config")
-async def update_judge_config(body: dict):
-    """Upsert the singleton judge config. Validates that the prompt
-    contains both {golden} and {candidate} before saving."""
-    judge_prompt = (body.get("judge_prompt") or "").strip()
-    judge_model = (body.get("judge_model") or "").strip() or DEFAULT_JUDGE_MODEL
-    _validate_judge_prompt(judge_prompt)
+@api_router.get("/eval/verifier-config")
+async def get_verifier_config(bench: str = "testing_agent_bench"):
+    _ensure_known_bench(bench)
+    return await _read_verifier_doc(bench)
+
+
+@api_router.put("/eval/verifier-config")
+async def update_verifier_config(body: dict, bench: str = "testing_agent_bench"):
+    _ensure_known_bench(bench)
+    prompt = (body.get("prompt") or "").strip()
+    model = (body.get("model") or "").strip() or BENCH_VERIFIER_DEFAULTS[bench]["model"]
+    _validate_verifier_prompt(prompt, bench)
     now = datetime.now(timezone.utc).isoformat()
     await db.judge_config.update_one(
-        {"_id": "default"},
-        {"$set": {
-            "judge_prompt": judge_prompt,
-            "judge_model": judge_model,
-            "updated_at": now,
-        }},
+        {"_id": bench},
+        {"$set": {"prompt": prompt, "model": model, "updated_at": now}},
         upsert=True,
     )
     return {
-        "judge_prompt": judge_prompt,
-        "judge_model": judge_model,
+        "bench_type": bench,
+        "prompt": prompt,
+        "model": model,
         "is_default": False,
         "updated_at": now,
     }
 
 
-@api_router.post("/eval/judge-config/reset")
-async def reset_judge_config():
-    """Drop the singleton doc — subsequent GETs serve the in-code defaults."""
-    await db.judge_config.delete_one({"_id": "default"})
+@api_router.post("/eval/verifier-config/reset")
+async def reset_verifier_config(bench: str = "testing_agent_bench"):
+    _ensure_known_bench(bench)
+    await db.judge_config.delete_one({"_id": bench})
+    # Also drop the pre-iter-28 doc so testing_agent_bench really resets.
+    if bench == "testing_agent_bench":
+        await db.judge_config.delete_one({"_id": "default"})
+    defaults = BENCH_VERIFIER_DEFAULTS[bench]
     return {
-        "judge_prompt": DEFAULT_JUDGE_PROMPT,
-        "judge_model": DEFAULT_JUDGE_MODEL,
+        "bench_type": bench,
+        "prompt": defaults["prompt"],
+        "model": defaults["model"],
         "is_default": True,
         "updated_at": None,
     }
+
+
+# ── Legacy aliases (kept for callers that still hit /judge-config) ─────
+
+
+def _validate_judge_prompt(prompt: str) -> None:
+    """Back-compat shim — delegate to the bench-aware validator."""
+    _validate_verifier_prompt(prompt, "testing_agent_bench")
+
+
+@api_router.get("/eval/judge-config")
+async def get_judge_config():
+    cfg = await _read_verifier_doc("testing_agent_bench")
+    return {
+        "judge_prompt": cfg["prompt"],
+        "judge_model": cfg["model"],
+        "is_default": cfg["is_default"],
+        "updated_at": cfg["updated_at"],
+    }
+
+
+@api_router.put("/eval/judge-config")
+async def update_judge_config(body: dict):
+    cfg = await update_verifier_config(
+        {"prompt": body.get("judge_prompt"), "model": body.get("judge_model")},
+        bench="testing_agent_bench",
+    )
+    return {
+        "judge_prompt": cfg["prompt"],
+        "judge_model": cfg["model"],
+        "is_default": cfg["is_default"],
+        "updated_at": cfg["updated_at"],
+    }
+
+
+@api_router.post("/eval/judge-config/reset")
+async def reset_judge_config():
+    cfg = await reset_verifier_config(bench="testing_agent_bench")
+    return {
+        "judge_prompt": cfg["prompt"],
+        "judge_model": cfg["model"],
+        "is_default": cfg["is_default"],
+        "updated_at": cfg["updated_at"],
+    }
+
 
 
 @api_router.post("/eval/jobs")

@@ -12,6 +12,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import {
   Select,
@@ -22,59 +23,98 @@ import {
 } from '@/components/ui/select';
 
 import {
-  getJudgeConfig,
-  updateJudgeConfig,
-  resetJudgeConfig,
+  getVerifierConfig,
+  updateVerifierConfig,
+  resetVerifierConfig,
 } from '@/services/evalApi';
 import { parseApiError } from '@/lib/errorUtils';
 
-// The user has explicitly restricted the judge model to these two
-// production-ready options. If the harness later supports more we add
-// them here — there's no free-text Custom option by design.
-const MODEL_OPTIONS = [
-  'gemini-flash-latest',
-  'gpt-5.5',
-];
-const FALLBACK_MODEL = MODEL_OPTIONS[0];
+// Shared shortlist + free-text Custom for the model picker.
+const MODEL_PRESETS = ['gemini-flash-latest', 'gpt-5.5'];
+const CUSTOM_SENTINEL = '__custom__';
+
+// Per-bench labels, defaults, and required-token rules. The page passes
+// `benchType` to the form; everything bench-specific is sourced from here.
+export const BENCH_META = {
+  testing_agent_bench: {
+    label: 'Testing Agent Bench',
+    promptLabel: 'Judge Prompt',
+    modelLabel: 'Judge Model',
+    requiredTokens: ['{golden}', '{candidate}'],
+    helperHeading:
+      "The model + prompt used to score every testing_agent_bench eval.",
+    helperBody: (
+      <>
+        <code className="font-mono">{'{golden}'}</code> and{' '}
+        <code className="font-mono">{'{candidate}'}</code> are required —
+        the harness substitutes them with the dataset&apos;s golden output and
+        the testing agent&apos;s reply before calling the model.
+      </>
+    ),
+    footerHelper: (
+      <>
+        Other curly braces (e.g. JSON literals in the output spec) flow through
+        untouched — only <code className="font-mono">{'{golden}'}</code> and{' '}
+        <code className="font-mono">{'{candidate}'}</code> are substituted.
+      </>
+    ),
+  },
+  scratch_bench_phased: {
+    label: 'Scratch Bench',
+    promptLabel: 'Browser Prompt',
+    modelLabel: 'Browser Model',
+    requiredTokens: ['{preview_url}', '{test_case}'],
+    helperHeading:
+      "The model + prompt used to drive + score every scratch_bench_phased browser test.",
+    helperBody: (
+      <>
+        <code className="font-mono">{'{preview_url}'}</code> and{' '}
+        <code className="font-mono">{'{test_case}'}</code> are required —
+        the harness substitutes them with the app&apos;s preview URL and each
+        test case before running the browser agent.
+      </>
+    ),
+    footerHelper: (
+      <>
+        The pass/fail <code className="font-mono">&lt;verdict&gt;</code> format
+        is appended automatically by the harness — don&apos;t include it.
+        Other curly braces flow through untouched.
+      </>
+    ),
+  },
+};
 
 /**
- * Shared body shared between the modal dialog and the standalone page.
- * Manages load / dirty state / validation / save / reset and surfaces
- * the persisted config via `onSaved`.
- *
- * Props:
- *   onClose?:        () => void  // optional — dialog uses it for auto-close on Save
- *   onSaved?:        (cfg) => void  // called whenever the server returns a fresh config
- *   showHeader:      bool         // page hides the inner header (it uses the page header)
- *   showSaveFooter:  bool         // page renders its own footer; dialog uses ours
+ * Shared body — driven by `benchType`. Re-fetches the bench's config on
+ * mount AND whenever `benchType` changes, so the page can swap benches
+ * in place without unmounting.
  */
-export function JudgeConfigForm({ onClose, onSaved, showHeader = true, showSaveFooter = true }) {
+export function VerifierConfigForm({ benchType, onClose, onSaved, showSaveFooter = true }) {
+  const meta = BENCH_META[benchType] || BENCH_META.testing_agent_bench;
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [resetting, setResetting] = useState(false);
-  const [judgePrompt, setJudgePrompt] = useState('');
-  const [judgeModel, setJudgeModel] = useState(FALLBACK_MODEL);
+  const [prompt, setPrompt] = useState('');
+  const [model, setModel] = useState(MODEL_PRESETS[0]);
   const [isDefault, setIsDefault] = useState(true);
   const [updatedAt, setUpdatedAt] = useState(null);
+  const [modelForceCustom, setModelForceCustom] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
       try {
-        const cfg = await getJudgeConfig();
+        const cfg = await getVerifierConfig(benchType);
         if (cancelled) return;
-        setJudgePrompt(cfg.judge_prompt || '');
-        // If a previously-saved value isn't one of the two allowed
-        // options anymore, coerce back to the fallback so the Select
-        // always has a valid match. The original value is NOT mutated
-        // server-side until the user clicks Save.
-        const model = cfg.judge_model || FALLBACK_MODEL;
-        setJudgeModel(MODEL_OPTIONS.includes(model) ? model : FALLBACK_MODEL);
+        setPrompt(cfg.prompt || '');
+        setModel(cfg.model || MODEL_PRESETS[0]);
         setIsDefault(!!cfg.is_default);
         setUpdatedAt(cfg.updated_at || null);
+        setModelForceCustom(false);
       } catch (err) {
-        toast.error(parseApiError(err, 'Failed to load judge config'));
+        toast.error(parseApiError(err, 'Failed to load verifier config'));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -82,32 +122,35 @@ export function JudgeConfigForm({ onClose, onSaved, showHeader = true, showSaveF
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [benchType]);
 
-  const hasGoldenToken = judgePrompt.includes('{golden}');
-  const hasCandidateToken = judgePrompt.includes('{candidate}');
-  const promptValid = hasGoldenToken && hasCandidateToken && !!judgePrompt.trim();
+  const tokenStatus = meta.requiredTokens.map((tok) => ({
+    token: tok,
+    present: prompt.includes(tok),
+  }));
+  const promptValid =
+    !!prompt.trim() && tokenStatus.every((t) => t.present);
 
   const handleSave = async () => {
     if (!promptValid) {
-      if (!judgePrompt.trim()) toast.error('judge_prompt cannot be empty');
-      else if (!hasGoldenToken) toast.error('Prompt must contain the literal token {golden}');
-      else toast.error('Prompt must contain the literal token {candidate}');
+      const missing = tokenStatus.find((t) => !t.present);
+      if (!prompt.trim()) toast.error('prompt cannot be empty');
+      else toast.error(`Prompt must contain the literal token ${missing.token}`);
       return;
     }
     setSaving(true);
     try {
-      const cfg = await updateJudgeConfig({
-        judge_prompt: judgePrompt,
-        judge_model: judgeModel,
+      const cfg = await updateVerifierConfig(benchType, {
+        prompt,
+        model: model.trim() || MODEL_PRESETS[0],
       });
       setIsDefault(!!cfg.is_default);
       setUpdatedAt(cfg.updated_at);
-      toast.success('Judge config saved');
+      toast.success(`${meta.label} verifier saved`);
       onSaved && onSaved(cfg);
       onClose && onClose();
     } catch (err) {
-      toast.error(parseApiError(err, 'Failed to save judge config'));
+      toast.error(parseApiError(err, 'Failed to save verifier config'));
     } finally {
       setSaving(false);
     }
@@ -116,104 +159,124 @@ export function JudgeConfigForm({ onClose, onSaved, showHeader = true, showSaveF
   const handleReset = async () => {
     setResetting(true);
     try {
-      const cfg = await resetJudgeConfig();
-      setJudgePrompt(cfg.judge_prompt);
-      setJudgeModel(MODEL_OPTIONS.includes(cfg.judge_model) ? cfg.judge_model : FALLBACK_MODEL);
+      const cfg = await resetVerifierConfig(benchType);
+      setPrompt(cfg.prompt);
+      setModel(cfg.model);
       setIsDefault(true);
       setUpdatedAt(null);
+      setModelForceCustom(false);
       toast.success('Reset to default');
       onSaved && onSaved(cfg);
     } catch (err) {
-      toast.error(parseApiError(err, 'Failed to reset judge config'));
+      toast.error(parseApiError(err, 'Failed to reset verifier config'));
     } finally {
       setResetting(false);
     }
   };
 
+  const isPresetModel = MODEL_PRESETS.includes(model);
+  const showCustomInput = modelForceCustom || (!!model && !isPresetModel);
+  let selectValue;
+  if (!model) selectValue = MODEL_PRESETS[0];
+  else if (modelForceCustom || !isPresetModel) selectValue = CUSTOM_SENTINEL;
+  else selectValue = model;
+
+  const handleModelSelect = (next) => {
+    if (next === CUSTOM_SENTINEL) {
+      setModelForceCustom(true);
+    } else {
+      setModelForceCustom(false);
+      setModel(next);
+    }
+  };
+
   return (
-    <>
-      {showHeader && (
-        <div className="mb-3">
-          {isDefault ? (
-            <Badge variant="outline" className="text-[10px] font-mono">unsaved · using default</Badge>
-          ) : (
-            <Badge variant="default" className="text-[10px] font-mono">customized</Badge>
-          )}
-        </div>
-      )}
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        {isDefault ? (
+          <Badge variant="outline" className="text-[10px] font-mono">unsaved · using default</Badge>
+        ) : (
+          <Badge variant="default" className="text-[10px] font-mono">customized</Badge>
+        )}
+        {updatedAt && (
+          <span className="text-[10px] text-muted-foreground font-mono">
+            last updated {new Date(updatedAt).toLocaleString()}
+          </span>
+        )}
+      </div>
 
       {loading ? (
         <div className="flex items-center justify-center py-16">
           <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
         </div>
       ) : (
-        <div className="space-y-4">
+        <>
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <Label className="text-xs font-medium">Judge Model</Label>
-              {updatedAt && (
-                <span className="text-[10px] text-muted-foreground font-mono">
-                  last updated {new Date(updatedAt).toLocaleString()}
-                </span>
+            <Label className="text-xs font-medium">{meta.modelLabel}</Label>
+            <div className="mt-1">
+              <Select value={selectValue} onValueChange={handleModelSelect}>
+                <SelectTrigger
+                  className="text-sm font-mono"
+                  data-testid="verifier-model-select"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {MODEL_PRESETS.map((m) => (
+                    <SelectItem key={m} value={m} className="font-mono">{m}</SelectItem>
+                  ))}
+                  <SelectItem value={CUSTOM_SENTINEL}>Custom…</SelectItem>
+                </SelectContent>
+              </Select>
+              {showCustomInput && (
+                <Input
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  placeholder="e.g. claude-sonnet-4-5"
+                  className="mt-1.5 font-mono text-sm"
+                  data-testid="verifier-model-custom"
+                />
               )}
             </div>
-            <Select value={judgeModel} onValueChange={setJudgeModel}>
-              <SelectTrigger
-                className="text-sm font-mono"
-                data-testid="judge-model-select"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {MODEL_OPTIONS.map((m) => (
-                  <SelectItem key={m} value={m} className="font-mono">{m}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
           </div>
 
           <div>
             <div className="flex items-center justify-between mb-1">
-              <Label className="text-xs font-medium">Judge Prompt *</Label>
+              <Label className="text-xs font-medium">{meta.promptLabel} *</Label>
               <div className="flex items-center gap-1.5">
-                <Badge
-                  variant={hasGoldenToken ? 'default' : 'destructive'}
-                  className="text-[10px] font-mono"
-                >
-                  {hasGoldenToken ? '✓' : '✗'} {'{golden}'}
-                </Badge>
-                <Badge
-                  variant={hasCandidateToken ? 'default' : 'destructive'}
-                  className="text-[10px] font-mono"
-                >
-                  {hasCandidateToken ? '✓' : '✗'} {'{candidate}'}
-                </Badge>
+                {tokenStatus.map(({ token, present }) => (
+                  <Badge
+                    key={token}
+                    variant={present ? 'default' : 'destructive'}
+                    className="text-[10px] font-mono"
+                  >
+                    {present ? '✓' : '✗'} {token}
+                  </Badge>
+                ))}
               </div>
             </div>
             <Textarea
-              value={judgePrompt}
-              onChange={(e) => setJudgePrompt(e.target.value)}
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
               className="font-mono text-[11px] min-h-[360px] leading-relaxed"
               spellCheck={false}
-              data-testid="judge-prompt-textarea"
+              data-testid="verifier-prompt-textarea"
             />
             <p className="text-[10px] text-muted-foreground mt-1">
-              Other curly braces (e.g. JSON literals in the output spec) flow
-              through untouched — only <code className="font-mono">{'{golden}'}</code> and{' '}
-              <code className="font-mono">{'{candidate}'}</code> are substituted.
+              {meta.footerHelper}
             </p>
           </div>
-        </div>
+        </>
       )}
 
       {showSaveFooter && !loading && (
-        <div className="mt-4 flex items-center justify-between gap-2">
+        <div className="flex items-center justify-between gap-2 pt-2">
           <Button
             variant="ghost"
             size="sm"
             onClick={handleReset}
             disabled={loading || resetting || saving}
-            data-testid="judge-config-reset"
+            data-testid="verifier-config-reset"
           >
             {resetting ? <Loader2 className="w-3 h-3 mr-1.5 animate-spin" /> : <RotateCcw className="w-3 h-3 mr-1.5" />}
             Reset to default
@@ -225,7 +288,7 @@ export function JudgeConfigForm({ onClose, onSaved, showHeader = true, showSaveF
                 size="sm"
                 onClick={onClose}
                 disabled={saving}
-                data-testid="judge-config-cancel"
+                data-testid="verifier-config-cancel"
               >
                 Cancel
               </Button>
@@ -234,7 +297,7 @@ export function JudgeConfigForm({ onClose, onSaved, showHeader = true, showSaveF
               size="sm"
               onClick={handleSave}
               disabled={loading || saving || !promptValid}
-              data-testid="judge-config-save"
+              data-testid="verifier-config-save"
             >
               {saving ? <Loader2 className="w-3 h-3 mr-1.5 animate-spin" /> : <Save className="w-3 h-3 mr-1.5" />}
               Save
@@ -242,42 +305,37 @@ export function JudgeConfigForm({ onClose, onSaved, showHeader = true, showSaveF
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }
 
 /**
- * Modal wrapper around <JudgeConfigForm/> — kept for the Run Eval Step 2
- * "Edit judge prompt & model" button.
+ * Modal wrapper around <VerifierConfigForm/> — kept for the Run Eval
+ * Step 2 "Edit prompt & model" button. Default bench = testing_agent_bench
+ * so the existing call site doesn't have to change props.
  */
-export function JudgeConfigDialog({ open, onOpenChange, onSaved }) {
+export function VerifierConfigDialog({ open, onOpenChange, onSaved, benchType = 'testing_agent_bench' }) {
+  const meta = BENCH_META[benchType] || BENCH_META.testing_agent_bench;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col"
-        data-testid="judge-config-dialog"
+        data-testid="verifier-config-dialog"
       >
         <DialogHeader>
-          <DialogTitle>LLM Judge Configuration</DialogTitle>
+          <DialogTitle>{meta.label} — Verifier Configuration</DialogTitle>
           <DialogDescription className="text-xs">
-            Used as the top-level <code className="font-mono">judge_prompt</code> +{' '}
-            <code className="font-mono">judge_model</code> on every testing_agent_bench
-            eval. The prompt must contain the literal tokens{' '}
-            <code className="font-mono">{'{golden}'}</code> and{' '}
-            <code className="font-mono">{'{candidate}'}</code> — they&apos;re the only
-            two substitutions the harness performs.
+            {meta.helperHeading}{' '}
+            {meta.helperBody}
           </DialogDescription>
         </DialogHeader>
         <div className="flex-1 overflow-y-auto px-1">
-          {/* Re-mount the form whenever the dialog opens so it re-fetches
-              fresh config and clears prior dirty state. The form renders
-              its own Save/Cancel/Reset row at the bottom. */}
           {open && (
-            <JudgeConfigForm
-              key={open ? 'open' : 'closed'}
+            <VerifierConfigForm
+              key={`${open}-${benchType}`}
+              benchType={benchType}
               onClose={() => onOpenChange(false)}
               onSaved={onSaved}
-              showHeader
               showSaveFooter
             />
           )}
@@ -286,3 +344,11 @@ export function JudgeConfigDialog({ open, onOpenChange, onSaved }) {
     </Dialog>
   );
 }
+
+// ── Back-compat aliases — RunEvalModal still imports these names. ──────
+export const JudgeConfigForm = (props) => (
+  <VerifierConfigForm benchType="testing_agent_bench" {...props} />
+);
+export const JudgeConfigDialog = (props) => (
+  <VerifierConfigDialog benchType="testing_agent_bench" {...props} />
+);

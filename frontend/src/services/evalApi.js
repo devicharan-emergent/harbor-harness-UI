@@ -58,14 +58,32 @@ export const submitTestingAgentEval = async (payload) => {
 };
 
 /**
- * Judge-config CRUD (singleton). Stored in OUR Mongo and stamped onto
- * every testing_agent_bench submit as top-level `judge_prompt` +
- * `judge_model`. The prompt MUST contain {golden} and {candidate};
- * the server 400s otherwise.
+ * Verifier-config CRUD (per-bench, singleton-per-bench). Stored in OUR
+ * Mongo keyed by bench type ("testing_agent_bench" or "scratch_bench_phased").
+ * The prompt MUST contain bench-specific tokens — server 400s otherwise.
  *
- * GET    /api/eval/judge-config           → { judge_prompt, judge_model, is_default, updated_at? }
- * PUT    /api/eval/judge-config            { judge_prompt, judge_model }
- * POST   /api/eval/judge-config/reset      → defaults
+ * GET    /api/eval/verifier-config?bench=<bench>
+ * PUT    /api/eval/verifier-config?bench=<bench>     { prompt, model }
+ * POST   /api/eval/verifier-config/reset?bench=<bench>
+ */
+export const getVerifierConfig = async (bench) => {
+  const response = await evalApiClient.get('/verifier-config', { params: { bench } });
+  return response.data;
+};
+
+export const updateVerifierConfig = async (bench, payload) => {
+  const response = await evalApiClient.put('/verifier-config', payload, { params: { bench } });
+  return response.data;
+};
+
+export const resetVerifierConfig = async (bench) => {
+  const response = await evalApiClient.post('/verifier-config/reset', null, { params: { bench } });
+  return response.data;
+};
+
+/**
+ * Legacy judge-config wrappers — kept for any older callers; both
+ * surfaces below have been migrated to the verifier-config endpoints.
  */
 export const getJudgeConfig = async () => {
   const response = await evalApiClient.get('/judge-config');
