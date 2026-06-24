@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { getEvalStats, listEvalJobs, listGroupJobs, getEvalAggregate } from '@/services/evalApi';
+import { getEvalStats, listEvalJobs, listGroupJobs, getEvalAggregate, cancelEvalJob } from '@/services/evalApi';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -8,6 +8,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Loader2, Clock, Cpu, CheckCircle, XCircle, Ban, ActivitySquare, RefreshCw, Plus, ChevronDown, ChevronRight, Layers, ExternalLink, Timer } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { Progress } from '@/components/ui/progress';
+import { toast } from 'sonner';
+import { parseApiError } from '@/lib/errorUtils';
 import { RunEvalModal } from '@/components/evals/RunEvalModal';
 import { EvalFilterBar, EMPTY_FILTERS, buildJobFilter } from '@/components/evals/EvalFilterBar';
 import { OpenInChatButton } from '@/components/evals/OpenInChatButton';
@@ -62,6 +64,49 @@ function GroupStatusSummary({ jobs }) {
         );
       })}
     </div>
+  );
+}
+
+// ── CancelJobButton ────────────────────────────────────────────────────
+// Inline cancel button rendered next to the status pill on each row.
+// Only active jobs (queued / generating / running) can be cancelled; for
+// every other status we render nothing so the row stays compact.
+// Click is stopped so the parent row's navigate-to-detail handler doesn't
+// fire when the user is trying to cancel.
+const CANCELLABLE_STATUSES = new Set(['queued', 'generating', 'running']);
+function CancelJobButton({ jobId, status, onCancelled }) {
+  const [cancelling, setCancelling] = useState(false);
+  if (!CANCELLABLE_STATUSES.has(status)) return null;
+
+  const handleClick = async (e) => {
+    e.stopPropagation();
+    if (cancelling) return;
+    if (!window.confirm('Cancel this eval job? In-flight phases will be terminated.')) return;
+    setCancelling(true);
+    try {
+      await cancelEvalJob(jobId);
+      toast.success(`Job ${jobId.substring(0, 8)} cancelled`);
+      onCancelled && onCancelled(jobId);
+    } catch (err) {
+      toast.error(parseApiError(err, 'Failed to cancel job'));
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="h-7 w-7 p-0 text-rose-600 hover:text-rose-700 hover:bg-rose-500/10 flex-shrink-0"
+      onClick={handleClick}
+      disabled={cancelling}
+      title="Cancel this job"
+      aria-label={`Cancel job ${jobId.substring(0, 8)}`}
+      data-testid={`cancel-job-${jobId}`}
+    >
+      {cancelling ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Ban className="w-3.5 h-3.5" />}
+    </Button>
   );
 }
 
@@ -486,6 +531,13 @@ export default function EvalRuns() {
 
                           {/* Status */}
                           <StatusBadge status={job.status} />
+
+                          {/* Cancel (only for active jobs) */}
+                          <CancelJobButton
+                            jobId={job.id}
+                            status={job.status}
+                            onCancelled={fetchJobs}
+                          />
 
                           {/* Score */}
                           <ScoreBadges job={job} />
