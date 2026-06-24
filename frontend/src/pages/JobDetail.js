@@ -1237,13 +1237,15 @@ export default function JobDetail() {
 
           {/* LLM Judge — Raw Request / Raw Response */}
           {(() => {
-            // Aggregate judge_raw_request + judge_raw_response across phases.
-            // Older / non-testing-agent runs don't have these fields → render nothing.
+            // Aggregate raw_request + raw_response across phases. The
+            // harness writes these as `raw_request` / `raw_response`
+            // directly on the phase_result. Older / non-testing-agent
+            // runs don't have either field → render nothing.
             const judgePhases = phaseResults
               .map((p, idx) => ({
                 idx: p.phase_index !== undefined ? p.phase_index : idx,
-                req: p.judge_raw_request || '',
-                resp: p.judge_raw_response || '',
+                req: p.raw_request || '',
+                resp: p.raw_response || '',
               }))
               .filter((p) => p.req || p.resp);
             if (judgePhases.length === 0) return null;
