@@ -58,6 +58,31 @@ export const submitTestingAgentEval = async (payload) => {
 };
 
 /**
+ * Judge-config CRUD (singleton). Stored in OUR Mongo and stamped onto
+ * every testing_agent_bench submit as top-level `judge_prompt` +
+ * `judge_model`. The prompt MUST contain {golden} and {candidate};
+ * the server 400s otherwise.
+ *
+ * GET    /api/eval/judge-config           → { judge_prompt, judge_model, is_default, updated_at? }
+ * PUT    /api/eval/judge-config            { judge_prompt, judge_model }
+ * POST   /api/eval/judge-config/reset      → defaults
+ */
+export const getJudgeConfig = async () => {
+  const response = await evalApiClient.get('/judge-config');
+  return response.data;
+};
+
+export const updateJudgeConfig = async (payload) => {
+  const response = await evalApiClient.put('/judge-config', payload);
+  return response.data;
+};
+
+export const resetJudgeConfig = async () => {
+  const response = await evalApiClient.post('/judge-config/reset');
+  return response.data;
+};
+
+/**
  * Check whether a cortex agent exists in a given ephemeral DB.
  * GET /api/eval/cortex/agents/exists?eph_name=&agent_name=
  * Returns: { exists: boolean, eph_name, agent_name }

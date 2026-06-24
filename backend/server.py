@@ -563,10 +563,11 @@ async def proxy_submit_eval_with_es(body: dict):
 async def proxy_submit_testing_agent_eval(body: dict):
     """Proxy → harness POST /api/v1/testing-agent-evals.
 
-    Pass-through for the testing_agent_bench fork flow. The harness takes
-    flat HITL/golden inputs (no dataset_id) and returns 202 with a `jobs`
-    array. `created_by` is injected client-side via the axios interceptor;
-    we forward the body as-is.
+    Pass-through for the testing_agent_bench fork flow. The harness accepts
+    a batched `items[]` body (one entry per dataset) with shared top-level
+    `group_run_id` / `user_id` / `created_by` / `judge_prompt` /
+    `judge_model`. Returns 202 with a `jobs` array. `created_by` is
+    injected client-side via the axios interceptor; we forward the body as-is.
     """
     try:
         async with httpx.AsyncClient(timeout=30.0) as hclient:
@@ -587,6 +588,112 @@ async def proxy_submit_testing_agent_eval(body: dict):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Eval API error: {str(e)}")
+
+
+# ── Judge config (singleton, Mongo-backed) ──────────────────────────────
+# Stored on every testing_agent_bench submit as top-level `judge_prompt` +
+# `judge_model`. The prompt MUST contain {golden} and {candidate} tokens
+# (harness substitutes them server-side); other JSON braces flow through
+# untouched. A single singleton doc with _id="default" backs the editor.
+
+DEFAULT_JUDGE_MODEL = "gemini-flash-latest"
+DEFAULT_JUDGE_PROMPT = """You are evaluating a testing agent against a golden reference.
+
+The GOLDEN output lists the bugs/issues that SHOULD be found. The TESTING AGENT output is what the agent actually reported. Match them by meaning (wording may differ; a golden bug counts as covered only if the agent clearly identified the same issue).
+
+<golden_output>
+{golden}
+</golden_output>
+
+<testing_agent_output>
+{candidate}
+</testing_agent_output>
+
+Return ONLY a JSON object, no prose:
+{"covered": ["<golden bug the agent found>", ...],
+  "missed":  ["<golden bug the agent did NOT find>", ...],
+  "extra":   ["<bug the agent reported that is NOT in golden>", ...]}
+
+Every golden bug must appear in exactly one of "covered" or "missed"."""
+
+
+def _validate_judge_prompt(prompt: str) -> None:
+    """Both {golden} and {candidate} must appear at least once — that's
+    what the harness substitutes. Reject otherwise so the user gets the
+    same error client-side and server-side.
+    """
+    if not prompt or not prompt.strip():
+        raise HTTPException(status_code=400, detail="judge_prompt cannot be empty")
+    if "{golden}" not in prompt:
+        raise HTTPException(
+            status_code=400,
+            detail="judge_prompt must contain the literal token {golden}",
+        )
+    if "{candidate}" not in prompt:
+        raise HTTPException(
+            status_code=400,
+            detail="judge_prompt must contain the literal token {candidate}",
+        )
+
+
+@api_router.get("/eval/judge-config")
+async def get_judge_config():
+    """Read the singleton judge config from Mongo. When nothing has been
+    saved yet, return the defaults with `is_default: true` so the UI can
+    show a "(default — unsaved)" hint.
+    """
+    doc = await db.judge_config.find_one({"_id": "default"})
+    if not doc:
+        return {
+            "judge_prompt": DEFAULT_JUDGE_PROMPT,
+            "judge_model": DEFAULT_JUDGE_MODEL,
+            "is_default": True,
+            "updated_at": None,
+        }
+    return {
+        "judge_prompt": doc.get("judge_prompt", DEFAULT_JUDGE_PROMPT),
+        "judge_model": doc.get("judge_model", DEFAULT_JUDGE_MODEL),
+        "is_default": False,
+        "updated_at": doc.get("updated_at"),
+    }
+
+
+@api_router.put("/eval/judge-config")
+async def update_judge_config(body: dict):
+    """Upsert the singleton judge config. Validates that the prompt
+    contains both {golden} and {candidate} before saving."""
+    judge_prompt = (body.get("judge_prompt") or "").strip()
+    judge_model = (body.get("judge_model") or "").strip() or DEFAULT_JUDGE_MODEL
+    _validate_judge_prompt(judge_prompt)
+    now = datetime.now(timezone.utc).isoformat()
+    await db.judge_config.update_one(
+        {"_id": "default"},
+        {"$set": {
+            "judge_prompt": judge_prompt,
+            "judge_model": judge_model,
+            "updated_at": now,
+        }},
+        upsert=True,
+    )
+    return {
+        "judge_prompt": judge_prompt,
+        "judge_model": judge_model,
+        "is_default": False,
+        "updated_at": now,
+    }
+
+
+@api_router.post("/eval/judge-config/reset")
+async def reset_judge_config():
+    """Drop the singleton doc — subsequent GETs serve the in-code defaults."""
+    await db.judge_config.delete_one({"_id": "default"})
+    return {
+        "judge_prompt": DEFAULT_JUDGE_PROMPT,
+        "judge_model": DEFAULT_JUDGE_MODEL,
+        "is_default": True,
+        "updated_at": None,
+    }
+
 
 @api_router.post("/eval/jobs")
 async def proxy_submit_eval(body: dict):

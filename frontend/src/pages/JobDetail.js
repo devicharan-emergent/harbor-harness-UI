@@ -1235,6 +1235,42 @@ export default function JobDetail() {
             </Card>
           )}
 
+          {/* LLM Judge — Raw Request / Raw Response */}
+          {(() => {
+            // Aggregate judge_raw_request + judge_raw_response across phases.
+            // Older / non-testing-agent runs don't have these fields → render nothing.
+            const judgePhases = phaseResults
+              .map((p, idx) => ({
+                idx: p.phase_index !== undefined ? p.phase_index : idx,
+                req: p.judge_raw_request || '',
+                resp: p.judge_raw_response || '',
+              }))
+              .filter((p) => p.req || p.resp);
+            if (judgePhases.length === 0) return null;
+            return (
+              <Card data-testid="llm-judge-raw-card">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm flex items-center gap-2">
+                    LLM Judge — Raw Request / Raw Response
+                    <Badge variant="outline" className="text-[10px] font-mono">
+                      {judgePhases.length} phase{judgePhases.length !== 1 ? 's' : ''}
+                    </Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {judgePhases.map((p) => (
+                    <JudgeRawBlock
+                      key={`judge-${p.idx}`}
+                      phaseIndex={p.idx}
+                      request={p.req}
+                      response={p.resp}
+                    />
+                  ))}
+                </CardContent>
+              </Card>
+            );
+          })()}
+
           {/* Phase Results */}
           {job.phase_results && (
             <Card>
@@ -1249,6 +1285,106 @@ export default function JobDetail() {
             </Card>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── LLM Judge raw req/resp block ───────────────────────────────────────
+function JudgeRawBlock({ phaseIndex, request, response }) {
+  const [reqOpen, setReqOpen] = useState(false);
+  const [respOpen, setRespOpen] = useState(false);
+
+  const copy = async (text, label) => {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(`${label} copied`);
+    } catch {
+      toast.error(`Failed to copy ${label}`);
+    }
+  };
+
+  return (
+    <div className="rounded-md border bg-muted/20" data-testid={`judge-raw-block-${phaseIndex}`}>
+      <div className="px-3 py-1.5 border-b bg-muted/40 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+        Phase {phaseIndex + 1}
+      </div>
+      <div className="p-2 space-y-2">
+        {request ? (
+          <Collapsible open={reqOpen} onOpenChange={setReqOpen}>
+            <div className="flex items-center justify-between gap-2">
+              <CollapsibleTrigger
+                className="flex items-center gap-1.5 text-[11px] font-medium hover:text-primary transition-colors"
+                data-testid={`judge-raw-request-toggle-${phaseIndex}`}
+              >
+                <ChevronRight className={`w-3 h-3 transition-transform ${reqOpen ? 'rotate-90' : ''}`} />
+                Raw Request
+                <Badge variant="outline" className="text-[9px] font-mono ml-1">
+                  {request.length} chars
+                </Badge>
+              </CollapsibleTrigger>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-[10px]"
+                onClick={() => copy(request, 'Raw request')}
+                data-testid={`judge-raw-request-copy-${phaseIndex}`}
+              >
+                <Copy className="w-3 h-3 mr-1" /> Copy
+              </Button>
+            </div>
+            <CollapsibleContent className="mt-1.5">
+              <pre
+                className="text-[10px] font-mono bg-background border rounded p-2 overflow-auto max-h-[400px] whitespace-pre-wrap leading-relaxed"
+                data-testid={`judge-raw-request-content-${phaseIndex}`}
+              >
+                {request}
+              </pre>
+            </CollapsibleContent>
+          </Collapsible>
+        ) : (
+          <div className="text-[10px] text-muted-foreground italic px-1">
+            Raw request not captured for this phase.
+          </div>
+        )}
+        {response ? (
+          <Collapsible open={respOpen} onOpenChange={setRespOpen}>
+            <div className="flex items-center justify-between gap-2">
+              <CollapsibleTrigger
+                className="flex items-center gap-1.5 text-[11px] font-medium hover:text-primary transition-colors"
+                data-testid={`judge-raw-response-toggle-${phaseIndex}`}
+              >
+                <ChevronRight className={`w-3 h-3 transition-transform ${respOpen ? 'rotate-90' : ''}`} />
+                Raw Response
+                <Badge variant="outline" className="text-[9px] font-mono ml-1">
+                  {response.length} chars
+                </Badge>
+              </CollapsibleTrigger>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-[10px]"
+                onClick={() => copy(response, 'Raw response')}
+                data-testid={`judge-raw-response-copy-${phaseIndex}`}
+              >
+                <Copy className="w-3 h-3 mr-1" /> Copy
+              </Button>
+            </div>
+            <CollapsibleContent className="mt-1.5">
+              <pre
+                className="text-[10px] font-mono bg-background border rounded p-2 overflow-auto max-h-[400px] whitespace-pre-wrap leading-relaxed"
+                data-testid={`judge-raw-response-content-${phaseIndex}`}
+              >
+                {response}
+              </pre>
+            </CollapsibleContent>
+          </Collapsible>
+        ) : (
+          <div className="text-[10px] text-muted-foreground italic px-1">
+            Raw response not captured for this phase.
+          </div>
+        )}
       </div>
     </div>
   );

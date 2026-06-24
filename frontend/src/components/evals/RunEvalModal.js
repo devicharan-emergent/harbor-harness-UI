@@ -11,13 +11,14 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
-import { listDatasets, listDatasetsByType, getDatasetForProblem, submitEvalJobs, submitEvalJobsWithEs, submitTestingAgentEval, checkAgentExists } from '@/services/evalApi';
+import { listDatasets, listDatasetsByType, getDatasetForProblem, submitEvalJobs, submitEvalJobsWithEs, submitTestingAgentEval, checkAgentExists, getJudgeConfig } from '@/services/evalApi';
 import { toast } from 'sonner';
 import { Loader2, Rocket, FileText, Search, ChevronRight, Check, AlertCircle, X } from 'lucide-react';
 import { parseApiError } from '@/lib/errorUtils';
 import { useEnv } from '@/components/layout/EnvSwitcher';
 import { EphPicker } from '@/components/cortex/EphPicker';
 import { ModelNamePicker } from './ModelNamePicker';
+import { JudgeConfigDialog } from './JudgeConfigDialog';
 
 const DATASET_TYPES = [
   { value: 'all', label: 'All Types' },
@@ -303,6 +304,12 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
   const [modelNameOverride, setModelNameOverride] = useState('');
   const [modelOverrideTouched, setModelOverrideTouched] = useState(false);
 
+  // Judge config (singleton, Mongo-backed). Loaded lazily on entering
+  // Step 2 in testing_agent_mode; stamped onto the batch body as
+  // top-level judge_prompt + judge_model.
+  const [judgeConfig, setJudgeConfig] = useState(null);
+  const [judgeConfigOpen, setJudgeConfigOpen] = useState(false);
+
   // Eph (ephemeral cortex deployment) name + existence check state.
   // Only used for the "Check" button beside the agent name input.
   const [ephName, setEphName] = useState('');
@@ -386,6 +393,21 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
       setModelNameOverride(seed);
     }
   }, [step, isTestingAgentMode, modelOverrideTouched, selectedProblems, modelNameOverride]);
+
+  // Lazy-load the judge config on entering Step 2 in testing_agent_mode.
+  // Cached on the modal so users can pop the dialog open without a re-fetch.
+  useEffect(() => {
+    if (step !== 2 || !isTestingAgentMode || judgeConfig) return;
+    (async () => {
+      try {
+        const cfg = await getJudgeConfig();
+        setJudgeConfig(cfg);
+      } catch {
+        // Non-fatal — submit will fall back to omitting judge_* keys and
+        // the backend defaults will kick in.
+      }
+    })();
+  }, [step, isTestingAgentMode, judgeConfig]);
 
   const handleCheckAgent = async () => {
     const eph = ephName.trim();
@@ -531,6 +553,11 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
           items,
         };
         if (userId.trim()) batchBody.user_id = userId.trim();
+        // Stamp the saved judge config (if any) at the top level. Omit
+        // when the config call failed or we're using the in-memory
+        // defaults — the harness uses its own defaults in that case.
+        if (judgeConfig?.judge_prompt) batchBody.judge_prompt = judgeConfig.judge_prompt;
+        if (judgeConfig?.judge_model) batchBody.judge_model = judgeConfig.judge_model;
         const result = await submitTestingAgentEval(batchBody);
         const jobCount = Array.isArray(result?.jobs) ? result.jobs.length : items.length;
         toast.success(`Submitted ${jobCount} testing-agent eval(s)`);
@@ -1005,6 +1032,42 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 </div>
               )}
 
+              {/* LLM Judge config — testing_agent_mode only */}
+              {isTestingAgentMode && (
+                <div>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm font-semibold">LLM Judge</Label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-[11px]"
+                      onClick={() => setJudgeConfigOpen(true)}
+                      data-testid="open-judge-config"
+                    >
+                      Edit judge prompt &amp; model
+                    </Button>
+                  </div>
+                  <div
+                    className="mt-1.5 rounded-md border bg-muted/30 px-3 py-2 text-[11px] space-y-1"
+                    data-testid="judge-config-summary"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground">Model:</span>
+                      <code className="font-mono">{judgeConfig?.judge_model || 'gemini-flash-latest'}</code>
+                      {judgeConfig?.is_default !== false && (
+                        <Badge variant="outline" className="text-[9px] font-mono">default</Badge>
+                      )}
+                    </div>
+                    <div className="text-muted-foreground">
+                      Prompt: {judgeConfig?.judge_prompt
+                        ? `${judgeConfig.judge_prompt.length} chars · {golden} + {candidate} tokens`
+                        : 'using harness default'}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {!isTestingAgentMode && (
                 <>
               <Separator />
@@ -1225,6 +1288,11 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
           </div>
         </DialogFooter>
       </DialogContent>
+      <JudgeConfigDialog
+        open={judgeConfigOpen}
+        onOpenChange={setJudgeConfigOpen}
+        onSaved={(cfg) => setJudgeConfig(cfg)}
+      />
     </Dialog>
   );
 }
