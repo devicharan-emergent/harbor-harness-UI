@@ -1,25 +1,51 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { ExternalLink, RefreshCw, Loader2 } from 'lucide-react';
+import { ExternalLink, RefreshCw, Loader2, Sun, Moon } from 'lucide-react';
 
 // External tool hosted by the agent-definitions service. It already runs
 // behind the same Emergent SSO so an iframe load works without additional
 // auth handshakes — we just embed it as-is.
-const IFRAME_SRC = 'https://source-view-4.internal.emergent.host/agent-definitions';
+const IFRAME_BASE = 'https://source-view-4.internal.emergent.host/agent-definitions';
+const STORAGE_KEY = 'acm_agent_prompt_iframe_theme';
 
 export default function AgentPromptManagementPage() {
   const [iframeKey, setIframeKey] = useState(0);
   const [loading, setLoading] = useState(true);
+  // Default iframe theme = light: the embedded Cortex Admin reads cleaner
+  // on a light surface inside our dark shell. Persist user override.
+  const [iframeTheme, setIframeTheme] = useState(() => {
+    try {
+      return localStorage.getItem(STORAGE_KEY) || 'light';
+    } catch {
+      return 'light';
+    }
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem(STORAGE_KEY, iframeTheme); } catch { /* ignore */ }
+  }, [iframeTheme]);
+
+  // Build src with a ?theme= hint — best-effort: if the embedded app reads
+  // it, great; if not, the `color-scheme` CSS prop below still nudges its
+  // form controls + scrollbar palette to match.
+  const iframeSrc = `${IFRAME_BASE}?theme=${iframeTheme}`;
+  const surfaceBg = iframeTheme === 'dark' ? '#0b0f17' : '#ffffff';
 
   const reload = () => {
     setLoading(true);
     setIframeKey((k) => k + 1);
   };
 
+  const toggleTheme = () => {
+    setIframeTheme((t) => (t === 'light' ? 'dark' : 'light'));
+    setLoading(true);
+    setIframeKey((k) => k + 1); // remount so the ?theme= hint takes effect
+  };
+
   return (
     <div className="space-y-4" data-testid="agent-prompt-management-page">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold leading-tight">Agent & Prompt Management</h1>
           <p className="text-sm text-muted-foreground mt-1">
@@ -27,6 +53,19 @@ export default function AgentPromptManagementPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={toggleTheme}
+            data-testid="agent-prompt-mgmt-theme-toggle-btn"
+            title={`Switch embedded view to ${iframeTheme === 'light' ? 'dark' : 'light'} theme`}
+          >
+            {iframeTheme === 'light' ? (
+              <><Moon className="w-3.5 h-3.5 mr-1.5" /> Dark view</>
+            ) : (
+              <><Sun className="w-3.5 h-3.5 mr-1.5" /> Light view</>
+            )}
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -42,7 +81,7 @@ export default function AgentPromptManagementPage() {
             asChild
             data-testid="agent-prompt-mgmt-open-new-tab-btn"
           >
-            <a href={IFRAME_SRC} target="_blank" rel="noreferrer">
+            <a href={iframeSrc} target="_blank" rel="noreferrer">
               <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
               Open in new tab
             </a>
@@ -50,7 +89,11 @@ export default function AgentPromptManagementPage() {
         </div>
       </div>
 
-      <Card className="overflow-hidden relative" data-testid="agent-prompt-mgmt-card">
+      <Card
+        className="overflow-hidden relative border-border/60"
+        style={{ background: surfaceBg }}
+        data-testid="agent-prompt-mgmt-card"
+      >
         {loading && (
           <div
             className="absolute inset-0 z-10 flex items-center justify-center bg-background/60 backdrop-blur-sm pointer-events-none"
@@ -61,13 +104,19 @@ export default function AgentPromptManagementPage() {
         )}
         <iframe
           key={iframeKey}
-          src={IFRAME_SRC}
+          src={iframeSrc}
           title="Agent & Prompt Management"
           className="w-full block border-0"
-          style={{ height: 'calc(100vh - 180px)', minHeight: '600px' }}
+          // `color-scheme` is a CSS hint that nudges form controls, scrollbars
+          // and `prefers-color-scheme` inside the iframe so the embedded
+          // page stops fighting our wrapper's contrast.
+          style={{
+            height: 'calc(100vh - 180px)',
+            minHeight: '600px',
+            colorScheme: iframeTheme,
+            background: surfaceBg,
+          }}
           onLoad={() => setLoading(false)}
-          // sandbox kept permissive — same-origin to *.internal.emergent.host
-          // (read: behind our SSO) so we don't strip storage/cookies.
           allow="clipboard-read; clipboard-write"
           data-testid="agent-prompt-mgmt-iframe"
         />
