@@ -6,14 +6,12 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import {
   Select,
@@ -30,37 +28,36 @@ import {
 } from '@/services/evalApi';
 import { parseApiError } from '@/lib/errorUtils';
 
-const MODEL_PRESETS = [
+// The user has explicitly restricted the judge model to these two
+// production-ready options. If the harness later supports more we add
+// them here — there's no free-text Custom option by design.
+const MODEL_OPTIONS = [
   'gemini-flash-latest',
-  'gemini-2.5-pro-latest',
-  'claude-sonnet-4-5',
-  'claude-opus-4-7',
-  'gpt-5.2',
+  'gpt-5.5',
 ];
-const CUSTOM_SENTINEL = '__custom__';
+const FALLBACK_MODEL = MODEL_OPTIONS[0];
 
 /**
- * Singleton judge-prompt / judge-model editor.
- * - Loads current config on open via GET /api/eval/judge-config.
- * - Save validates locally that the prompt contains both {golden} and
- *   {candidate} tokens (backend re-validates and 400s on mismatch).
- * - Reset wipes the stored doc; subsequent loads serve the in-code defaults.
- * - onSaved(config) bubbles the persisted record back to the parent so it
- *   can immediately attach `judge_prompt` / `judge_model` to the next submit.
+ * Shared body shared between the modal dialog and the standalone page.
+ * Manages load / dirty state / validation / save / reset and surfaces
+ * the persisted config via `onSaved`.
+ *
+ * Props:
+ *   onClose?:        () => void  // optional — dialog uses it for auto-close on Save
+ *   onSaved?:        (cfg) => void  // called whenever the server returns a fresh config
+ *   showHeader:      bool         // page hides the inner header (it uses the page header)
+ *   showSaveFooter:  bool         // page renders its own footer; dialog uses ours
  */
-export function JudgeConfigDialog({ open, onOpenChange, onSaved }) {
+export function JudgeConfigForm({ onClose, onSaved, showHeader = true, showSaveFooter = true }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [judgePrompt, setJudgePrompt] = useState('');
-  const [judgeModel, setJudgeModel] = useState('gemini-flash-latest');
+  const [judgeModel, setJudgeModel] = useState(FALLBACK_MODEL);
   const [isDefault, setIsDefault] = useState(true);
   const [updatedAt, setUpdatedAt] = useState(null);
-  const [modelForceCustom, setModelForceCustom] = useState(false);
 
-  // Load on every open so stale state doesn't survive across opens.
   useEffect(() => {
-    if (!open) return;
     let cancelled = false;
     (async () => {
       setLoading(true);
@@ -68,10 +65,14 @@ export function JudgeConfigDialog({ open, onOpenChange, onSaved }) {
         const cfg = await getJudgeConfig();
         if (cancelled) return;
         setJudgePrompt(cfg.judge_prompt || '');
-        setJudgeModel(cfg.judge_model || 'gemini-flash-latest');
+        // If a previously-saved value isn't one of the two allowed
+        // options anymore, coerce back to the fallback so the Select
+        // always has a valid match. The original value is NOT mutated
+        // server-side until the user clicks Save.
+        const model = cfg.judge_model || FALLBACK_MODEL;
+        setJudgeModel(MODEL_OPTIONS.includes(model) ? model : FALLBACK_MODEL);
         setIsDefault(!!cfg.is_default);
         setUpdatedAt(cfg.updated_at || null);
-        setModelForceCustom(false);
       } catch (err) {
         toast.error(parseApiError(err, 'Failed to load judge config'));
       } finally {
@@ -81,7 +82,7 @@ export function JudgeConfigDialog({ open, onOpenChange, onSaved }) {
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, []);
 
   const hasGoldenToken = judgePrompt.includes('{golden}');
   const hasCandidateToken = judgePrompt.includes('{candidate}');
@@ -98,13 +99,13 @@ export function JudgeConfigDialog({ open, onOpenChange, onSaved }) {
     try {
       const cfg = await updateJudgeConfig({
         judge_prompt: judgePrompt,
-        judge_model: judgeModel.trim() || 'gemini-flash-latest',
+        judge_model: judgeModel,
       });
       setIsDefault(!!cfg.is_default);
       setUpdatedAt(cfg.updated_at);
       toast.success('Judge config saved');
       onSaved && onSaved(cfg);
-      onOpenChange(false);
+      onClose && onClose();
     } catch (err) {
       toast.error(parseApiError(err, 'Failed to save judge config'));
     } finally {
@@ -117,10 +118,9 @@ export function JudgeConfigDialog({ open, onOpenChange, onSaved }) {
     try {
       const cfg = await resetJudgeConfig();
       setJudgePrompt(cfg.judge_prompt);
-      setJudgeModel(cfg.judge_model);
+      setJudgeModel(MODEL_OPTIONS.includes(cfg.judge_model) ? cfg.judge_model : FALLBACK_MODEL);
       setIsDefault(true);
       setUpdatedAt(null);
-      setModelForceCustom(false);
       toast.success('Reset to default');
       onSaved && onSaved(cfg);
     } catch (err) {
@@ -130,118 +130,84 @@ export function JudgeConfigDialog({ open, onOpenChange, onSaved }) {
     }
   };
 
-  const isPresetModel = MODEL_PRESETS.includes(judgeModel);
-  const selectValue = !modelForceCustom && isPresetModel ? judgeModel : CUSTOM_SENTINEL;
-
-  const handleModelSelect = (next) => {
-    if (next === CUSTOM_SENTINEL) {
-      setModelForceCustom(true);
-    } else {
-      setModelForceCustom(false);
-      setJudgeModel(next);
-    }
-  };
-
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col"
-        data-testid="judge-config-dialog"
-      >
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            LLM Judge Configuration
-            {isDefault ? (
-              <Badge variant="outline" className="text-[10px] font-mono">unsaved · using default</Badge>
-            ) : (
-              <Badge variant="default" className="text-[10px] font-mono">customized</Badge>
-            )}
-          </DialogTitle>
-          <DialogDescription className="text-xs">
-            Used as the top-level <code className="font-mono">judge_prompt</code> +{' '}
-            <code className="font-mono">judge_model</code> on every testing_agent_bench
-            eval. The prompt must contain the literal tokens{' '}
-            <code className="font-mono">{'{golden}'}</code> and{' '}
-            <code className="font-mono">{'{candidate}'}</code> — they&apos;re the only
-            two substitutions the harness performs.
-          </DialogDescription>
-        </DialogHeader>
+    <>
+      {showHeader && (
+        <div className="mb-3">
+          {isDefault ? (
+            <Badge variant="outline" className="text-[10px] font-mono">unsaved · using default</Badge>
+          ) : (
+            <Badge variant="default" className="text-[10px] font-mono">customized</Badge>
+          )}
+        </div>
+      )}
 
-        {loading ? (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-          </div>
-        ) : (
-          <div className="flex-1 overflow-y-auto space-y-4 px-1">
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <Label className="text-xs font-medium">Judge Model</Label>
-                {updatedAt && (
-                  <span className="text-[10px] text-muted-foreground font-mono">
-                    last updated {new Date(updatedAt).toLocaleString()}
-                  </span>
-                )}
-              </div>
-              <Select value={selectValue} onValueChange={handleModelSelect}>
-                <SelectTrigger
-                  className="text-sm font-mono"
-                  data-testid="judge-model-select"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {MODEL_PRESETS.map((m) => (
-                    <SelectItem key={m} value={m} className="font-mono">{m}</SelectItem>
-                  ))}
-                  <SelectItem value={CUSTOM_SENTINEL}>Custom…</SelectItem>
-                </SelectContent>
-              </Select>
-              {(modelForceCustom || !isPresetModel) && (
-                <Input
-                  value={judgeModel}
-                  onChange={(e) => setJudgeModel(e.target.value)}
-                  placeholder="e.g. gemini-flash-latest"
-                  className="mt-1.5 font-mono text-sm"
-                  data-testid="judge-model-custom"
-                />
+      {loading ? (
+        <div className="flex items-center justify-center py-16">
+          <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <Label className="text-xs font-medium">Judge Model</Label>
+              {updatedAt && (
+                <span className="text-[10px] text-muted-foreground font-mono">
+                  last updated {new Date(updatedAt).toLocaleString()}
+                </span>
               )}
             </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <Label className="text-xs font-medium">Judge Prompt *</Label>
-                <div className="flex items-center gap-1.5">
-                  <Badge
-                    variant={hasGoldenToken ? 'default' : 'destructive'}
-                    className="text-[10px] font-mono"
-                  >
-                    {hasGoldenToken ? '✓' : '✗'} {'{golden}'}
-                  </Badge>
-                  <Badge
-                    variant={hasCandidateToken ? 'default' : 'destructive'}
-                    className="text-[10px] font-mono"
-                  >
-                    {hasCandidateToken ? '✓' : '✗'} {'{candidate}'}
-                  </Badge>
-                </div>
-              </div>
-              <Textarea
-                value={judgePrompt}
-                onChange={(e) => setJudgePrompt(e.target.value)}
-                className="font-mono text-[11px] min-h-[360px] leading-relaxed"
-                spellCheck={false}
-                data-testid="judge-prompt-textarea"
-              />
-              <p className="text-[10px] text-muted-foreground mt-1">
-                Other curly braces (e.g. JSON literals in the output spec) flow
-                through untouched — only <code className="font-mono">{'{golden}'}</code> and{' '}
-                <code className="font-mono">{'{candidate}'}</code> are substituted.
-              </p>
-            </div>
+            <Select value={judgeModel} onValueChange={setJudgeModel}>
+              <SelectTrigger
+                className="text-sm font-mono"
+                data-testid="judge-model-select"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {MODEL_OPTIONS.map((m) => (
+                  <SelectItem key={m} value={m} className="font-mono">{m}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
-        )}
 
-        <DialogFooter className="flex items-center justify-between sm:justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <Label className="text-xs font-medium">Judge Prompt *</Label>
+              <div className="flex items-center gap-1.5">
+                <Badge
+                  variant={hasGoldenToken ? 'default' : 'destructive'}
+                  className="text-[10px] font-mono"
+                >
+                  {hasGoldenToken ? '✓' : '✗'} {'{golden}'}
+                </Badge>
+                <Badge
+                  variant={hasCandidateToken ? 'default' : 'destructive'}
+                  className="text-[10px] font-mono"
+                >
+                  {hasCandidateToken ? '✓' : '✗'} {'{candidate}'}
+                </Badge>
+              </div>
+            </div>
+            <Textarea
+              value={judgePrompt}
+              onChange={(e) => setJudgePrompt(e.target.value)}
+              className="font-mono text-[11px] min-h-[360px] leading-relaxed"
+              spellCheck={false}
+              data-testid="judge-prompt-textarea"
+            />
+            <p className="text-[10px] text-muted-foreground mt-1">
+              Other curly braces (e.g. JSON literals in the output spec) flow
+              through untouched — only <code className="font-mono">{'{golden}'}</code> and{' '}
+              <code className="font-mono">{'{candidate}'}</code> are substituted.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {showSaveFooter && !loading && (
+        <div className="mt-4 flex items-center justify-between gap-2">
           <Button
             variant="ghost"
             size="sm"
@@ -253,15 +219,17 @@ export function JudgeConfigDialog({ open, onOpenChange, onSaved }) {
             Reset to default
           </Button>
           <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => onOpenChange(false)}
-              disabled={saving}
-              data-testid="judge-config-cancel"
-            >
-              Cancel
-            </Button>
+            {onClose && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onClose}
+                disabled={saving}
+                data-testid="judge-config-cancel"
+              >
+                Cancel
+              </Button>
+            )}
             <Button
               size="sm"
               onClick={handleSave}
@@ -272,7 +240,48 @@ export function JudgeConfigDialog({ open, onOpenChange, onSaved }) {
               Save
             </Button>
           </div>
-        </DialogFooter>
+        </div>
+      )}
+    </>
+  );
+}
+
+/**
+ * Modal wrapper around <JudgeConfigForm/> — kept for the Run Eval Step 2
+ * "Edit judge prompt & model" button.
+ */
+export function JudgeConfigDialog({ open, onOpenChange, onSaved }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col"
+        data-testid="judge-config-dialog"
+      >
+        <DialogHeader>
+          <DialogTitle>LLM Judge Configuration</DialogTitle>
+          <DialogDescription className="text-xs">
+            Used as the top-level <code className="font-mono">judge_prompt</code> +{' '}
+            <code className="font-mono">judge_model</code> on every testing_agent_bench
+            eval. The prompt must contain the literal tokens{' '}
+            <code className="font-mono">{'{golden}'}</code> and{' '}
+            <code className="font-mono">{'{candidate}'}</code> — they&apos;re the only
+            two substitutions the harness performs.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex-1 overflow-y-auto px-1">
+          {/* Re-mount the form whenever the dialog opens so it re-fetches
+              fresh config and clears prior dirty state. The form renders
+              its own Save/Cancel/Reset row at the bottom. */}
+          {open && (
+            <JudgeConfigForm
+              key={open ? 'open' : 'closed'}
+              onClose={() => onOpenChange(false)}
+              onSaved={onSaved}
+              showHeader
+              showSaveFooter
+            />
+          )}
+        </div>
       </DialogContent>
     </Dialog>
   );

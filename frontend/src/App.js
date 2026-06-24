@@ -14,6 +14,7 @@ import ChatWizard from "@/pages/ChatWizard";
 import EvalRuns from "@/pages/EvalRuns";
 import JobDetail from "@/pages/JobDetail";
 import DatasetsPage from "@/pages/DatasetsPage";
+import JudgeConfigPage from "@/pages/JudgeConfigPage";
 import SchedulesList from "@/pages/SchedulesList";
 import ScheduleEditor from "@/pages/ScheduleEditor";
 import ScheduleDetail from "@/pages/ScheduleDetail";
@@ -57,6 +58,7 @@ const router = createBrowserRouter([
           { path: "/evals", element: <EvalRuns /> },
           { path: "/evals/:id", element: <JobDetail /> },
           { path: "/datasets", element: <DatasetsPage /> },
+          { path: "/judge-config", element: <JudgeConfigPage /> },
           { path: "/schedules", element: <SchedulesList /> },
           { path: "/schedules/new", element: <ScheduleEditor /> },
           { path: "/schedules/:id", element: <ScheduleDetail /> },
