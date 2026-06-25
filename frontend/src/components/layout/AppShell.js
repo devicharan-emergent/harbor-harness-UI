@@ -15,7 +15,7 @@ const navItems = [
   { label: 'Datasets', href: '/datasets', icon: Database },
   { label: 'Dataset Views', href: '/dataset-views', icon: BookMarked },
   { label: 'Verifier Config', href: '/judge-config', icon: Scale },
-  { label: 'Agent & Prompt Management', href: '/agent-prompt-management', icon: FileCode2 },
+  { label: 'Agent Management', href: '/agent-prompt-management', icon: FileCode2 },
   { label: 'Compare', href: '/compare', icon: GitCompare },
 ];
 

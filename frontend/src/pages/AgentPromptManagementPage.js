@@ -46,7 +46,7 @@ export default function AgentPromptManagementPage() {
   return (
     <div className="space-y-4" data-testid="agent-prompt-management-page">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <h1 className="text-2xl font-bold">Agent &amp; Prompt Management</h1>
+        <h1 className="text-2xl font-bold">Agent Management</h1>
         <div className="flex items-center gap-1.5">
           <Button
             variant="ghost"
@@ -98,7 +98,7 @@ export default function AgentPromptManagementPage() {
         <iframe
           key={iframeKey}
           src={iframeSrc}
-          title="Agent & Prompt Management"
+          title="Agent Management"
           className="w-full block border-0"
           // `color-scheme` is a CSS hint that nudges form controls, scrollbars
           // and `prefers-color-scheme` inside the iframe so the embedded
