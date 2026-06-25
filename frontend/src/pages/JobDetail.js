@@ -754,12 +754,13 @@ export default function JobDetail() {
                                     </pre>
                                   </div>
                                 )}
-                                {test.kernel_session_id && (
+                                {(test.replay_url || test.kernel_session_id) && (
                                   <a
-                                    href={`https://dashboard.onkernel.com/browsers/${test.kernel_session_id}`}
+                                    href={test.replay_url || `https://dashboard.onkernel.com/browsers/${test.kernel_session_id}`}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="inline-flex items-center gap-1 text-[10px] text-blue-500 hover:text-blue-400 font-mono underline"
+                                    data-testid={`watch-replay-${phaseIdx}-${testIdx}`}
                                   >
                                     Watch Replay
                                   </a>
