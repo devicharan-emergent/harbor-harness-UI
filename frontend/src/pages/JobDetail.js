@@ -172,9 +172,25 @@ export default function JobDetail() {
             <Loader2 className="w-3.5 h-3.5 mr-1.5" />
             Refresh
           </Button>
-          <Button variant="outline" size="sm" onClick={handleCopyId} className="h-8">
+          <Button variant="outline" size="sm" onClick={handleCopyId} className="h-8" data-testid="jobdetail-copy-id">
             <Copy className="w-3.5 h-3.5 mr-1.5" />
             Copy ID
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8"
+            data-testid="jobdetail-copy-link"
+            onClick={() => {
+              const url = window.location.origin + `/evals/${job.id}`;
+              navigator.clipboard.writeText(url).then(
+                () => toast.success('Deep link copied'),
+                () => toast.error('Could not copy link'),
+              );
+            }}
+          >
+            <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
+            Copy link
           </Button>
           <OpenInChatButton jobId={job.id} status={job.status} className="h-8" />
           {isActive && (
@@ -1160,15 +1176,6 @@ export default function JobDetail() {
                     <Separator />
                   </>
                 )}
-                {job.user_id && (
-                  <>
-                    <div>
-                      <dt className="text-muted-foreground">User ID</dt>
-                      <dd className="font-mono mt-0.5">{job.user_id}</dd>
-                    </div>
-                    <Separator />
-                  </>
-                )}
                 {(job.group_run_id || job.group_id) && (
                   <>
                     <div>
@@ -1190,73 +1197,10 @@ export default function JobDetail() {
                     <Separator />
                   </>
                 )}
-                {job.k8s_job_name && (
-                  <>
-                    <div>
-                      <dt className="text-muted-foreground">K8s Job</dt>
-                      <dd className="font-mono mt-0.5 text-[10px]">{job.k8s_job_name}</dd>
-                    </div>
-                    <Separator />
-                  </>
-                )}
-                {job.cortex_job_id && (
-                  <>
-                    <div>
-                      <dt className="text-muted-foreground">Cortex Job ID</dt>
-                      <dd className="font-mono mt-0.5 text-[10px]">{job.cortex_job_id}</dd>
-                    </div>
-                    <Separator />
-                  </>
-                )}
-                {job.eval_metrics?.kernel_session_id && (
-                  <>
-                    <div>
-                      <dt className="text-muted-foreground">Session</dt>
-                      <dd className="font-mono mt-0.5 text-[10px]">{job.eval_metrics.kernel_session_id}</dd>
-                    </div>
-                    <Separator />
-                  </>
-                )}
-                {job.eval_metrics?.task_name && (
-                  <>
-                    <div>
-                      <dt className="text-muted-foreground">Task</dt>
-                      <dd className="font-mono mt-0.5 text-[10px]">{job.eval_metrics.task_name}</dd>
-                    </div>
-                    <Separator />
-                  </>
-                )}
-                {job.eval_metrics?.dataset && (
-                  <>
-                    <div>
-                      <dt className="text-muted-foreground">Dataset</dt>
-                      <dd className="font-mono mt-0.5 text-[10px]">{job.eval_metrics.dataset}</dd>
-                    </div>
-                    <Separator />
-                  </>
-                )}
                 <div>
                   <dt className="text-muted-foreground">Created</dt>
                   <dd className="mt-0.5">{formatDistanceToNow(new Date(job.created_at), { addSuffix: true })}</dd>
                 </div>
-                {job.started_at && (
-                  <>
-                    <Separator />
-                    <div>
-                      <dt className="text-muted-foreground">Started</dt>
-                      <dd className="mt-0.5">{formatDistanceToNow(new Date(job.started_at), { addSuffix: true })}</dd>
-                    </div>
-                  </>
-                )}
-                {job.updated_at && (
-                  <>
-                    <Separator />
-                    <div>
-                      <dt className="text-muted-foreground">Updated</dt>
-                      <dd className="mt-0.5">{formatDistanceToNow(new Date(job.updated_at), { addSuffix: true })}</dd>
-                    </div>
-                  </>
-                )}
                 {job.finished_at && (
                   <>
                     <Separator />
@@ -1274,53 +1218,151 @@ export default function JobDetail() {
                     </div>
                   </>
                 )}
+
+                {/* "More" — infra IDs + secondary timestamps tucked away */}
+                <Collapsible className="pt-1">
+                  <CollapsibleTrigger
+                    className="w-full flex items-center justify-between text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground py-1 [&[data-state=open]>svg]:rotate-180"
+                    data-testid="jobdetail-more-toggle"
+                  >
+                    <span className="font-semibold">More details</span>
+                    <ChevronDown className="w-3 h-3 transition-transform" />
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <div className="space-y-2 pt-2">
+                      {job.user_id && (
+                        <>
+                          <div>
+                            <dt className="text-muted-foreground">User ID</dt>
+                            <dd className="font-mono mt-0.5 text-[10px] break-all">{job.user_id}</dd>
+                          </div>
+                          <Separator />
+                        </>
+                      )}
+                      {job.k8s_job_name && (
+                        <>
+                          <div>
+                            <dt className="text-muted-foreground">K8s Job</dt>
+                            <dd className="font-mono mt-0.5 text-[10px] break-all">{job.k8s_job_name}</dd>
+                          </div>
+                          <Separator />
+                        </>
+                      )}
+                      {job.cortex_job_id && (
+                        <>
+                          <div>
+                            <dt className="text-muted-foreground">Cortex Job ID</dt>
+                            <dd className="font-mono mt-0.5 text-[10px] break-all">{job.cortex_job_id}</dd>
+                          </div>
+                          <Separator />
+                        </>
+                      )}
+                      {job.eval_metrics?.kernel_session_id && (
+                        <>
+                          <div>
+                            <dt className="text-muted-foreground">Session</dt>
+                            <dd className="font-mono mt-0.5 text-[10px] break-all">{job.eval_metrics.kernel_session_id}</dd>
+                          </div>
+                          <Separator />
+                        </>
+                      )}
+                      {job.eval_metrics?.task_name && (
+                        <>
+                          <div>
+                            <dt className="text-muted-foreground">Task</dt>
+                            <dd className="font-mono mt-0.5 text-[10px]">{job.eval_metrics.task_name}</dd>
+                          </div>
+                          <Separator />
+                        </>
+                      )}
+                      {job.eval_metrics?.dataset && (
+                        <>
+                          <div>
+                            <dt className="text-muted-foreground">Dataset</dt>
+                            <dd className="font-mono mt-0.5 text-[10px]">{job.eval_metrics.dataset}</dd>
+                          </div>
+                          <Separator />
+                        </>
+                      )}
+                      {job.started_at && (
+                        <>
+                          <div>
+                            <dt className="text-muted-foreground">Started</dt>
+                            <dd className="mt-0.5">{formatDistanceToNow(new Date(job.started_at), { addSuffix: true })}</dd>
+                          </div>
+                          <Separator />
+                        </>
+                      )}
+                      {job.updated_at && (
+                        <div>
+                          <dt className="text-muted-foreground">Updated</dt>
+                          <dd className="mt-0.5">{formatDistanceToNow(new Date(job.updated_at), { addSuffix: true })}</dd>
+                        </div>
+                      )}
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
               </dl>
             </CardContent>
           </Card>
 
-          {/* Config Info */}
+          {/* Config Info — collapsed by default; raw JSON is verbose */}
           {job.config && (
             <Card>
-              <CardHeader>
-                <CardTitle className="text-sm">Config</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <pre className="text-[10px] font-mono bg-muted/50 p-3 rounded-lg overflow-auto max-h-[200px]">
-                  {JSON.stringify(job.config, null, 2)}
-                </pre>
-              </CardContent>
+              <Collapsible>
+                <CollapsibleTrigger className="w-full text-left [&[data-state=open]>div>svg]:rotate-180">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                    <CardTitle className="text-sm">Config</CardTitle>
+                    <ChevronDown className="w-3.5 h-3.5 text-muted-foreground transition-transform" />
+                  </CardHeader>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <CardContent>
+                    <pre className="text-[10px] font-mono bg-muted/50 p-3 rounded-lg overflow-auto max-h-[200px]">
+                      {JSON.stringify(job.config, null, 2)}
+                    </pre>
+                  </CardContent>
+                </CollapsibleContent>
+              </Collapsible>
             </Card>
           )}
 
-          {/* Submission Config */}
+          {/* Submission Config — small, but still secondary; collapse */}
           {job.config && (
             <Card data-testid="submission-config-card">
-              <CardHeader>
-                <CardTitle className="text-sm">Submission Config</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <dl className="space-y-2 text-xs">
-                  <div className="flex justify-between">
-                    <dt className="text-muted-foreground">CPUs</dt>
-                    <dd className="font-mono">{job.config.cpus ?? 2}</dd>
-                  </div>
-                  <Separator />
-                  <div className="flex justify-between">
-                    <dt className="text-muted-foreground">Memory</dt>
-                    <dd className="font-mono">{job.config.memory ?? 8192} MB</dd>
-                  </div>
-                  <Separator />
-                  <div className="flex justify-between">
-                    <dt className="text-muted-foreground">Storage</dt>
-                    <dd className="font-mono">{job.config.storage ?? 10} GB</dd>
-                  </div>
-                  <Separator />
-                  <div className="flex justify-between">
-                    <dt className="text-muted-foreground">Cloud</dt>
-                    <dd className="font-mono">{job.config.cloud ? 'Yes' : 'No'}</dd>
-                  </div>
-                </dl>
-              </CardContent>
+              <Collapsible>
+                <CollapsibleTrigger className="w-full text-left [&[data-state=open]>div>svg]:rotate-180">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                    <CardTitle className="text-sm">Submission Config</CardTitle>
+                    <ChevronDown className="w-3.5 h-3.5 text-muted-foreground transition-transform" />
+                  </CardHeader>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <CardContent>
+                    <dl className="space-y-2 text-xs">
+                      <div className="flex justify-between">
+                        <dt className="text-muted-foreground">CPUs</dt>
+                        <dd className="font-mono">{job.config.cpus ?? 2}</dd>
+                      </div>
+                      <Separator />
+                      <div className="flex justify-between">
+                        <dt className="text-muted-foreground">Memory</dt>
+                        <dd className="font-mono">{job.config.memory ?? 8192} MB</dd>
+                      </div>
+                      <Separator />
+                      <div className="flex justify-between">
+                        <dt className="text-muted-foreground">Storage</dt>
+                        <dd className="font-mono">{job.config.storage ?? 10} GB</dd>
+                      </div>
+                      <Separator />
+                      <div className="flex justify-between">
+                        <dt className="text-muted-foreground">Cloud</dt>
+                        <dd className="font-mono">{job.config.cloud ? 'Yes' : 'No'}</dd>
+                      </div>
+                    </dl>
+                  </CardContent>
+                </CollapsibleContent>
+              </Collapsible>
             </Card>
           )}
 
@@ -1362,17 +1404,24 @@ export default function JobDetail() {
             );
           })()}
 
-          {/* Phase Results */}
+          {/* Phase Results — raw JSON, collapsed by default */}
           {job.phase_results && (
             <Card>
-              <CardHeader>
-                <CardTitle className="text-sm">Phase Results</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <pre className="text-[10px] font-mono bg-muted/50 p-3 rounded-lg overflow-auto max-h-[200px]">
-                  {JSON.stringify(job.phase_results, null, 2)}
-                </pre>
-              </CardContent>
+              <Collapsible>
+                <CollapsibleTrigger className="w-full text-left [&[data-state=open]>div>svg]:rotate-180">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                    <CardTitle className="text-sm">Phase Results (raw)</CardTitle>
+                    <ChevronDown className="w-3.5 h-3.5 text-muted-foreground transition-transform" />
+                  </CardHeader>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <CardContent>
+                    <pre className="text-[10px] font-mono bg-muted/50 p-3 rounded-lg overflow-auto max-h-[200px]">
+                      {JSON.stringify(job.phase_results, null, 2)}
+                    </pre>
+                  </CardContent>
+                </CollapsibleContent>
+              </Collapsible>
             </Card>
           )}
         </div>

@@ -44,46 +44,42 @@ export default function AgentPromptManagementPage() {
   };
 
   return (
-    <div className="space-y-4" data-testid="agent-prompt-management-page">
+    <div className="space-y-3" data-testid="agent-prompt-management-page">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-bold leading-tight">Agent & Prompt Management</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Embedded view of the agent-definitions service.
-          </p>
+        <div className="flex items-baseline gap-3 min-w-0">
+          <h1 className="text-xl font-semibold leading-tight truncate">Agent &amp; Prompt Management</h1>
+          <span className="text-[11px] text-muted-foreground hidden sm:inline">embedded view</span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <Button
-            variant="outline"
-            size="sm"
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
             onClick={toggleTheme}
             data-testid="agent-prompt-mgmt-theme-toggle-btn"
             title={`Switch embedded view to ${iframeTheme === 'light' ? 'dark' : 'light'} theme`}
           >
-            {iframeTheme === 'light' ? (
-              <><Moon className="w-3.5 h-3.5 mr-1.5" /> Dark view</>
-            ) : (
-              <><Sun className="w-3.5 h-3.5 mr-1.5" /> Light view</>
-            )}
+            {iframeTheme === 'light' ? <Moon className="w-3.5 h-3.5" /> : <Sun className="w-3.5 h-3.5" />}
           </Button>
           <Button
-            variant="outline"
-            size="sm"
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
             onClick={reload}
             data-testid="agent-prompt-mgmt-reload-btn"
+            title="Reload embedded view"
           >
-            <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
-            Reload
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
           </Button>
           <Button
-            variant="outline"
-            size="sm"
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
             asChild
             data-testid="agent-prompt-mgmt-open-new-tab-btn"
           >
-            <a href={iframeSrc} target="_blank" rel="noreferrer">
-              <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
-              Open in new tab
+            <a href={iframeSrc} target="_blank" rel="noreferrer" title="Open in new tab">
+              <ExternalLink className="w-3.5 h-3.5" />
             </a>
           </Button>
         </div>
@@ -111,7 +107,7 @@ export default function AgentPromptManagementPage() {
           // and `prefers-color-scheme` inside the iframe so the embedded
           // page stops fighting our wrapper's contrast.
           style={{
-            height: 'calc(100vh - 180px)',
+            height: 'calc(100vh - 120px)',
             minHeight: '600px',
             colorScheme: iframeTheme,
             background: surfaceBg,
