@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
+import re
 import logging
 import copy
 import uuid
@@ -1760,6 +1761,18 @@ async def create_dataset_view(body: dict, request: Request):
         raise HTTPException(status_code=400, detail="`name` is required")
     if len(name) > 200:
         raise HTTPException(status_code=400, detail="`name` must be 200 chars or fewer")
+    # Reject duplicate names (case-insensitive, ignoring leading/trailing
+    # whitespace). Views are shared, so this prevents two users from
+    # picking the same label and creating ambiguous entries in the list.
+    existing = await db.dataset_views.find_one(
+        {"name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}},
+        {"_id": 1, "name": 1},
+    )
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"A view named \"{existing['name']}\" already exists. Pick a different name.",
+        )
     description = (body.get("description") or "").strip()
     items = _normalize_view_items(body.get("items") or [])
     if not items:
@@ -1799,6 +1812,20 @@ async def update_dataset_view(view_id: str, body: dict, request: Request):
             raise HTTPException(status_code=400, detail="`name` must be non-empty")
         if len(name) > 200:
             raise HTTPException(status_code=400, detail="`name` must be 200 chars or fewer")
+        # Reject duplicate names (case-insensitive). Allow keeping the
+        # same name (i.e. don't conflict with own row).
+        existing = await db.dataset_views.find_one(
+            {
+                "name": {"$regex": f"^{re.escape(name)}$", "$options": "i"},
+                "view_id": {"$ne": view_id},
+            },
+            {"_id": 1, "name": 1},
+        )
+        if existing:
+            raise HTTPException(
+                status_code=409,
+                detail=f"A view named \"{existing['name']}\" already exists. Pick a different name.",
+            )
         updates["name"] = name
     if "description" in body:
         updates["description"] = (body["description"] or "").strip()

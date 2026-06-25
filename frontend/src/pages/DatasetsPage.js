@@ -7,6 +7,7 @@ import {
   getDatasetInstance,
   exportDatasetsCSV,
   getDatasetView,
+  updateDatasetView,
 } from '@/services/evalApi';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -85,16 +86,10 @@ export default function DatasetsPage() {
     setLoading(true);
     try {
       let data;
-      // When a view is active we need a wider window so all of its items
-      // are likely present (views may span types); the type filter is
-      // forced to 'all' and `filteredDatasets` narrows down to the view.
-      // Cap at 200 — the harness rejects higher values with 422.
-      const limit = activeView ? 200 : pageSize;
-      const offset = activeView ? 0 : page * pageSize;
-      if (activeView || typeFilter === 'all') {
-        data = await listDatasets({ limit, offset });
+      if (typeFilter === 'all') {
+        data = await listDatasets({ limit: pageSize, offset: page * pageSize });
       } else {
-        data = await listDatasetsByType(typeFilter, { limit, offset });
+        data = await listDatasetsByType(typeFilter, { limit: pageSize, offset: page * pageSize });
       }
       setDatasets(data.datasets || []);
     } catch (error) {
@@ -104,7 +99,7 @@ export default function DatasetsPage() {
     } finally {
       setLoading(false);
     }
-  }, [typeFilter, page, activeView]);
+  }, [typeFilter, page]);
 
   useEffect(() => {
     fetchDatasets();
@@ -179,14 +174,17 @@ export default function DatasetsPage() {
   const keyOf = (ds) => `${ds.dataset_type}/${ds.instance_id || ds.id}`;
 
   // Active-view key set for fast lookup. `null` when no view is loaded.
+  // NOTE: only used for the "highlight rows that belong to the view"
+  // visual cue — the table is NOT narrowed when a view is loaded so the
+  // user can add/remove items freely. The view's items are pre-selected
+  // (see pickView), so "Save as new view" / "Update view" can build the
+  // payload from the full selectedKeys Set.
   const activeViewKeys = useMemo(() => {
     if (!activeView?.items) return null;
     return new Set(activeView.items.map(it => `${it.dataset_type}/${it.instance_id}`));
   }, [activeView]);
 
   const filteredDatasets = datasets.filter(ds => {
-    // First narrow by active view (if any).
-    if (activeViewKeys && !activeViewKeys.has(keyOf(ds))) return false;
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return (
@@ -274,8 +272,16 @@ export default function DatasetsPage() {
     setActiveView(view);
     setTypeFilter('all');
     setPage(0);
-    clearSelection();
-    toast.success(`Loaded view "${view.name}" — ${view.items.length} items`);
+    // Pre-select every item in the view so cross-page selection persists
+    // and "Update view" can save modifications (add/remove items).
+    const nextKeys = new Set();
+    for (const it of view.items || []) {
+      if (it.dataset_type && it.instance_id) {
+        nextKeys.add(`${it.dataset_type}/${it.instance_id}`);
+      }
+    }
+    setSelectedKeys(nextKeys);
+    toast.success(`Loaded view "${view.name}" — ${view.items.length} items selected`);
     const next = new URLSearchParams(searchParams);
     next.set('view', view.view_id);
     setSearchParams(next, { replace: true });
@@ -289,12 +295,51 @@ export default function DatasetsPage() {
     setSearchParams(next, { replace: true });
   };
 
-  // Build the items payload from the current selection for "Save as view".
+  // True if the active view's stored items differ from the current
+  // selection — drives the "Update view" button enable state.
+  const viewSelectionChanged = useMemo(() => {
+    if (!activeView) return false;
+    const stored = new Set(
+      (activeView.items || []).map(it => `${it.dataset_type}/${it.instance_id}`),
+    );
+    if (stored.size !== selectedKeys.size) return true;
+    for (const k of selectedKeys) if (!stored.has(k)) return true;
+    return false;
+  }, [activeView, selectedKeys]);
+
+  const handleUpdateActiveView = async () => {
+    if (!activeView) return;
+    if (selectionItemsForView.length === 0) {
+      toast.error('A view must have at least one item');
+      return;
+    }
+    try {
+      const updated = await updateDatasetView(activeView.view_id, {
+        items: selectionItemsForView,
+      });
+      setActiveView(updated);
+      toast.success(`Updated view "${updated.name}" — ${updated.items.length} items`);
+    } catch (err) {
+      toast.error(parseApiError(err, 'Failed to update view'));
+    }
+  };
+
+  // Build the items payload from the FULL selection set so that selections
+  // spanning multiple pages are saved correctly. We parse the composite
+  // `dataset_type/instance_id` keys directly instead of reading from the
+  // current-page-only `selectedRows`.
   const selectionItemsForView = useMemo(
-    () => selectedRows
-      .map(r => ({ dataset_type: r.dataset_type, instance_id: r.instance_id }))
-      .filter(it => it.dataset_type && it.instance_id),
-    [selectedRows],
+    () => Array.from(selectedKeys)
+      .map(k => {
+        const idx = k.indexOf('/');
+        if (idx <= 0) return null;
+        const dataset_type = k.substring(0, idx);
+        const instance_id = k.substring(idx + 1);
+        if (!dataset_type || !instance_id) return null;
+        return { dataset_type, instance_id };
+      })
+      .filter(Boolean),
+    [selectedKeys],
   );
 
   const runExport = async (datasetType, instanceIds, label) => {
@@ -367,12 +412,29 @@ export default function DatasetsPage() {
             title={
               selectionItemsForView.length === 0
                 ? 'Select at least one row to save as a view'
-                : `Save the ${selectionItemsForView.length} selected row${selectionItemsForView.length === 1 ? '' : 's'} as a view`
+                : `Save the ${selectionItemsForView.length} selected row${selectionItemsForView.length === 1 ? '' : 's'} as a NEW view`
             }
           >
             <Save className="w-3.5 h-3.5 mr-1.5" />
-            Save as view{selectionItemsForView.length > 0 ? ` (${selectionItemsForView.length})` : ''}
+            Save as new view{selectionItemsForView.length > 0 ? ` (${selectionItemsForView.length})` : ''}
           </Button>
+          {activeView && (
+            <Button
+              onClick={handleUpdateActiveView}
+              variant="outline"
+              size="sm"
+              disabled={!viewSelectionChanged || selectionItemsForView.length === 0}
+              data-testid="datasets-update-view-btn"
+              title={
+                !viewSelectionChanged
+                  ? 'Modify the selection to enable update'
+                  : `Save the ${selectionItemsForView.length} current item${selectionItemsForView.length === 1 ? '' : 's'} into "${activeView.name}"`
+              }
+            >
+              <Save className="w-3.5 h-3.5 mr-1.5" />
+              Update view{viewSelectionChanged ? ` (${selectionItemsForView.length})` : ''}
+            </Button>
+          )}
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -436,7 +498,7 @@ export default function DatasetsPage() {
 
       {/* Filters */}
       <div className="flex items-center gap-3 flex-wrap">
-        <Select value={typeFilter} onValueChange={(v) => { setTypeFilter(v); setPage(0); }} disabled={!!activeView}>
+        <Select value={typeFilter} onValueChange={(v) => { setTypeFilter(v); setPage(0); }}>
           <SelectTrigger className="w-[220px]" data-testid="datasets-type-filter">
             <SelectValue />
           </SelectTrigger>

@@ -245,10 +245,12 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [selectedProblems, setSelectedProblems] = useState([]);
 
-  // Active dataset view (loaded via DatasetViewsDropdown or `?view=`
-  // deep link). Shown as a chip near the selection area; doesn't gate
-  // anything but tells the user where their selection came from.
-  const [activeView, setActiveView] = useState(null);
+  // Loaded dataset views (multi-select supported). Each entry is the
+  // full view document (with `items[]`). Selection in the modal is the
+  // UNION of every loaded view + any manual picks. Removing a view chip
+  // drops that view from the chip strip but does NOT auto-deselect its
+  // items — the user can deselect manually if they want.
+  const [activeViews, setActiveViews] = useState([]);
   const [loadingView, setLoadingView] = useState(false);
 
   // Group ID (mandatory tag for batch jobs)
@@ -399,7 +401,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
     if (open) {
       setStep(1);
       setSelectedProblems([]);
-      setActiveView(null);
+      setActiveViews([]);
       setSelectedPreview(null);
       setSearchQuery('');
       // Seed eph + agent_name from props when the caller deep-linked us
@@ -510,10 +512,11 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
     }
   };
 
-  // Apply a dataset view: replace the current selection with the view's
-  // items. Items are `{dataset_type, instance_id}` pairs — match them to
-  // the loaded `datasets` list. Items that don't match anything currently
-  // loaded surface as a non-fatal warning toast (likely soft-deleted).
+  // Apply a dataset view: MERGE its items into the current selection
+  // (union semantics so multiple views can be loaded). Items are
+  // `{dataset_type, instance_id}` pairs — match them to the loaded
+  // `datasets` list. Items that don't match anything currently loaded
+  // surface as a non-fatal warning toast (likely soft-deleted).
   const applyView = useCallback((view) => {
     if (!view?.items?.length) {
       toast.error('View has no items');
@@ -530,15 +533,30 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
       if (ds) matched.push(ds);
       else missing.push(k);
     }
-    setSelectedProblems(matched);
-    setActiveView(view);
+    // Merge into existing selection (union, deduped by .name).
+    setSelectedProblems(prev => {
+      const seen = new Set(prev.map(p => p.name));
+      const next = [...prev];
+      for (const ds of matched) {
+        if (!seen.has(ds.name)) {
+          seen.add(ds.name);
+          next.push(ds);
+        }
+      }
+      return next;
+    });
+    // Track the view in the chip strip. Skip if already loaded.
+    setActiveViews(prev => {
+      if (prev.some(v => v.view_id === view.view_id)) return prev;
+      return [...prev, view];
+    });
     if (missing.length > 0) {
       toast.warning(
         `Loaded "${view.name}": ${matched.length} matched, ${missing.length} not found (may be soft-deleted).`,
       );
     } else {
       toast.success(
-        `Loaded ${matched.length} item${matched.length === 1 ? '' : 's'} from view "${view.name}". Previous selection cleared.`,
+        `Loaded ${matched.length} item${matched.length === 1 ? '' : 's'} from view "${view.name}" (added to selection).`,
       );
     }
   }, [datasets]);
@@ -562,7 +580,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
   // Wait until datasets have finished loading so applyView can match items.
   useEffect(() => {
     if (!open || !initialViewId || loadingDatasets || datasets.length === 0) return;
-    if (activeView?.view_id === initialViewId) return;
+    if (activeViews.some(v => v.view_id === initialViewId)) return;
     (async () => {
       setLoadingView(true);
       try {
@@ -910,22 +928,40 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 />
               </div>
 
-              {activeView && (
+              {activeViews.length > 0 && (
                 <div
-                  className="flex items-center gap-2 text-xs border border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300 rounded-md px-2.5 py-1.5 self-start"
-                  data-testid="eval-active-view-chip"
+                  className="flex items-center gap-2 flex-wrap self-start"
+                  data-testid="eval-active-views-chips"
                 >
-                  <span>Loaded view:</span>
-                  <span className="font-semibold">{activeView.name}</span>
-                  <span className="font-mono text-[10px] opacity-80">
-                    · {activeView.items?.length || 0} items
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold mr-1">
+                    Loaded views:
                   </span>
+                  {activeViews.map(v => (
+                    <div
+                      key={v.view_id}
+                      className="flex items-center gap-2 text-xs border border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300 rounded-md px-2 py-1"
+                      data-testid={`eval-active-view-chip-${v.view_id}`}
+                    >
+                      <span className="font-semibold">{v.name}</span>
+                      <span className="font-mono text-[10px] opacity-80">
+                        · {v.items?.length || 0}
+                      </span>
+                      <button
+                        onClick={() => setActiveViews(prev => prev.filter(x => x.view_id !== v.view_id))}
+                        className="text-blue-700/70 dark:text-blue-300/70 hover:text-foreground -mr-1"
+                        data-testid={`eval-active-view-clear-btn-${v.view_id}`}
+                        title="Remove this view from the chip strip (items stay selected; deselect manually if you want)"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
                   <button
-                    onClick={() => { setActiveView(null); setSelectedProblems([]); }}
-                    className="text-[10px] underline underline-offset-2 hover:text-foreground ml-1"
-                    data-testid="eval-active-view-clear-btn"
+                    onClick={() => setActiveViews([])}
+                    className="text-[10px] underline underline-offset-2 text-muted-foreground hover:text-foreground"
+                    data-testid="eval-active-views-clear-all"
                   >
-                    clear
+                    clear all
                   </button>
                 </div>
               )}
