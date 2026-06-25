@@ -8,6 +8,7 @@ import { Loader2, ArrowLeft, ExternalLink, RefreshCw, Layers, Clock, Cpu, Activi
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
 import { getEvalRunGroup, listGroupJobs, getEvalAggregate, listEvalJobs } from '@/services/evalApi';
+import { getJobAgentName, getJobModelName, getJobTemplateName } from '@/lib/jobShape';
 import { parseApiError } from '@/lib/errorUtils';
 
 const STATUS_CONFIG = {
@@ -72,10 +73,9 @@ function GroupStatusBar({ jobs }) {
 function ConfigSnapshotCard({ firstJob }) {
   if (!firstJob) return null;
   const cfg = firstJob.config || {};
-  const exp = cfg.experiments || {};
-  const agentName = exp.agent_name || firstJob.agent_name || '—';
-  const modelName = exp.model_name || '—';
-  const templateName = cfg.template_name || '—';
+  const agentName = getJobAgentName(firstJob) || '—';
+  const modelName = getJobModelName(firstJob) || '—';
+  const templateName = getJobTemplateName(firstJob) || '—';
   return (
     <Card data-testid="group-config-card">
       <CardHeader>
@@ -184,6 +184,8 @@ function GroupScoresCard({ jobs, aggregate }) {
 function JobRow({ job }) {
   const cfg = STATUS_CONFIG[job.status] || STATUS_CONFIG.queued;
   const StatusIcon = cfg.icon;
+  const agentName = getJobAgentName(job);
+  const modelName = getJobModelName(job);
   return (
     <Link
       to={`/evals/${job.id}`}
@@ -200,14 +202,14 @@ function JobRow({ job }) {
       <div className="flex-1 min-w-0">
         <div className="font-mono font-medium truncate">{job.problem}</div>
         <div className="flex items-center gap-1.5 mt-0.5">
-          {job.config?.experiments?.agent_name && (
+          {agentName && (
             <Badge variant="outline" className="text-[9px] font-mono px-1 py-0 bg-blue-500/5 border-blue-500/20 text-blue-600 dark:text-blue-400">
-              {job.config.experiments.agent_name}
+              {agentName}
             </Badge>
           )}
-          {job.config?.experiments?.model_name && (
+          {modelName && (
             <Badge variant="outline" className="text-[9px] font-mono px-1 py-0">
-              {job.config.experiments.model_name}
+              {modelName}
             </Badge>
           )}
           <span className="text-[9px] text-muted-foreground/50 font-mono">{job.id.substring(0, 8)}</span>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getEvalJob, cancelEvalJob, getDatasetForProblem, updateBreakpoint } from '@/services/evalApi';
+import { getJobAgentName, getJobModelName } from '@/lib/jobShape';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -148,18 +149,25 @@ export default function JobDetail() {
           <p className="text-xs text-muted-foreground ml-[52px]">
             Problem: <span className="font-mono">{job.problem}</span>
           </p>
-          {job.config?.experiments?.agent_name && (
-            <div className="flex items-center gap-1.5 ml-[52px] mt-1">
-              <Badge variant="outline" className="text-[10px] font-mono bg-blue-500/5 border-blue-500/20 text-blue-600 dark:text-blue-400" data-testid="job-agent-badge">
-                {job.config.experiments.agent_name}
-              </Badge>
-              {job.config?.experiments?.model_name && (
-                <Badge variant="outline" className="text-[10px] font-mono" data-testid="job-model-badge">
-                  {job.config.experiments.model_name}
-                </Badge>
-              )}
-            </div>
-          )}
+          {(() => {
+            const agentName = getJobAgentName(job);
+            const modelName = getJobModelName(job);
+            if (!agentName && !modelName) return null;
+            return (
+              <div className="flex items-center gap-1.5 ml-[52px] mt-1">
+                {agentName && (
+                  <Badge variant="outline" className="text-[10px] font-mono bg-blue-500/5 border-blue-500/20 text-blue-600 dark:text-blue-400" data-testid="job-agent-badge">
+                    {agentName}
+                  </Badge>
+                )}
+                {modelName && (
+                  <Badge variant="outline" className="text-[10px] font-mono" data-testid="job-model-badge">
+                    {modelName}
+                  </Badge>
+                )}
+              </div>
+            );
+          })()}
         </div>
         <div className="flex items-center gap-2">
           {isActive && (
@@ -1158,24 +1166,32 @@ export default function JobDetail() {
                   <dd className="font-mono mt-0.5">{job.problem}</dd>
                 </div>
                 <Separator />
-                {job.config?.experiments?.agent_name && (
-                  <>
-                    <div>
-                      <dt className="text-muted-foreground">Agent</dt>
-                      <dd className="font-mono mt-0.5">{job.config.experiments.agent_name}</dd>
-                    </div>
-                    <Separator />
-                  </>
-                )}
-                {job.config?.experiments?.model_name && (
-                  <>
-                    <div>
-                      <dt className="text-muted-foreground">Model</dt>
-                      <dd className="font-mono mt-0.5">{job.config.experiments.model_name}</dd>
-                    </div>
-                    <Separator />
-                  </>
-                )}
+                {(() => {
+                  const agentName = getJobAgentName(job);
+                  const modelName = getJobModelName(job);
+                  return (
+                    <>
+                      {agentName && (
+                        <>
+                          <div>
+                            <dt className="text-muted-foreground">Agent</dt>
+                            <dd className="font-mono mt-0.5 break-all">{agentName}</dd>
+                          </div>
+                          <Separator />
+                        </>
+                      )}
+                      {modelName && (
+                        <>
+                          <div>
+                            <dt className="text-muted-foreground">Model</dt>
+                            <dd className="font-mono mt-0.5 break-all">{modelName}</dd>
+                          </div>
+                          <Separator />
+                        </>
+                      )}
+                    </>
+                  );
+                })()}
                 {(job.group_run_id || job.group_id) && (
                   <>
                     <div>

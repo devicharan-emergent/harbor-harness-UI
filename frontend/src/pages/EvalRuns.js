@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { getEvalStats, listEvalJobs, listGroupJobs, getEvalAggregate, cancelEvalJob, listEvalRunGroups, patchEvalRunGroup } from '@/services/evalApi';
+import { getJobAgentName, getJobModelName } from '@/lib/jobShape';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -392,11 +393,13 @@ export default function EvalRuns() {
     return detail.filter(filterPredicate);
   };
 
-  // Unique agents in a group
+  // Unique agents in a group — uses the same fallback chain as JobDetail
+  // so scratch_bench (config.agent_name) and testing_agent_bench
+  // (config.experiments.agent_name) both light up.
   const getGroupAgents = (jobsList) => {
     const agents = new Set();
     for (const j of jobsList) {
-      const name = j.config?.experiments?.agent_name;
+      const name = getJobAgentName(j);
       if (name) agents.add(name);
     }
     return [...agents];
@@ -681,16 +684,24 @@ export default function EvalRuns() {
                           <div className="flex-1 min-w-0">
                             <div className="font-mono font-medium truncate">{job.problem}</div>
                             <div className="flex items-center gap-1.5 mt-0.5">
-                              {job.config?.experiments?.agent_name && (
-                                <Badge variant="outline" className="text-[9px] font-mono px-1 py-0 bg-blue-500/5 border-blue-500/20 text-blue-600 dark:text-blue-400" data-testid={`agent-badge-${job.id}`}>
-                                  {job.config.experiments.agent_name}
-                                </Badge>
-                              )}
-                              {job.config?.experiments?.model_name && (
-                                <Badge variant="outline" className="text-[9px] font-mono px-1 py-0" data-testid={`model-badge-${job.id}`}>
-                                  {job.config.experiments.model_name}
-                                </Badge>
-                              )}
+                              {(() => {
+                                const an = getJobAgentName(job);
+                                const mn = getJobModelName(job);
+                                return (
+                                  <>
+                                    {an && (
+                                      <Badge variant="outline" className="text-[9px] font-mono px-1 py-0 bg-blue-500/5 border-blue-500/20 text-blue-600 dark:text-blue-400" data-testid={`agent-badge-${job.id}`}>
+                                        {an}
+                                      </Badge>
+                                    )}
+                                    {mn && (
+                                      <Badge variant="outline" className="text-[9px] font-mono px-1 py-0" data-testid={`model-badge-${job.id}`}>
+                                        {mn}
+                                      </Badge>
+                                    )}
+                                  </>
+                                );
+                              })()}
                               <span className="text-[9px] text-muted-foreground/50 font-mono">{job.id.substring(0, 8)}</span>
                             </div>
                           </div>
