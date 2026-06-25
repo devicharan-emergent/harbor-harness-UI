@@ -579,6 +579,23 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
       const trimmedAgentOverride = agentNameOverride.trim();
       const trimmedTemplate = templateName.trim();
 
+      // Derive the batch-level agent_name for the non-testing_agent flow
+      // from (in order):
+      //   1. The manual override input on this page
+      //   2. The `initialAgentName` prop (deep-link from the Cortex editor)
+      //   3. The first selected dataset's `attributes.agent_name` (so when
+      //      the user just picks a dataset without typing anything, the
+      //      agent baked into that dataset still rides along).
+      // This is essential when Number of Runs > 1 — each iteration builds a
+      // fresh payload and we were previously dropping `agent_name` whenever
+      // the override field happened to be empty, even though it could be
+      // resolved from a dataset attribute or the deep-link prop.
+      const derivedAgentName = (
+        trimmedAgentOverride
+        || (initialAgentName || '').trim()
+        || ((selectedProblems[0]?.attributes?.agent_name) || '').trim()
+      );
+
       for (let i = 1; i <= runsCount; i++) {
         const groupRunId = runsCount > 1
           ? `${baseGroupRunId}-run-${i}`
@@ -676,7 +693,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
         });
 
         const payload = { user_id: userId, group_run_id: groupRunId, evals };
-        if (trimmedAgentOverride) payload.agent_name = trimmedAgentOverride;
+        if (derivedAgentName) payload.agent_name = derivedAgentName;
         if (submitEph) {
           payload.eph_name = submitEph;
           payload.emergent_agents_url = `https://emergent-agents-${submitEph}-tit7tznrtq-uc.a.run.app`;
