@@ -37,40 +37,6 @@ attachOwnership(evalApiClient, [
   /\/groups\/[^/]+\/jobs(\/|$)/,
 ]);
 
-// ============ Group run comments (BFF Mongo) ============
-
-/**
- * List comments on a group run. Sorted oldest → newest.
- * GET /api/eval/groups/{group_id}/comments
- * Returns { comments: [{ comment_id, group_id, text, created_by_user_id,
- *                        created_by_email, created_by_name,
- *                        created_at, updated_at }] }
- */
-export const listGroupComments = async (groupId) => {
-  const response = await evalApiClient.get(`/groups/${groupId}/comments`);
-  return response.data;
-};
-
-/**
- * Add a comment to a group run. Requires auth (session_token via interceptor).
- * POST /api/eval/groups/{group_id}/comments  body { text }
- */
-export const createGroupComment = async (groupId, text) => {
-  const response = await evalApiClient.post(`/groups/${groupId}/comments`, { text });
-  return response.data;
-};
-
-/**
- * Delete a comment. Only the author can delete (server enforces).
- * DELETE /api/eval/groups/{group_id}/comments/{comment_id}
- */
-export const deleteGroupComment = async (groupId, commentId) => {
-  const response = await evalApiClient.delete(
-    `/groups/${groupId}/comments/${commentId}`,
-  );
-  return response.data;
-};
-
 // ============ Eval Jobs ============
 
 /**

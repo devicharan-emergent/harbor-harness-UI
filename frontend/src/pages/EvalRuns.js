@@ -14,7 +14,6 @@ import { parseApiError } from '@/lib/errorUtils';
 import { RunEvalModal } from '@/components/evals/RunEvalModal';
 import { EvalFilterBar, EMPTY_FILTERS, buildJobFilter } from '@/components/evals/EvalFilterBar';
 import { OpenInChatButton } from '@/components/evals/OpenInChatButton';
-import { GroupCommentsPanel } from '@/components/evals/GroupCommentsPanel';
 
 const STATUS_CONFIG = {
   queued: { color: 'bg-amber-500', icon: Clock, label: 'Queued' },
@@ -519,9 +518,6 @@ export default function EvalRuns() {
                       </div>
                     ) : (<>
                       <GroupAggregateSummary aggregate={groupAggregates[group.groupId]} />
-                      {!isUngrouped && (
-                        <GroupCommentsPanel groupId={group.groupId} />
-                      )}
                       <div className="space-y-1">
                       {groupJobs.map(job => (
                         <div

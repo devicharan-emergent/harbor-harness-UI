@@ -12,6 +12,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { listDatasets, listDatasetsByType, getDatasetForProblem, submitEvalJobs, submitEvalJobsWithEs, submitTestingAgentEval, checkAgentExists, getVerifierConfig } from '@/services/evalApi';
+import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { Loader2, Rocket, FileText, Search, ChevronRight, Check, AlertCircle, X } from 'lucide-react';
 import { parseApiError } from '@/lib/errorUtils';
@@ -250,7 +251,10 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
   const [storageGb, setStorageGb] = useState(10);
   const [headed, setHeaded] = useState(true);
   const [forceBuild, setForceBuild] = useState(false);
-  const [userId, setUserId] = useState('6e01d102-2641-44a2-89b8-039927baefde');
+  // user_id is now sourced from the authenticated session (no UI). The
+  // user_id stamp is what the harness uses for job ownership lookups.
+  const { user } = useAuth();
+  const userId = user?.user_id || '';
 
   // Experiment config
   const [showExpConfig, setShowExpConfig] = useState(false);
@@ -966,25 +970,6 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 </div>
               )}
 
-              {/* Eph picker (hidden in testing_agent_mode) */}
-              {!isTestingAgentMode && (
-                <div>
-                  <Label className="text-sm font-semibold">Target eph</Label>
-                  <p className="text-[11px] text-muted-foreground mt-0.5 mb-2">
-                    Pick the ephemeral deployment to evaluate against. The backend derives
-                    emergent + cortex URLs from this name.
-                    <span className="ml-1 text-amber-600 dark:text-amber-400">
-                      Readiness check temporarily disabled — submission proceeds without preflight.
-                    </span>
-                  </p>
-                  <EphPicker
-                    value={submitEph}
-                    onChange={(name) => { setSubmitEph(name); setSubmitEphReadiness(null); }}
-                    onReadiness={setSubmitEphReadiness}
-                  />
-                </div>
-              )}
-
               {/* Group Run ID — always shown */}
               <div>
                 <Label className="text-sm font-semibold">Group Run ID *</Label>
@@ -1107,20 +1092,6 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
               </div>
                 </>
               )}
-
-              {/* User ID — always shown */}
-              <div>
-                <Label className="text-sm font-semibold">User ID</Label>
-                <p className="text-[11px] text-muted-foreground mt-0.5 mb-2">
-                  UUID forwarded to the harness as <code className="font-mono">user_id</code>.
-                </p>
-                <Input
-                  value={userId}
-                  onChange={e => setUserId(e.target.value)}
-                  className="font-mono text-xs"
-                  data-testid="eval-user-id"
-                />
-              </div>
 
               {/* Agent name override — testing_agent_mode only */}
               {isTestingAgentMode && (
