@@ -2,19 +2,16 @@ import { useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
-import { Menu, Cpu, Home, GitCompare, MessageSquare, ActivitySquare, Database, CalendarClock, Boxes, Scale, FileCode2, BookMarked } from 'lucide-react';
+import { Menu, Cpu, Home, GitCompare, ActivitySquare, Database, CalendarClock, Scale, FileCode2, BookMarked } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
-import { EnvSwitcher } from './EnvSwitcher';
 import { ApiHealthIndicator } from '@/components/evals/ApiHealthIndicator';
 import { DataSourceIndicator } from './DataSourceIndicator';
 import { UserMenu } from './UserMenu';
 
 const navItems = [
   { label: 'Agents', href: '/', icon: Home },
-  { label: 'Wizard', href: '/wizard', icon: MessageSquare },
   { label: 'Evals', href: '/evals', icon: ActivitySquare },
   { label: 'Schedules', href: '/schedules', icon: CalendarClock },
-  { label: 'Cortex Agents', href: '/cortex/agents', icon: Boxes },
   { label: 'Datasets', href: '/datasets', icon: Database },
   { label: 'Dataset Views', href: '/dataset-views', icon: BookMarked },
   { label: 'Verifier Config', href: '/judge-config', icon: Scale },
@@ -74,14 +71,7 @@ export default function AppShell() {
       {/* Footer with data source, health indicator, theme toggle, and version */}
       <div className="pt-3 mt-3 border-t border-[hsl(var(--border)/0.5)] space-y-2 flex-shrink-0">
         <DataSourceIndicator />
-        {/*
-         * The harness-eval health chip is irrelevant on the Cortex Agents
-         * page — that page reads cortex_<eph> directly, not the eval API.
-         * A red "degraded" chip would make the page look broken when it's
-         * fine. Hide on /cortex/* to avoid that confusion.
-         */}
-        {!location.pathname.startsWith('/cortex/') && <ApiHealthIndicator />}
-        <EnvSwitcher />
+        <ApiHealthIndicator />
         <UserMenu />
         <div className="flex items-center justify-between px-2.5">
           <span className="text-xs text-muted-foreground">v1.0.0</span>
