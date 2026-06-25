@@ -644,44 +644,165 @@ _CSV_ATTR_COLS = {
 # new users get a working example to edit rather than a bare header.
 _CSV_TEMPLATES = {
     "scratch_bench_phased": [
+        # Single-phase example — minimum viable shape.
         {
-            "instance_id": "example_public_notes",
-            "problem_statement": "<problem>Build a simple public notes app where anyone can post a sticky note without signing in. Do NOT ask questions; build it all in one pass.</problem>",
-            "natural_language_tests": "<phase><test>Visitor can create a note and it appears in the list.</test><test>Notes persist after page reload.</test></phase>",
+            "instance_id": "example_single_phase",
+            "name": "",  # empty → backend auto-names "<type>/<instance_id>"
+            "description": "Single-phase example with 2 test cases.",
+            "tags": "example,starter",
+            "problem_statement": (
+                "<phases>"
+                "<phase>Build a simple public notes app where anyone can post a "
+                "sticky note without signing in. One page; no auth.</phase>"
+                "</phases>"
+            ),
+            "natural_language_tests": (
+                "<phases>"
+                "<phase><test_cases>"
+                "<test_case>Visitor can create a note and it appears in the list "
+                "immediately.</test_case>"
+                "<test_case>Notes persist across a full page reload.</test_case>"
+                "</test_cases></phase>"
+                "</phases>"
+            ),
             "model_name": "claude-sonnet-4-5",
         },
+        # Two-phase example — different counts of test cases per phase.
         {
-            "instance_id": "example_notes_phased",
-            "problem_statement": "<problem><phase>Phase 1: list + create notes.</phase><phase>Phase 2: add edit and delete.</phase></problem>",
-            "natural_language_tests": "<phase><test>can create a note</test></phase><phase><test>can edit a note</test><test>can delete a note</test></phase>",
+            "instance_id": "example_two_phases",
+            "name": "",
+            "description": "Two phases — phase 1 has 2 tests, phase 2 has 3 tests.",
+            "tags": "example,phased",
+            "problem_statement": (
+                "<phases>"
+                "<phase>Phase 1: list + create notes (single user, no auth).</phase>"
+                "<phase>Phase 2: add edit and delete on existing notes, plus a "
+                "5-second &quot;undo&quot; toast.</phase>"
+                "</phases>"
+            ),
+            "natural_language_tests": (
+                "<phases>"
+                "<phase><test_cases>"
+                "<test_case>Can create a note and see it in the list.</test_case>"
+                "<test_case>The list survives a page reload.</test_case>"
+                "</test_cases></phase>"
+                "<phase><test_cases>"
+                "<test_case>Editing a note updates the list in place.</test_case>"
+                "<test_case>Deleting a note removes it from the list.</test_case>"
+                "<test_case>Clicking Undo within 5 seconds restores the deleted "
+                "note.</test_case>"
+                "</test_cases></phase>"
+                "</phases>"
+            ),
+            "model_name": "claude-sonnet-4-5",
+        },
+        # Three-phase example with hints + nudge, demonstrating the full set of
+        # optional fields a scratch_bench_phased row can carry.
+        {
+            "instance_id": "example_three_phases_full",
+            "name": "",
+            "description": "Three phases; 1 / 2 / 2 test_cases respectively. Shows hints & nudge.",
+            "tags": "example,advanced",
+            "problem_statement": (
+                "<phases>"
+                "<phase>Phase 1: set up a single-room chat. No auth, no DMs.</phase>"
+                "<phase>Phase 2: add nicknames and a typing indicator.</phase>"
+                "<phase>Phase 3: add @-mentions that highlight in the recipient's "
+                "view.</phase>"
+                "</phases>"
+            ),
+            "natural_language_tests": (
+                "<phases>"
+                "<phase><test_cases>"
+                "<test_case>Two tabs see each other's messages within 1 second.</test_case>"
+                "</test_cases></phase>"
+                "<phase><test_cases>"
+                "<test_case>Each tab can pick a nickname and it shows next to "
+                "their messages.</test_case>"
+                "<test_case>Tab A sees &quot;Tab B is typing...&quot; while Tab B "
+                "is composing.</test_case>"
+                "</test_cases></phase>"
+                "<phase><test_cases>"
+                "<test_case>Typing @nick autocompletes against connected "
+                "users.</test_case>"
+                "<test_case>The mentioned user's view highlights the message "
+                "(distinct background).</test_case>"
+                "</test_cases></phase>"
+                "</phases>"
+            ),
+            "hints": "Use WebSockets for typing indicators; debounce 300ms.",
+            "nudge": "Don't worry about offline replay — focus on the live cases.",
+            "model_name": "claude-sonnet-4-5",
+            "thinking_level": "medium",
         },
     ],
     "bug_bench": [
         {
             "instance_id": "example_save_bug",
-            "problem_statement": "Saving a record shows a success toast but the value is not persisted.",
-            "natural_language_tests": "<test>Open the form, save a value, reload the page — the value is still there.</test>",
+            "name": "",
+            "description": "Single-page bug repro example.",
+            "tags": "example,form",
+            "problem_statement": (
+                "Saving a record on /settings shows a success toast but the "
+                "value is not actually persisted — reloading the page drops it."
+            ),
+            "natural_language_tests": (
+                "<test_cases>"
+                "<test_case>Open /settings, change &quot;Display name&quot; to "
+                "&quot;Aria&quot;, click Save — a success toast appears.</test_case>"
+                "<test_case>Reload the page — the field still reads "
+                "&quot;Aria&quot;.</test_case>"
+                "<test_case>Open the row directly in the API "
+                "(/api/users/me) — display_name == &quot;Aria&quot;.</test_case>"
+                "</test_cases>"
+            ),
             "repo": "org/example-repo",
             "eph_job_id": "eph-abc123",
+            "agent_name": "bug_fixer_v1",
         },
     ],
     "test_report_bench": [
         {
             "instance_id": "example_test_report",
-            "problem_statement": "Triage the failing test_report_bench run for the example app.",
-            "natural_language_tests": "<test>Repro the failure, then confirm the fix resolves it.</test>",
+            "name": "",
+            "description": "Triage a failing test_report_bench run.",
+            "tags": "example,triage",
+            "problem_statement": (
+                "Triage the failing run for the example app and propose a "
+                "minimal fix. The login button on /signin does nothing."
+            ),
+            "natural_language_tests": (
+                "<test_cases>"
+                "<test_case>Open /signin, enter valid creds, click Login — the "
+                "user is redirected to /home.</test_case>"
+                "<test_case>An invalid password shows an inline error.</test_case>"
+                "</test_cases>"
+            ),
             "repo": "org/example-repo",
             "eph_job_id": "eph-abc123",
             "testing_hitl": "The login button does nothing after entering credentials.",
             "Bug_description": "Login submit handler is wired to a no-op.",
             "Bug_fix_status": "pending",
+            "agent_name": "test_report_bench_v1",
         },
     ],
     "testing_agent_bench": [
         {
             "instance_id": "example_fork_job",
-            "problem_statement": "Please continue with the task and report what you find.",
-            "natural_language_tests": "1. The login button is unresponsive.\n2. The save button shows a toast but no persistence.",
+            "name": "",
+            "description": "HITL → golden output example. Both fields are plain text.",
+            "tags": "example",
+            "problem_statement": (
+                "Please continue with the task and report what you find. "
+                "Login button is unresponsive; save toast appears but no "
+                "persistence."
+            ),
+            "natural_language_tests": (
+                "1. The login button is unresponsive on /signin.\n"
+                "2. Save on /settings shows a toast but the value is not "
+                "persisted across reload.\n"
+                "3. Both issues blocked the user from completing the QA flow."
+            ),
             "agent_name": "testing-agent-v3-gpt-5-2-codex",
             "prod_job_id": "example_fork_job",
             "model_name": "claude-sonnet-4-5",
@@ -690,13 +811,25 @@ _CSV_TEMPLATES = {
     "wingman_bench": [
         {
             "instance_id": "example_wingman_task",
-            "problem_statement": "Connect Slack and post a message to the team channel summarising open PRs.",
-            "natural_language_tests": "<test>A summary message appears in #team-eng.</test>",
+            "name": "",
+            "description": "Wingman example — plain text + comma-separated integrations.",
+            "tags": "example",
+            "problem_statement": (
+                "Connect Slack + GitHub and post a daily message to "
+                "#team-eng summarising any PRs that opened in the last 24h."
+            ),
+            "natural_language_tests": (
+                "1. The agent connects Slack successfully.\n"
+                "2. The agent connects GitHub successfully.\n"
+                "3. A summary message appears in #team-eng listing the open "
+                "PRs from the last 24h."
+            ),
             "wingman_id": "wm-001",
             "user_id": "u-001",
             "expected_integrations": "slack,github",
             "max_iterations": "7",
             "model_name": "claude-sonnet-4-5",
+            "agent_name": "wingman_agent_v1",
         },
     ],
 }

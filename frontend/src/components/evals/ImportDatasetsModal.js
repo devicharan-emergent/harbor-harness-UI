@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { importDatasetsCSV } from '@/services/evalApi';
+import evalApiClient from '@/services/evalApi';
 import { parseApiError } from '@/lib/errorUtils';
 
 export const IMPORT_DATASET_TYPES = [
@@ -40,20 +41,9 @@ export const IMPORT_DATASET_TYPES = [
   { value: 'wingman_bench', label: 'Wingman Bench' },
 ];
 
-// Per-type expected CSV header. Attribute columns must match harness
-// attribute field names exactly (see handoff spec Part 3).
-const HEADER_TEMPLATES = {
-  bug_bench:
-    'instance_id,problem_statement,natural_language_tests,repo,eph_job_id,agent_name,base_commit,pull_number,issue_number',
-  scratch_bench_phased:
-    'instance_id,problem_statement,natural_language_tests,subagents,preview_url,image,model_name,system_prompt,thinking_level,hints,nudge',
-  test_report_bench:
-    'instance_id,problem_statement,natural_language_tests,repo,eph_job_id,testing_hitl,Bug_description,Bug_fix_status,request_id,base_commit,pull_number,issue_number',
-  testing_agent_bench:
-    'instance_id,agent_name,problem_statement,natural_language_tests,prod_job_id,model_name',
-  wingman_bench:
-    'instance_id,problem_statement,natural_language_tests,wingman_id,user_id,expected_integrations,max_iterations,agent_id,model_name',
-};
+// (Header templates live in the backend `/eval/datasets/template` route now —
+// it ships rich multi-phase examples per type so users can see the canonical
+// XML shape: `<phases><phase><test_cases><test_case>…</test_case></test_cases></phase></phases>`.)
 
 const MAX_TOTAL_BYTES = 32 * 1024 * 1024;
 
@@ -131,17 +121,33 @@ export function ImportDatasetsModal({ open, onClose, onImported, defaultType }) 
     }
   };
 
-  const downloadHeaderTemplate = () => {
-    const header = HEADER_TEMPLATES[datasetType] || 'instance_id,problem_statement';
-    const blob = new Blob([header + '\n'], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${datasetType}_template.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+  const downloadHeaderTemplate = async () => {
+    try {
+      // Hit the BFF route — backend ships a per-type template with
+      // multi-phase, multi-test_case canonical XML examples baked in,
+      // so users get a CSV they can edit in-place instead of staring
+      // at an empty header row.
+      const resp = await evalApiClient.get('/datasets/template', {
+        params: { dataset_type: datasetType },
+        responseType: 'blob',
+      });
+      const cd = resp.headers['content-disposition'] || resp.headers['Content-Disposition'] || '';
+      const m = /filename\*?=(?:UTF-8'')?["']?([^"';]+)["']?/i.exec(cd);
+      const filename = (m && decodeURIComponent(m[1])) || `${datasetType}_template.csv`;
+      const url = URL.createObjectURL(resp.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast.success(`Downloaded ${filename}`, {
+        description: 'Includes example rows — delete or edit them before uploading.',
+      });
+    } catch (err) {
+      toast.error(parseApiError(err, 'Failed to download template'));
+    }
   };
 
   const createdCount = result?.created?.length ?? 0;
@@ -190,10 +196,10 @@ export function ImportDatasetsModal({ open, onClose, onImported, defaultType }) 
                 className="shrink-0"
                 disabled={uploading}
                 data-testid="import-download-template-btn"
-                title="Download a CSV with just the header row for this type"
+                title="Download a CSV with the canonical header + example rows for this dataset type"
               >
                 <Download className="w-3.5 h-3.5 mr-1.5" />
-                Header
+                Template
               </Button>
             </div>
           </div>
