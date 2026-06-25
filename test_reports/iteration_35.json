@@ -1,0 +1,43 @@
+{
+  "summary": "Iter 35 — Editable Eval Run Group (name + comment) + JobDetail extras. Backend: 8/8 pytest tests PASS — GET list, GET by id (200/404), PATCH (200, empty body 400, comment='' clears, 404 for missing id), and POST /api/eval/jobs forwarding of group_name + comment. Frontend /evals: ALL group-card assertions PASS — title shows group_name with fallback, subtitle shows group_run_id mono, comment positioned LEFT of time and RIGHT of avg-score (DOM idx 3, time idx 4; bbox confirmed comment.x<time.x), pencil opens edit-group-dialog without toggling expand state (data-state stayed 'closed'), all 5 modal data-testids present, save disabled when name empty, PATCH /api/eval/eval-run-groups/{id} called with {group_name, comment}, modal closes, optimistic update visible immediately (toast 'Group updated' shown). 18/21 groups with no comment correctly skip group-comment-* element. JobDetail extras: CRITICAL CRASH — JobDetail.js uses <Info/> icon at L777 but never imports it from lucide-react, causing 'ReferenceError: Info is not defined' that triggers the React Router ErrorBoundary on EVERY job that has phase.extra[]. Render path fully broken. Job WITHOUT extras renders fine (no extra-bugs section), which confirms the crash is gated by the broken extras render.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "JobDetail.js",
+        "issue": "ReferenceError: Info is not defined — <Info/> used at line 777 in the extra-bugs row render but missing from the lucide-react import at line 11. ErrorBoundary catches it and replaces the entire JobDetail page with 'Unexpected Application Error! Info is not defined' for any job that has phase_results[].extra[] populated. Verified live on job 6990e691-7655-45a8-ba32-7b8b7d1016d4 (has 7 extras).",
+        "selector": "[data-testid$='-extra-bugs']",
+        "priority": "CRITICAL"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_eval_run_groups.py",
+    "/app/test_reports/pytest/pytest_iter35.xml"
+  ],
+  "action_items": [
+    "URGENT: Add `Info` to the lucide-react import in /app/frontend/src/pages/JobDetail.js line 11 — currently imports {ArrowLeft, Copy, XCircle, Loader2, CheckCircle, Clock, AlertTriangle, Cpu, ActivitySquare, Ban, FileText, ChevronDown, ChevronRight, ExternalLink} but Info is missing. This is a one-line fix: append `, Info` to the import. Without it, ANY job with phase.extra populated renders a full-page React Router ErrorBoundary instead of the job detail.",
+    "After fix: re-verify by loading /evals/6990e691-7655-45a8-ba32-7b8b7d1016d4 — should render the phase-N-extra-bugs section in blue with 7 extra-bug-* rows."
+  ],
+  "critical_code_review_comments": [
+    "JobDetail.js: missing Info import — would have been caught by `yarn lint` or a Storybook render. Recommend adding lint to CI pipeline.",
+    "EvalRuns.js comment placement and optimistic-update flow are clean — uses functional setState rollback on PATCH failure. Good.",
+    "Backend proxy passes only `group_name` and `comment` (whitelist) on PATCH — correct, prevents harness from receiving stray fields.",
+    "Pytest test_post_accepts_group_name_and_comment passes with 400 from harness (empty evals); the assertion that the proxy didn't single out group_name/comment in the error works but is loose — consider mocking the harness for stronger assertion. Non-blocking."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_eval_run_groups.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (8/8 pytest)",
+    "frontend": "92% — all /evals group/edit/comment assertions PASS (11/11). JobDetail extras render FAILS due to ReferenceError (1/1 critical failure)."
+  },
+  "test_credentials": "localStorage.acm_session_token=pw_emergent_gate_post; user_id=0ee59a27-db9c-4647-aeee-f72173fcd757; email=TEST_pw_user@emergent.com",
+  "seed_data_creation": "None — used existing harness group `tst-glm-2026-06-25T12-17-49-820Z-1qbj` (which already had group_name='tst-glm' and a non-empty comment) for visual + PATCH tests. Restored original comment via direct API after the optimistic-update test.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "After main agent adds `Info` to JobDetail.js lucide import, re-test by navigating to /evals/6990e691-7655-45a8-ba32-7b8b7d1016d4 (7 extras across phases). Assert: (1) [data-testid='phase-N-extra-bugs'] container exists with blue classes; (2) inside, [data-testid='extra-bug-N-0..6'] rows exist with text-blue-700/dark:text-blue-300 + bg-blue-500/10 + border-blue-500/30; (3) [data-testid='phase-N-extra-count'] badge shows the correct count. For the empty-extras assertion, use job a1cdb092-28ee-46fd-88e6-a3c033b3160d (verified no extras). For backend regression, just run `pytest /app/backend/tests/test_eval_run_groups.py -v`.",
+  "rca_of_the_issue": "Root cause: JobDetail.js imports lucide icons at L11 but `Info` (used at L777 inside the phase.extra[].map row render) was never added to the destructured import list. Reproduction: navigate to /evals/6990e691-7655-45a8-ba32-7b8b7d1016d4 — page replaced by ErrorBoundary fallback with `ReferenceError: Info is not defined at JobDetail (bundle.js:49672:36)`. Mitigation: add `Info` to the lucide-react import. Why iter 34 didn't catch this: feature was new this iter and prior iter didn't render extras."
+}

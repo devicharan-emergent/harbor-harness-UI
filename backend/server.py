@@ -1434,6 +1434,13 @@ async def proxy_submit_eval(body: dict):
         if group_value:
             payload["group_run_id"] = group_value
 
+        # New editable-group fields (harness mints the group_run_id UUID
+        # server-side when these are present; we just pass them through).
+        if "group_name" in body and body["group_name"] is not None:
+            payload["group_name"] = body["group_name"]
+        if "comment" in body and body["comment"] is not None:
+            payload["comment"] = body["comment"]
+
         # Batch-level agent override (forwarded as-is)
         if body.get("agent_name"):
             payload["agent_name"] = body["agent_name"]
