@@ -1127,7 +1127,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
 
               {/* Runs — inline single-line pattern */}
               <div className="flex items-center gap-2">
-                <Label className="text-sm font-semibold whitespace-nowrap">Runs : number of runs</Label>
+                <Label className="text-sm font-semibold whitespace-nowrap">Runs</Label>
                 <Input
                   type="text"
                   inputMode="numeric"
@@ -1386,7 +1386,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 <div className="flex items-center gap-1.5">
                   <Rocket className="w-4 h-4 text-muted-foreground" />
                   <span className="text-muted-foreground">Total jobs:</span>
-                  <span className="font-mono font-bold">{totalJobs}</span>
+                  <span className="font-mono font-bold" data-testid="review-total-jobs">{totalJobs * numRuns}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="text-muted-foreground">Group:</span>
@@ -1485,39 +1485,24 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 Next <ChevronRight className="w-4 h-4 ml-1" />
               </Button>
             ) : (
-              <>
-                {/* Jobs count summary — separate, not inside the button.
-                    Shows "{N} jobs" (or "{base} × {runs} = {N} jobs" when
-                    numRuns > 1). Submit button stays minimal. */}
-                {totalJobs > 0 && (
-                  <span
-                    className="text-xs text-muted-foreground font-mono mr-1"
-                    data-testid="review-jobs-count"
-                  >
-                    {numRuns > 1
-                      ? `${totalJobs} × ${numRuns} = ${totalJobs * numRuns} jobs`
-                      : `${totalJobs} job${totalJobs > 1 ? 's' : ''}`}
-                  </span>
-                )}
-                <Button
-                  onClick={handleSubmit}
-                  disabled={
-                    submitting || totalJobs === 0 ||
-                    agentVerified === false
-                    // NOTE: eph readiness gate temporarily disabled (see Next btn).
-                  }
-                  title={
-                    agentVerified === false ? 'Agent name failed verification — fix it or clear the eph check' :
-                    undefined
-                  }
-                  data-testid="submit-eval-button"
-                >
-                  {submitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Rocket className="w-4 h-4 mr-2" />}
-                  {runProgress
-                    ? `Submitting ${runProgress.current}/${runProgress.total}…`
-                    : 'Submit'}
-                </Button>
-              </>
+              <Button
+                onClick={handleSubmit}
+                disabled={
+                  submitting || totalJobs === 0 ||
+                  agentVerified === false
+                  // NOTE: eph readiness gate temporarily disabled (see Next btn).
+                }
+                title={
+                  agentVerified === false ? 'Agent name failed verification — fix it or clear the eph check' :
+                  undefined
+                }
+                data-testid="submit-eval-button"
+              >
+                {submitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Rocket className="w-4 h-4 mr-2" />}
+                {runProgress
+                  ? `Submitting ${runProgress.current}/${runProgress.total}…`
+                  : 'Submit'}
+              </Button>
             )}
           </div>
         </DialogFooter>

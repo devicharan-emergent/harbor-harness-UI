@@ -1140,10 +1140,18 @@ export default function JobDetail() {
                     </a>
                   )}
                   {cortexJobId && (
-                    <div className="flex items-center gap-2 text-xs">
+                    <a
+                      href={`https://app.emergent.sh/home?job_id=${cortexJobId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 text-xs text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300 underline-offset-2 hover:underline"
+                      data-testid="quicklinks-cortex"
+                      title="Open the Cortex job in Emergent in a new tab"
+                    >
+                      <ExternalLink className="w-3 h-3 flex-shrink-0" />
                       <span className="text-muted-foreground">Cortex:</span>
-                      <span className="font-mono text-[10px]">{cortexJobId}</span>
-                    </div>
+                      <span className="font-mono text-[10px] break-all">{cortexJobId}</span>
+                    </a>
                   )}
                 </CardContent>
               </Card>
