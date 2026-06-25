@@ -901,20 +901,6 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                     data-testid="dataset-search-input"
                   />
                 </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-9 whitespace-nowrap"
-                  onClick={handleSelectAllVisible}
-                  disabled={loadingDatasets || filteredDatasets.length === 0}
-                  data-testid="select-all-datasets"
-                  title={filteredAllSelected ? 'Deselect every dataset currently visible' : 'Select every dataset currently visible'}
-                >
-                  {filteredAllSelected
-                    ? `Clear (${filteredDatasets.length})`
-                    : `Select all (${filteredDatasets.length})`}
-                </Button>
                 <DatasetViewsDropdown
                   label={loadingView ? 'Loading…' : 'Load view'}
                   testId="eval-load-view-btn"
@@ -971,6 +957,23 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
               )}
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-3" style={{ minHeight: '300px' }}>
+                <div className="flex flex-col">
+                  <div className="flex items-center justify-between px-1 pb-1.5 text-[11px] text-muted-foreground">
+                    <span data-testid="eval-list-count">
+                      {filteredDatasets.length} dataset{filteredDatasets.length === 1 ? '' : 's'}
+                      {selectedProblems.length > 0 && ` · ${selectedProblems.length} selected`}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleSelectAllVisible}
+                      disabled={loadingDatasets || filteredDatasets.length === 0}
+                      className="text-[11px] text-foreground/80 hover:text-foreground underline underline-offset-2 disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
+                      data-testid="select-all-datasets"
+                      title={filteredAllSelected ? 'Deselect every dataset currently visible' : 'Select every dataset currently visible'}
+                    >
+                      {filteredAllSelected ? `Clear all (${filteredDatasets.length})` : `Select all (${filteredDatasets.length})`}
+                    </button>
+                  </div>
                 <ScrollArea className="h-[350px] border rounded-lg">
                   {loadingDatasets ? (
                     <div className="flex items-center justify-center py-12"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
@@ -1054,6 +1057,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                     </div>
                   )}
                 </ScrollArea>
+                </div>
 
                 <div className="border rounded-lg p-3 h-[350px] overflow-y-auto no-scrollbar">
                   {loadingPreview ? (
@@ -1107,100 +1111,45 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 />
               </div>
 
-              {/* Run Nx — compact inline pattern: "Run [N] x" */}
-              <div>
-                <Label className="text-sm font-semibold">Runs</Label>
-                <div className="flex items-center gap-1.5 mt-1.5">
-                  <span className="text-sm text-muted-foreground font-mono">Run</span>
-                  <Input
-                    type="text"
-                    inputMode="numeric"
-                    value={numRunsRaw}
-                    onChange={e => {
-                      // Allow any digit-only text (incl. empty). Strip
-                      // non-digits silently so paste of '3,000' becomes '3000'.
-                      const raw = (e.target.value || '').replace(/[^0-9]/g, '');
-                      setNumRunsRaw(raw);
-                    }}
-                    onBlur={() => {
-                      // Snap to a valid value on blur so the user sees the
-                      // effective number that will actually be submitted.
-                      const n = Math.trunc(Number(numRunsRaw));
-                      if (!Number.isFinite(n) || n < 1) { setNumRunsRaw('1'); return; }
-                      setNumRunsRaw(String(Math.min(NUM_RUNS_MAX, n)));
-                    }}
-                    className="font-mono text-sm w-16 text-center"
-                    data-testid="eval-num-runs"
-                  />
-                  <span className="text-sm text-muted-foreground font-mono">x</span>
-                  <span className="text-[10px] text-muted-foreground ml-2">max {NUM_RUNS_MAX}</span>
-                </div>
-              </div>
-
-              {/* Comment — collapsed by default (optional) */}
-              <Collapsible>
-                <CollapsibleTrigger
-                  className="w-full flex items-center justify-between text-xs text-muted-foreground hover:text-foreground border-b border-border/40 pb-1.5 [&[data-state=open]>svg]:rotate-180"
-                  data-testid="toggle-comment"
-                >
-                  <span className="font-semibold">Comment{groupComment ? ' ·' : ''}{groupComment ? <span className="ml-1 italic font-normal text-foreground/80">{groupComment.length} chars</span> : ''}</span>
-                  <ChevronDown className="w-3.5 h-3.5 transition-transform" />
-                </CollapsibleTrigger>
-                <CollapsibleContent className="pt-2">
-                  <Textarea
-                    value={groupComment}
-                    onChange={e => setGroupComment(e.target.value)}
-                    rows={2}
-                    placeholder="What is this batch testing?"
-                    className="text-sm resize-none"
-                    data-testid="eval-group-comment"
-                  />
-                </CollapsibleContent>
-              </Collapsible>
-
+              {/* Agent name — always visible (moved above and out of collapse) */}
               {!isTestingAgentMode && (
-                <>
-                  {/* Template — collapsed */}
-                  <Collapsible>
-                    <CollapsibleTrigger
-                      className="w-full flex items-center justify-between text-xs text-muted-foreground hover:text-foreground border-b border-border/40 pb-1.5 [&[data-state=open]>svg]:rotate-180"
-                      data-testid="toggle-template"
-                    >
-                      <span className="font-semibold">Template name{templateName ? <span className="ml-1 font-mono font-normal text-foreground/80">· {templateName}</span> : ''}</span>
-                      <ChevronDown className="w-3.5 h-3.5 transition-transform" />
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="pt-2">
-                      <Input
-                        value={templateName}
-                        onChange={e => setTemplateName(e.target.value)}
-                        placeholder="e.g. task_manager, ecom_store"
-                        className="font-mono text-sm"
-                        data-testid="eval-template-name"
-                      />
-                    </CollapsibleContent>
-                  </Collapsible>
-
-                  {/* Agent name — collapsed; eph input REMOVED per spec */}
-                  <Collapsible>
-                    <CollapsibleTrigger
-                      className="w-full flex items-center justify-between text-xs text-muted-foreground hover:text-foreground border-b border-border/40 pb-1.5 [&[data-state=open]>svg]:rotate-180"
-                      data-testid="toggle-agent-name"
-                    >
-                      <span className="font-semibold">Agent name{agentNameOverride.trim() ? <span className="ml-1 font-mono font-normal text-foreground/80">· {agentNameOverride.trim()}</span> : ''}</span>
-                      <ChevronDown className="w-3.5 h-3.5 transition-transform" />
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="pt-2">
-                      <Input
-                        value={agentNameOverride}
-                        onChange={e => setAgentNameOverride(e.target.value)}
-                        placeholder="e.g. full_stack_app_builder_cloud_v8_sonnet_4_5"
-                        className="font-mono text-sm"
-                        data-testid="eval-agent-name-override"
-                      />
-                    </CollapsibleContent>
-                  </Collapsible>
-                </>
+                <div>
+                  <Label className="text-sm font-semibold">Agent name</Label>
+                  <Input
+                    value={agentNameOverride}
+                    onChange={e => setAgentNameOverride(e.target.value)}
+                    placeholder="e.g. full_stack_app_builder_cloud_v8_sonnet_4_5"
+                    className="font-mono text-sm mt-1.5"
+                    data-testid="eval-agent-name-override"
+                  />
+                </div>
               )}
+
+              {/* Runs — inline single-line pattern */}
+              <div className="flex items-center gap-2">
+                <Label className="text-sm font-semibold whitespace-nowrap">Runs : number of runs</Label>
+                <Input
+                  type="text"
+                  inputMode="numeric"
+                  value={numRunsRaw}
+                  onChange={e => {
+                    // Allow any digit-only text (incl. empty). Strip
+                    // non-digits silently so paste of '3,000' becomes '3000'.
+                    const raw = (e.target.value || '').replace(/[^0-9]/g, '');
+                    setNumRunsRaw(raw);
+                  }}
+                  onBlur={() => {
+                    // Snap to a valid value on blur so the user sees the
+                    // effective number that will actually be submitted.
+                    const n = Math.trunc(Number(numRunsRaw));
+                    if (!Number.isFinite(n) || n < 1) { setNumRunsRaw('1'); return; }
+                    setNumRunsRaw(String(Math.min(NUM_RUNS_MAX, n)));
+                  }}
+                  className="font-mono text-sm w-16 text-center"
+                  data-testid="eval-num-runs"
+                />
+                <span className="text-[10px] text-muted-foreground">max {NUM_RUNS_MAX}</span>
+              </div>
 
               {/* User ID — collapsed; defaults to logged-in user, override
                   when stamping jobs on behalf of another account */}
@@ -1378,6 +1327,17 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 {showExpConfig && (
                   <div className="mt-3 space-y-3 pl-4 border-l-2 border-border">
                     <div>
+                      <Label className="text-xs">Comment <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                      <Textarea
+                        value={groupComment}
+                        onChange={e => setGroupComment(e.target.value)}
+                        rows={2}
+                        placeholder="What is this batch testing?"
+                        className="text-xs resize-none mt-1"
+                        data-testid="eval-group-comment"
+                      />
+                    </div>
+                    <div>
                       <Label className="text-xs">Image</Label>
                       <Input value={expImage} onChange={e => setExpImage(e.target.value)} className="font-mono text-xs" placeholder="e.g. us-central1-docker.pkg.dev/..." />
                     </div>
@@ -1461,14 +1421,9 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                     <div><span className="text-muted-foreground">Group:</span> <span className="font-mono">{groupName}</span></div>
                     <div><span className="text-muted-foreground">User:</span> <span className="font-mono">{userId}</span></div>
                     {numRuns > 1 && (
-                      <div className="col-span-2">
+                      <div>
                         <span className="text-muted-foreground">Runs:</span>{' '}
                         <span className="font-mono">{numRuns}</span>
-                        <span className="text-muted-foreground"> — each gets its own</span>{' '}
-                        <code className="font-mono text-[10px]">group_run_id</code>
-                        <span className="text-muted-foreground"> with</span>{' '}
-                        <code className="font-mono text-[10px]">-run-N</code>{' '}
-                        <span className="text-muted-foreground">suffix ({totalJobs * numRuns} total jobs)</span>
                       </div>
                     )}
                     {isTestingAgentMode ? (
@@ -1530,32 +1485,39 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 Next <ChevronRight className="w-4 h-4 ml-1" />
               </Button>
             ) : (
-              <Button
-                onClick={handleSubmit}
-                disabled={
-                  submitting || totalJobs === 0 ||
-                  agentVerified === false
-                  // NOTE: eph readiness gate temporarily disabled (see Next btn).
-                }
-                title={
-                  agentVerified === false ? 'Agent name failed verification — fix it or clear the eph check' :
-                  undefined
-                }
-                data-testid="submit-eval-button"
-              >
-                {submitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Rocket className="w-4 h-4 mr-2" />}
-                {runProgress
-                  ? `Submitting ${runProgress.current}/${runProgress.total}…`
-                  : (
-                    <>
-                      Submit {totalJobs > 0 && (
-                        numRuns > 1
-                          ? `(${totalJobs} × ${numRuns} = ${totalJobs * numRuns} jobs)`
-                          : `(${totalJobs} job${totalJobs > 1 ? 's' : ''})`
-                      )}
-                    </>
-                  )}
-              </Button>
+              <>
+                {/* Jobs count summary — separate, not inside the button.
+                    Shows "{N} jobs" (or "{base} × {runs} = {N} jobs" when
+                    numRuns > 1). Submit button stays minimal. */}
+                {totalJobs > 0 && (
+                  <span
+                    className="text-xs text-muted-foreground font-mono mr-1"
+                    data-testid="review-jobs-count"
+                  >
+                    {numRuns > 1
+                      ? `${totalJobs} × ${numRuns} = ${totalJobs * numRuns} jobs`
+                      : `${totalJobs} job${totalJobs > 1 ? 's' : ''}`}
+                  </span>
+                )}
+                <Button
+                  onClick={handleSubmit}
+                  disabled={
+                    submitting || totalJobs === 0 ||
+                    agentVerified === false
+                    // NOTE: eph readiness gate temporarily disabled (see Next btn).
+                  }
+                  title={
+                    agentVerified === false ? 'Agent name failed verification — fix it or clear the eph check' :
+                    undefined
+                  }
+                  data-testid="submit-eval-button"
+                >
+                  {submitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Rocket className="w-4 h-4 mr-2" />}
+                  {runProgress
+                    ? `Submitting ${runProgress.current}/${runProgress.total}…`
+                    : 'Submit'}
+                </Button>
+              </>
             )}
           </div>
         </DialogFooter>
