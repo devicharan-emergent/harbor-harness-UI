@@ -75,21 +75,31 @@ export default function DatasetsPage() {
   const [selectedKeys, setSelectedKeys] = useState(new Set());
   const [exporting, setExporting] = useState(false);
 
-  // Dataset views (saved selections). When `activeView` is set the table
-  // filters down to its items only. The `?view=<id>` query param deep-links
-  // straight into a view (e.g. from the /dataset-views page or the sidebar).
+  // Dataset views (saved selections). When `activeView` is set:
+  //  • the view's items are pre-selected (cross-page selection persists)
+  //  • by default we narrow the table to *only* show those items
+  //    (`showViewItemsOnly` ON), with a wider GET window so all of the
+  //    view's items are fetched in one go. The user can toggle the
+  //    filter off via the chip's "show all" link to add new items.
   const [activeView, setActiveView] = useState(null);
   const [saveViewOpen, setSaveViewOpen] = useState(false);
+  const [showViewItemsOnly, setShowViewItemsOnly] = useState(true);
   const [searchParams, setSearchParams] = useSearchParams();
 
   const fetchDatasets = useCallback(async () => {
     setLoading(true);
     try {
       let data;
-      if (typeFilter === 'all') {
-        data = await listDatasets({ limit: pageSize, offset: page * pageSize });
+      // When narrowing to a loaded view's items, widen the fetch window
+      // so every item in the view actually shows up (the harness caps
+      // limit=200). Otherwise use normal pagination.
+      const narrowToView = activeView && showViewItemsOnly;
+      const limit = narrowToView ? 200 : pageSize;
+      const offset = narrowToView ? 0 : page * pageSize;
+      if (narrowToView || typeFilter === 'all') {
+        data = await listDatasets({ limit, offset });
       } else {
-        data = await listDatasetsByType(typeFilter, { limit: pageSize, offset: page * pageSize });
+        data = await listDatasetsByType(typeFilter, { limit, offset });
       }
       setDatasets(data.datasets || []);
     } catch (error) {
@@ -99,7 +109,7 @@ export default function DatasetsPage() {
     } finally {
       setLoading(false);
     }
-  }, [typeFilter, page]);
+  }, [typeFilter, page, activeView, showViewItemsOnly]);
 
   useEffect(() => {
     fetchDatasets();
