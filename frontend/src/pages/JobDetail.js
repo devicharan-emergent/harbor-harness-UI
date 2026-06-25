@@ -783,8 +783,17 @@ export default function JobDetail() {
                         </div>
                       )}
 
-                      {/* Phase Lint Report */}
-                      {phase.lint_report && phase.lint_report.raw_output?.files?.some(f => f.error_count > 0) && (
+                      {/* Phase Lint Report — handles three shapes:
+                          (a) populated: raw_output.files[] with errors → full breakdown
+                          (b) degraded:   lint_report.error string → red chip
+                          (c) clean:      score present, no errors → small green chip */}
+                      {phase.lint_report && (() => {
+                        const lr = phase.lint_report;
+                        const hasFileErrors = lr.raw_output?.files?.some(f => f.error_count > 0);
+                        const errMsg = lr.error || lr.message;
+                        const score = lr.normalized_score ?? lr.overall_score ?? phase.lint_score;
+                        if (hasFileErrors) {
+                          return (
                         <Collapsible className="mt-2">
                           <div className="rounded-lg border border-red-400/20 bg-red-50/40 dark:bg-red-950/20">
                             {/* Header / trigger */}
@@ -844,7 +853,38 @@ export default function JobDetail() {
                             </CollapsibleContent>
                           </div>
                         </Collapsible>
-                      )}
+                          );
+                        }
+                        // Degraded — lint service returned an error string
+                        if (errMsg) {
+                          return (
+                            <div
+                              className="mt-2 rounded-lg border border-amber-400/30 bg-amber-50/40 dark:bg-amber-950/20 px-3 py-2 text-[11px] flex items-center gap-2"
+                              data-testid={`phase-${phaseIdx}-lint-error`}
+                            >
+                              <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 flex-shrink-0" />
+                              <span className="text-amber-700 dark:text-amber-400 font-semibold">Lint Report unavailable</span>
+                              <span className="text-muted-foreground font-mono text-[10px] truncate" title={errMsg}>· {errMsg}</span>
+                            </div>
+                          );
+                        }
+                        // Clean — score present but no errors, just show a green chip
+                        if (score != null) {
+                          return (
+                            <div
+                              className="mt-2 rounded-lg border border-emerald-400/30 bg-emerald-50/40 dark:bg-emerald-950/20 px-3 py-2 text-[11px] flex items-center gap-2"
+                              data-testid={`phase-${phaseIdx}-lint-clean`}
+                            >
+                              <CheckCircle className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                              <span className="text-emerald-700 dark:text-emerald-400 font-semibold">Lint Report</span>
+                              <span className="text-muted-foreground font-mono text-[10px]">
+                                · no issues · score {(Number(score) * 100).toFixed(0)}%
+                              </span>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
 
                       {phaseIdx < phaseResults.length - 1 && <Separator />}
                     </div>

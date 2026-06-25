@@ -737,6 +737,12 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
             group_name: runGroupName,
             items,
           };
+          // Always stamp the batch-level `agent_name` so the harness +
+          // downstream group views can identify the agent without
+          // peeking into items[]. Use the same resolution chain as the
+          // standard branch (override → deep-link prop → dataset attr).
+          const batchAgent = derivedAgentName || (items[0]?.agent_name || '').trim();
+          if (batchAgent) batchBody.agent_name = batchAgent;
           if (trimmedComment) batchBody.comment = trimmedComment;
           if (userId.trim()) batchBody.user_id = userId.trim();
           // Only stamp the saved judge config when the user has actually
