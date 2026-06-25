@@ -12,8 +12,25 @@ const evalApiClient = axios.create({
   timeout: 30000,
 });
 
-// Inject created_by into every eval-job + group-jobs request. Datasets,
-// cortex agent checks, stats, and health are shared resources and stay as-is.
+// Attach the session token as ?access_token=<acm_session_token> on every
+// /api/eval/* request — protected routes (e.g. comments POST/DELETE) rely on
+// `_get_session_user` resolving the token from cookie / Authorization /
+// access_token query param. Without this interceptor the auth helper never
+// sees the token and returns 401.
+evalApiClient.interceptors.request.use((config) => {
+  let token = null;
+  try { token = window.localStorage.getItem('acm_session_token') || null; } catch { /* ignore */ }
+  if (token) {
+    config.params = { ...(config.params || {}), access_token: token };
+  }
+  return config;
+});
+
+// Inject created_by into write requests for eval-job + group-jobs endpoints.
+// Datasets, cortex agent checks, stats, and health are shared resources and
+// stay as-is. Reads (GET/DELETE) intentionally skip injection — server-side
+// `created_by` filtering for "Mine only" is opt-in by the caller passing the
+// param explicitly (see EvalRuns.fetchJobs).
 attachOwnership(evalApiClient, [
   /\/jobs(\/|$|-with-es$)/,
   /\/testing-agent-evals(\/|$)/,
