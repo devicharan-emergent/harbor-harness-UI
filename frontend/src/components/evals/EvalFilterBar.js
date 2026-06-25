@@ -22,25 +22,26 @@ export const EMPTY_FILTERS = {
 // Build the predicate function used to filter eval jobs. Exported so EvalRuns
 // can apply the same predicate to both the flat job list and the per-group
 // detail jobs fetched on expand.
-// `currentUserId` is the authenticated user's user_id (UUID) — when present
+// `currentUserCreatedBy` is the authenticated user's `created_by` identity
+// (now the email — the harness migrated off the user_id UUID). When present
 // AND filters.mineOnly is on, jobs whose `created_by` doesn't match are
 // hidden. Server already filters, but stale cached lists or jobs from older
 // flows that didn't stamp `created_by` would otherwise leak through.
-export function buildJobFilter(filters, currentUserId = null) {
+export function buildJobFilter(filters, currentUserCreatedBy = null) {
   const batch = (filters.batch || '').trim().toLowerCase();
   const agent = (filters.agent || '').trim().toLowerCase();
   const prompt = (filters.prompt || '').trim().toLowerCase();
   const from = filters.dateFrom ? new Date(filters.dateFrom + 'T00:00:00').getTime() : null;
   const to = filters.dateTo ? new Date(filters.dateTo + 'T23:59:59').getTime() : null;
   const mode = filters.mode === 'or' ? 'or' : 'and';
-  const mineOnly = Boolean(filters.mineOnly) && Boolean(currentUserId);
+  const mineOnly = Boolean(filters.mineOnly) && Boolean(currentUserCreatedBy);
 
   return (job) => {
     // Mine-only is a hard AND filter regardless of mode — it's an
     // identity scope, not a "match any" criterion.
     if (mineOnly) {
       const owner = job.created_by || job.config?.created_by || '';
-      if (owner !== currentUserId) return false;
+      if (owner !== currentUserCreatedBy) return false;
     }
     const checks = [];
     if (batch) {

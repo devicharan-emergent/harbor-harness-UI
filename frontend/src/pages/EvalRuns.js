@@ -184,7 +184,10 @@ function GroupAvgScore({ jobs }) {
 export default function EvalRuns() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const currentUserId = user?.user_id || null;
+  // The harness now stamps `created_by = <email>` on every owner-tagged row
+  // (changed from user_id UUID). Use the same value for the "Mine only"
+  // filter and the predicate so we match correctly post-migration.
+  const currentUserCreatedBy = user?.email || null;
   const [stats, setStats] = useState(null);
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -252,7 +255,7 @@ export default function EvalRuns() {
       // When "Mine only" is on we pass `created_by` to the server so the
       // filter works across pagination (server-side narrowing) instead of
       // only on whatever happens to be in the current page.
-      const mineParam = (filters.mineOnly && currentUserId) ? { created_by: currentUserId } : {};
+      const mineParam = (filters.mineOnly && currentUserCreatedBy) ? { created_by: currentUserCreatedBy } : {};
       if (hasActiveFilter) {
         // Exhaustive fetch (capped) so client-side filters see everything.
         const all = [];
@@ -279,7 +282,7 @@ export default function EvalRuns() {
     } finally {
       setLoading(false);
     }
-  }, [selectedStatus, page, hasActiveFilter, filters.mineOnly, currentUserId]);
+  }, [selectedStatus, page, hasActiveFilter, filters.mineOnly, currentUserCreatedBy]);
 
   useEffect(() => { fetchStats(); }, []);
   useEffect(() => { fetchJobs(); }, [fetchJobs]);
@@ -289,8 +292,8 @@ export default function EvalRuns() {
   // Group jobs by group_run_id (falling back to legacy group_id for compatibility)
   // Filter first — groups with zero matching jobs disappear entirely.
   const filterPredicate = useMemo(
-    () => buildJobFilter(filters, currentUserId),
-    [filters, currentUserId],
+    () => buildJobFilter(filters, currentUserCreatedBy),
+    [filters, currentUserCreatedBy],
   );
 
   const filteredJobs = useMemo(
