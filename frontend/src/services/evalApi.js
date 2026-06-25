@@ -139,6 +139,47 @@ export const getEvalJob = async (jobId) => {
   return response.data;
 };
 
+// ============ Eval Run Groups (editable name + comment) ============
+
+/**
+ * List eval run groups (paged).
+ * GET /api/eval/eval-run-groups?limit=&offset=&created_by=
+ * Returns { groups: [{ group_run_id, group_name, comment, batch_id, created_by, created_at, updated_at }], limit, offset }
+ */
+export const listEvalRunGroups = async (params = {}) => {
+  const response = await evalApiClient.get('/eval-run-groups', { params });
+  return response.data;
+};
+
+/**
+ * Get a single eval run group.
+ * GET /api/eval/eval-run-groups/{group_run_id}
+ * Returns the group object; throws 404 if not found.
+ */
+export const getEvalRunGroup = async (groupRunId) => {
+  const response = await evalApiClient.get(`/eval-run-groups/${groupRunId}`);
+  return response.data;
+};
+
+/**
+ * Rename / re-comment a group. PATCH semantics:
+ *   omit field         → unchanged
+ *   { group_name: 'x' } → rename (display only; jobs untouched)
+ *   { comment: 'text' } → set
+ *   { comment: '' }     → clear
+ * Returns the updated group object.
+ */
+export const patchEvalRunGroup = async (groupRunId, updates) => {
+  const body = {};
+  if (updates.group_name !== undefined) body.group_name = updates.group_name;
+  if (updates.comment !== undefined) body.comment = updates.comment;
+  const response = await evalApiClient.patch(
+    `/eval-run-groups/${groupRunId}`,
+    body,
+  );
+  return response.data;
+};
+
 /**
  * List all eval jobs with filters
  * GET /api/eval/jobs?status=&limit=&offset=

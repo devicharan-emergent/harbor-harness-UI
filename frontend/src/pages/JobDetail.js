@@ -746,6 +746,43 @@ export default function JobDetail() {
                         );
                       })}
 
+                      {/* Extra bugs — agent-reported issues NOT in golden.
+                          Rendered in blue to clearly distinguish from the
+                          golden test rows above (pass=green, fail=red).
+                          Source: phase.extra[] (array of strings, populated
+                          by the verifier on testing_agent_bench runs). */}
+                      {Array.isArray(phase.extra) && phase.extra.length > 0 && (
+                        <div className="mt-3 space-y-1.5" data-testid={`phase-${phaseIdx}-extra-bugs`}>
+                          <div className="flex items-center gap-2 px-1">
+                            <span className="text-[10px] uppercase tracking-wider font-semibold text-blue-600 dark:text-blue-400">
+                              Extra bugs found by agent
+                            </span>
+                            <Badge
+                              variant="outline"
+                              className="text-[9px] font-mono text-blue-600 border-blue-500/30 bg-blue-500/10"
+                              data-testid={`phase-${phaseIdx}-extra-count`}
+                            >
+                              {phase.extra.length}
+                            </Badge>
+                            <span className="text-[10px] text-muted-foreground italic">
+                              not in golden — bonus findings
+                            </span>
+                          </div>
+                          {phase.extra.map((bug, extraIdx) => (
+                            <div
+                              key={extraIdx}
+                              className="flex items-start gap-2 px-3 py-2 rounded-lg border border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300 text-xs"
+                              data-testid={`extra-bug-${phaseIdx}-${extraIdx}`}
+                            >
+                              <Info className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-blue-500 dark:text-blue-400" />
+                              <span className="flex-1 leading-relaxed whitespace-pre-wrap break-words">
+                                {bug}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
                       {/* Phase Lint Report */}
                       {phase.lint_report && phase.lint_report.raw_output?.files?.some(f => f.error_count > 0) && (
                         <Collapsible className="mt-2">

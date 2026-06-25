@@ -1597,6 +1597,80 @@ async def proxy_prepare_eval_for_ui(job_id: str):
     except httpx.HTTPError as e:
         raise HTTPException(status_code=500, detail=f"Eval API error: {str(e)}")
 
+
+# ── Eval Run Groups (editable name + comment, harness-side) ────────────
+# Maps 1:1 to harness `/api/v1/eval-run-groups`. group_run_id is the
+# immutable UUID minted on first submit; group_name + comment are
+# user-editable display fields. PATCH semantics:
+#   omit field          → unchanged
+#   "group_name": "x"  → rename (display only; jobs untouched)
+#   "comment": "text"  → set
+#   "comment": ""       → clear
+@api_router.get("/eval/eval-run-groups")
+async def proxy_list_eval_run_groups(
+    limit: int = 50,
+    offset: int = 0,
+    created_by: str | None = None,
+):
+    params = {"limit": limit, "offset": offset}
+    if created_by:
+        params["created_by"] = created_by
+    async with httpx.AsyncClient(timeout=30.0) as hclient:
+        r = await hclient.get(
+            f"{EVAL_API_BASE}/api/v1/eval-run-groups",
+            params=params,
+        )
+        if r.status_code >= 400:
+            try: detail = r.json()
+            except Exception: detail = {"message": r.text or "harness error"}
+            raise HTTPException(status_code=r.status_code, detail=detail)
+        return r.json()
+
+
+@api_router.get("/eval/eval-run-groups/{group_run_id}")
+async def proxy_get_eval_run_group(group_run_id: str):
+    async with httpx.AsyncClient(timeout=30.0) as hclient:
+        r = await hclient.get(
+            f"{EVAL_API_BASE}/api/v1/eval-run-groups/{group_run_id}",
+        )
+        if r.status_code == 404:
+            raise HTTPException(status_code=404, detail="group not found")
+        if r.status_code >= 400:
+            try: detail = r.json()
+            except Exception: detail = {"message": r.text or "harness error"}
+            raise HTTPException(status_code=r.status_code, detail=detail)
+        return r.json()
+
+
+@api_router.patch("/eval/eval-run-groups/{group_run_id}")
+async def proxy_patch_eval_run_group(group_run_id: str, body: dict):
+    # Forward only the two editable fields (others are read-only on the
+    # harness; sending stray keys would cause a 4xx).
+    payload = {}
+    if "group_name" in body:
+        payload["group_name"] = body["group_name"]
+    if "comment" in body:
+        payload["comment"] = body["comment"]
+    if not payload:
+        raise HTTPException(
+            status_code=400,
+            detail="at least one of `group_name` or `comment` must be provided",
+        )
+    async with httpx.AsyncClient(timeout=30.0) as hclient:
+        r = await hclient.patch(
+            f"{EVAL_API_BASE}/api/v1/eval-run-groups/{group_run_id}",
+            json=payload,
+        )
+        if r.status_code == 404:
+            raise HTTPException(status_code=404, detail="group not found")
+        if r.status_code >= 400:
+            try: detail = r.json()
+            except Exception: detail = {"message": r.text or "harness error"}
+            raise HTTPException(status_code=r.status_code, detail=detail)
+        return r.json()
+
+
+
 @api_router.get("/eval/stats")
 async def proxy_eval_stats():
     """Proxy: Get eval queue stats - transforms array to object format"""

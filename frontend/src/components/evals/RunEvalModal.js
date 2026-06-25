@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Card, CardContent } from '@/components/ui/card';
@@ -243,7 +244,8 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
   const [selectedProblems, setSelectedProblems] = useState([]);
 
   // Group ID (mandatory tag for batch jobs)
-  const [groupId, setGroupId] = useState('');
+  const [groupName, setGroupName] = useState('');
+  const [groupComment, setGroupComment] = useState('');
 
   // Resources
   const [cpus, setCpus] = useState(2);
@@ -541,8 +543,8 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
       );
       return;
     }
-    if (!groupId.trim()) {
-      toast.error('Group Run ID is required');
+    if (!groupName.trim()) {
+      toast.error('Group name is required');
       return;
     }
     const runsCount = Math.max(1, Math.min(NUM_RUNS_MAX, Math.trunc(Number(numRuns) || 1)));
@@ -571,13 +573,14 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
     }
 
     try {
-      // The harness requires unique `group_run_id` per submission. Build
-      // a stable base (timestamp + 4-char random) once per Submit click,
-      // then suffix per-run only when N > 1. This keeps the N=1 case
-      // identical to legacy behaviour for downstream tooling.
-      const ts = new Date().toISOString().replace(/[:.]/g, '-');
-      const rand = Math.random().toString(36).slice(2, 6);
-      const baseGroupRunId = `${groupId.trim()}-${ts}-${rand}`;
+      // No more client-side group_run_id construction. The harness mints a
+      // UUID server-side; we send `group_name` (raw user input) + optional
+      // `comment` instead. For Number of Runs > 1 we either send the same
+      // group_name (harness mints DISTINCT UUIDs per submit), or — when
+      // the user has clearly asked for distinct labels — suffix the name
+      // with `(run 1 of N)` so groups stay legible in the list.
+      const trimmedGroupName = groupName.trim();
+      const trimmedComment = groupComment.trim();
 
       let totalJobsSubmitted = 0;
       const trimmedAgentOverride = agentNameOverride.trim();
@@ -601,9 +604,12 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
       );
 
       for (let i = 1; i <= runsCount; i++) {
-        const groupRunId = runsCount > 1
-          ? `${baseGroupRunId}-run-${i}`
-          : baseGroupRunId;
+        // Each run sends the SAME group_name; the harness mints distinct
+        // UUIDs per call. When N > 1 we annotate the name so the list
+        // doesn't show N duplicates with no visual disambiguation.
+        const runGroupName = runsCount > 1
+          ? `${trimmedGroupName} (run ${i} of ${runsCount})`
+          : trimmedGroupName;
         if (runsCount > 1) setRunProgress({ current: i, total: runsCount });
 
         // ── testing_agent_bench fork-eval branch ───────────────
@@ -643,9 +649,11 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
             items.push(item);
           }
           const batchBody = {
-            group_run_id: groupRunId,
+            // No group_run_id — harness mints a UUID server-side.
+            group_name: runGroupName,
             items,
           };
+          if (trimmedComment) batchBody.comment = trimmedComment;
           if (userId.trim()) batchBody.user_id = userId.trim();
           // Only stamp the saved judge config when the user has actually
           // customized it — otherwise omit so the harness applies its
@@ -696,7 +704,10 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
           return evalItem;
         });
 
-        const payload = { user_id: userId, group_run_id: groupRunId, evals };
+        // No group_run_id — harness mints a UUID server-side. Send the
+        // typed name + optional comment instead.
+        const payload = { user_id: userId, group_name: runGroupName, evals };
+        if (trimmedComment) payload.comment = trimmedComment;
         if (derivedAgentName) payload.agent_name = derivedAgentName;
         if (submitEph) {
           payload.eph_name = submitEph;
@@ -970,19 +981,33 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 </div>
               )}
 
-              {/* Group Run ID — always shown */}
+              {/* Group name + Comment — always shown */}
               <div>
-                <Label className="text-sm font-semibold">Group Run ID *</Label>
+                <Label className="text-sm font-semibold">Group name *</Label>
                 <p className="text-[11px] text-muted-foreground mt-0.5 mb-2">
-                  Tag all jobs in this batch. We'll auto-suffix a timestamp so it's unique
-                  per submission.
+                  Display name for this batch. The harness mints a stable UUID
+                  for the run group server-side — your name is just the label.
                 </p>
                 <Input
-                  value={groupId}
-                  onChange={e => setGroupId(e.target.value)}
+                  value={groupName}
+                  onChange={e => setGroupName(e.target.value)}
                   placeholder="e.g. nightly, sonnet-vs-opus"
                   className="font-mono text-sm"
-                  data-testid="eval-group-id"
+                  data-testid="eval-group-name"
+                />
+              </div>
+              <div>
+                <Label className="text-sm font-semibold">Comment <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                <p className="text-[11px] text-muted-foreground mt-0.5 mb-2">
+                  Short note shown next to the group in the runs list.
+                </p>
+                <Textarea
+                  value={groupComment}
+                  onChange={e => setGroupComment(e.target.value)}
+                  rows={2}
+                  placeholder="What is this batch testing?"
+                  className="text-sm resize-none"
+                  data-testid="eval-group-comment"
                 />
               </div>
 
@@ -1283,7 +1308,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="text-muted-foreground">Group:</span>
-                  <Badge variant="secondary" className="font-mono text-[10px]" data-testid="review-group-id">{groupId || '—'}</Badge>
+                  <Badge variant="secondary" className="font-mono text-[10px]" data-testid="review-group-name">{groupName || '—'}</Badge>
                 </div>
                 {agentNameOverride.trim() && (
                   <div className="flex items-center gap-1.5">
@@ -1311,7 +1336,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                   <Separator />
 
                   <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-xs">
-                    <div><span className="text-muted-foreground">Group:</span> <span className="font-mono">{groupId}</span></div>
+                    <div><span className="text-muted-foreground">Group:</span> <span className="font-mono">{groupName}</span></div>
                     <div><span className="text-muted-foreground">User:</span> <span className="font-mono">{userId}</span></div>
                     {numRuns > 1 && (
                       <div className="col-span-2">
@@ -1347,7 +1372,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 <div className="rounded-lg bg-emerald-500/5 border border-emerald-500/20 px-3 py-2 text-[11px] text-muted-foreground flex items-start gap-2">
                   <Rocket className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-emerald-600" />
                   <span>
-                    All <strong className="text-foreground">{totalJobs}</strong> jobs will start running simultaneously, tagged with group <strong className="text-foreground font-mono">{groupId}</strong>.
+                    All <strong className="text-foreground">{totalJobs}</strong> jobs will start running simultaneously, tagged with group <strong className="text-foreground font-mono">{groupName}</strong>.
                   </span>
                 </div>
               )}
@@ -1370,7 +1395,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 onClick={() => goToStep(step + 1)}
                 disabled={
                   (step === 1 && (selectedProblems.length === 0 || hasMixedTypes)) ||
-                  (step === 2 && !groupId.trim())
+                  (step === 2 && !groupName.trim())
                   // NOTE: eph readiness gate temporarily disabled per product
                   // ask. Submission still routes through /jobs-with-es when
                   // an eph is set; we just no longer block Next/Submit on
