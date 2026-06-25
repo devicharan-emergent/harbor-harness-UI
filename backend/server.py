@@ -609,6 +609,15 @@ _CSV_COMMON_COLS = {
     "problem_statement", "natural_language_tests", "base_image", "agent_name",
 }
 
+# The harness is inconsistent about where `agent_name` lives per type — these
+# types want it inside `attributes`, the others want it as a top-level field.
+# Both lookups are tried on export so the round-trip is loss-less either way.
+_AGENT_NAME_IN_ATTRIBUTES = {
+    "scratch_bench_phased",
+    "bug_bench",
+    "testing_agent_bench",
+}
+
 # Ordered list of common columns for export header (id+instance_id first
 # so a quick eyeball of the CSV is identifying).
 _CSV_COMMON_COLS_ORDER = [
@@ -918,7 +927,15 @@ def _csv_row_to_item(row: dict, dataset_type: str) -> dict:
         "natural_language_tests": nlt,
         "attributes": attributes,
     }
-    for opt in ("name", "description", "base_image", "agent_name"):
+    # Route `agent_name` per the per-type schema (some types want it on
+    # `attributes`, others at top-level — see _AGENT_NAME_IN_ATTRIBUTES).
+    agent_name_val = (row.get("agent_name") or "").strip()
+    if agent_name_val:
+        if dataset_type in _AGENT_NAME_IN_ATTRIBUTES:
+            attributes["agent_name"] = agent_name_val
+        else:
+            item["agent_name"] = agent_name_val
+    for opt in ("name", "description", "base_image"):
         if (row.get(opt) or "").strip():
             item[opt] = row[opt]
     if (row.get("tags") or "").strip():
