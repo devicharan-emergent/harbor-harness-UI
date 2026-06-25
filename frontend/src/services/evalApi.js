@@ -180,6 +180,60 @@ export const patchEvalRunGroup = async (groupRunId, updates) => {
   return response.data;
 };
 
+// ============ Dataset Views (saved selections) ============
+// Shared local-Mongo views: every authenticated user can list + load any
+// view; only the author can edit / delete (server enforces 403).
+
+/**
+ * List all saved dataset views (newest first).
+ * GET /api/eval/dataset-views?limit=
+ * Returns { views: [{view_id, name, description, items, created_by_email,
+ *                    created_by_name, created_at, updated_at}], total }
+ */
+export const listDatasetViews = async (params = {}) => {
+  const response = await evalApiClient.get('/dataset-views', { params });
+  return response.data;
+};
+
+export const getDatasetView = async (viewId) => {
+  const response = await evalApiClient.get(`/dataset-views/${viewId}`);
+  return response.data;
+};
+
+/**
+ * Create a new view.
+ * POST /api/eval/dataset-views
+ * Body: { name, description?, items: [{dataset_type, instance_id}] }
+ */
+export const createDatasetView = async ({ name, description, items }) => {
+  const response = await evalApiClient.post('/dataset-views', {
+    name,
+    description: description || '',
+    items,
+  });
+  return response.data;
+};
+
+/**
+ * Update a view (rename, edit items, edit description). Author-only on
+ * the server (403 for non-authors). PATCH semantics — omitted fields stay
+ * unchanged.
+ */
+export const updateDatasetView = async (viewId, updates) => {
+  const body = {};
+  if (updates.name !== undefined) body.name = updates.name;
+  if (updates.description !== undefined) body.description = updates.description;
+  if (updates.items !== undefined) body.items = updates.items;
+  const response = await evalApiClient.patch(`/dataset-views/${viewId}`, body);
+  return response.data;
+};
+
+export const deleteDatasetView = async (viewId) => {
+  const response = await evalApiClient.delete(`/dataset-views/${viewId}`);
+  return response.data;
+};
+
+
 /**
  * List all eval jobs with filters
  * GET /api/eval/jobs?status=&limit=&offset=

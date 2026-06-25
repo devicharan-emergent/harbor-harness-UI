@@ -1678,6 +1678,163 @@ async def proxy_patch_eval_run_group(group_run_id: str, body: dict):
 
 
 
+# ── Dataset Views (saved hand-picked dataset selections) ───────────────
+# Local-only MongoDB collection (`dataset_views`). Items are pinned by
+# (dataset_type, instance_id) so a soft-deleted-then-replaced row keeps
+# the same identity. Shared (every authenticated user can list + load any
+# view); only the author can edit / delete (POST + PATCH + DELETE require
+# auth via `_get_session_user`).
+#
+# Doc shape on Mongo:
+#   {
+#     view_id: <uuid4 hex>,
+#     name: <str>,
+#     description: <str>,
+#     items: [{dataset_type: <str>, instance_id: <str>}],
+#     created_by_email: <str>,
+#     created_by_name: <str>,
+#     created_at: <iso8601 str>,
+#     updated_at: <iso8601 str>,
+#   }
+def _normalize_view_items(raw: Any) -> list[dict[str, str]]:
+    if not isinstance(raw, list):
+        raise HTTPException(status_code=400, detail="`items` must be an array")
+    out: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for entry in raw:
+        if not isinstance(entry, dict):
+            raise HTTPException(status_code=400, detail="`items[]` entries must be objects")
+        dt = (entry.get("dataset_type") or "").strip()
+        iid = (entry.get("instance_id") or "").strip()
+        if not dt or not iid:
+            raise HTTPException(
+                status_code=400,
+                detail="every item needs non-empty `dataset_type` and `instance_id`",
+            )
+        key = (dt, iid)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"dataset_type": dt, "instance_id": iid})
+    return out
+
+
+def _view_to_dict(doc: dict) -> dict:
+    return {
+        "view_id": doc.get("view_id"),
+        "name": doc.get("name", ""),
+        "description": doc.get("description", ""),
+        "items": doc.get("items", []),
+        "created_by_email": doc.get("created_by_email"),
+        "created_by_name": doc.get("created_by_name"),
+        "created_at": doc.get("created_at"),
+        "updated_at": doc.get("updated_at"),
+    }
+
+
+@api_router.get("/eval/dataset-views")
+async def list_dataset_views(limit: int = Query(200, ge=1, le=500)):
+    """List every saved dataset view, newest first. Public read for any
+    authenticated user — the interceptor stamps the session token on the
+    request but we don't filter by author."""
+    cursor = db.dataset_views.find({}, {"_id": 0}).sort("updated_at", -1).limit(limit)
+    rows = [_view_to_dict(d) async for d in cursor]
+    return {"views": rows, "total": len(rows)}
+
+
+@api_router.get("/eval/dataset-views/{view_id}")
+async def get_dataset_view(view_id: str):
+    doc = await db.dataset_views.find_one({"view_id": view_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="view not found")
+    return _view_to_dict(doc)
+
+
+@api_router.post("/eval/dataset-views")
+async def create_dataset_view(body: dict, request: Request):
+    user = await _get_session_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="auth required")
+    name = (body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="`name` is required")
+    if len(name) > 200:
+        raise HTTPException(status_code=400, detail="`name` must be 200 chars or fewer")
+    description = (body.get("description") or "").strip()
+    items = _normalize_view_items(body.get("items") or [])
+    if not items:
+        raise HTTPException(
+            status_code=400,
+            detail="a view must contain at least one item",
+        )
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "view_id": uuid.uuid4().hex,
+        "name": name,
+        "description": description,
+        "items": items,
+        "created_by_email": user.get("email"),
+        "created_by_name": user.get("name") or user.get("email"),
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.dataset_views.insert_one(doc)
+    return _view_to_dict(doc)
+
+
+@api_router.patch("/eval/dataset-views/{view_id}")
+async def update_dataset_view(view_id: str, body: dict, request: Request):
+    user = await _get_session_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="auth required")
+    doc = await db.dataset_views.find_one({"view_id": view_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="view not found")
+    if doc.get("created_by_email") and doc["created_by_email"] != user.get("email"):
+        raise HTTPException(status_code=403, detail="only the author can edit this view")
+    updates: dict[str, Any] = {}
+    if "name" in body:
+        name = (body["name"] or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="`name` must be non-empty")
+        if len(name) > 200:
+            raise HTTPException(status_code=400, detail="`name` must be 200 chars or fewer")
+        updates["name"] = name
+    if "description" in body:
+        updates["description"] = (body["description"] or "").strip()
+    if "items" in body:
+        items = _normalize_view_items(body["items"])
+        if not items:
+            raise HTTPException(
+                status_code=400,
+                detail="a view must contain at least one item",
+            )
+        updates["items"] = items
+    if not updates:
+        raise HTTPException(
+            status_code=400,
+            detail="at least one of `name`, `description`, or `items` must be provided",
+        )
+    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.dataset_views.update_one({"view_id": view_id}, {"$set": updates})
+    fresh = await db.dataset_views.find_one({"view_id": view_id}, {"_id": 0})
+    return _view_to_dict(fresh)
+
+
+@api_router.delete("/eval/dataset-views/{view_id}")
+async def delete_dataset_view(view_id: str, request: Request):
+    user = await _get_session_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="auth required")
+    doc = await db.dataset_views.find_one({"view_id": view_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="view not found")
+    if doc.get("created_by_email") and doc["created_by_email"] != user.get("email"):
+        raise HTTPException(status_code=403, detail="only the author can delete this view")
+    await db.dataset_views.delete_one({"view_id": view_id})
+    return {"deleted": True, "view_id": view_id}
+
+
 @api_router.get("/eval/stats")
 async def proxy_eval_stats():
     """Proxy: Get eval queue stats - transforms array to object format"""

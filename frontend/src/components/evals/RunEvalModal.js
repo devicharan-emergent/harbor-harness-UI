@@ -12,7 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
-import { listDatasets, listDatasetsByType, getDatasetForProblem, submitEvalJobs, submitEvalJobsWithEs, submitTestingAgentEval, checkAgentExists, getVerifierConfig } from '@/services/evalApi';
+import { listDatasets, listDatasetsByType, getDatasetForProblem, submitEvalJobs, submitEvalJobsWithEs, submitTestingAgentEval, checkAgentExists, getVerifierConfig, getDatasetView } from '@/services/evalApi';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { Loader2, Rocket, FileText, Search, ChevronRight, Check, AlertCircle, X } from 'lucide-react';
@@ -21,6 +21,7 @@ import { useEnv } from '@/components/layout/EnvSwitcher';
 import { EphPicker } from '@/components/cortex/EphPicker';
 import { ModelNamePicker } from './ModelNamePicker';
 import { JudgeConfigDialog } from './JudgeConfigDialog';
+import { DatasetViewsDropdown } from '@/components/datasets/DatasetViewsDropdown';
 
 const DATASET_TYPES = [
   { value: 'all', label: 'All Types' },
@@ -229,7 +230,7 @@ function ProblemPreview({ ds }) {
 // (e.g. Cortex Agents → "Open in eval"). When set, the modal opens with
 // the eph picker + agent override pre-filled, so the user only has to
 // choose problems + a group id and submit.
-export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName = '' }) {
+export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName = '', initialViewId = '' }) {
   const navigate = useNavigate();
   const { cortexUrl: envCortexUrl } = useEnv();
   const [step, setStep] = useState(1); // 1: problems, 2: configure, 3: review
@@ -242,6 +243,12 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
   const [selectedPreview, setSelectedPreview] = useState(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [selectedProblems, setSelectedProblems] = useState([]);
+
+  // Active dataset view (loaded via DatasetViewsDropdown or `?view=`
+  // deep link). Shown as a chip near the selection area; doesn't gate
+  // anything but tells the user where their selection came from.
+  const [activeView, setActiveView] = useState(null);
+  const [loadingView, setLoadingView] = useState(false);
 
   // Group ID (mandatory tag for batch jobs)
   const [groupName, setGroupName] = useState('');
@@ -377,6 +384,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
     if (open) {
       setStep(1);
       setSelectedProblems([]);
+      setActiveView(null);
       setSelectedPreview(null);
       setSearchQuery('');
       // Seed eph + agent_name from props when the caller deep-linked us
@@ -486,6 +494,73 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
       setSelectedProblems([...selectedProblems, ds]);
     }
   };
+
+  // Apply a dataset view: replace the current selection with the view's
+  // items. Items are `{dataset_type, instance_id}` pairs — match them to
+  // the loaded `datasets` list. Items that don't match anything currently
+  // loaded surface as a non-fatal warning toast (likely soft-deleted).
+  const applyView = useCallback((view) => {
+    if (!view?.items?.length) {
+      toast.error('View has no items');
+      return;
+    }
+    const byKey = new Map(
+      datasets.map(d => [`${d.dataset_type}/${d.instance_id}`, d])
+    );
+    const matched = [];
+    const missing = [];
+    for (const it of view.items) {
+      const k = `${it.dataset_type}/${it.instance_id}`;
+      const ds = byKey.get(k);
+      if (ds) matched.push(ds);
+      else missing.push(k);
+    }
+    setSelectedProblems(matched);
+    setActiveView(view);
+    if (missing.length > 0) {
+      toast.warning(
+        `Loaded "${view.name}": ${matched.length} matched, ${missing.length} not found (may be soft-deleted).`,
+      );
+    } else {
+      toast.success(
+        `Loaded ${matched.length} item${matched.length === 1 ? '' : 's'} from view "${view.name}". Previous selection cleared.`,
+      );
+    }
+  }, [datasets]);
+
+  // Pick handler for the dropdown — wraps the API call + applyView.
+  const handlePickView = async (view) => {
+    // The dropdown gave us the lightweight list shape; re-fetch full doc
+    // (defensive — also lets us refresh items if they changed since list).
+    setLoadingView(true);
+    try {
+      const fresh = await getDatasetView(view.view_id);
+      applyView(fresh);
+    } catch (err) {
+      toast.error(parseApiError(err, `Failed to load view "${view.name}"`));
+    } finally {
+      setLoadingView(false);
+    }
+  };
+
+  // Auto-load `initialViewId` (deep link from /dataset-views or /evals?view=).
+  // Wait until datasets have finished loading so applyView can match items.
+  useEffect(() => {
+    if (!open || !initialViewId || loadingDatasets || datasets.length === 0) return;
+    if (activeView?.view_id === initialViewId) return;
+    (async () => {
+      setLoadingView(true);
+      try {
+        const v = await getDatasetView(initialViewId);
+        applyView(v);
+      } catch (err) {
+        toast.error(parseApiError(err, `Could not load view ${initialViewId}`));
+      } finally {
+        setLoadingView(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, initialViewId, loadingDatasets, datasets.length]);
 
   // "Select all (N)" — scoped to the currently-filtered list only.
   // Blocks (with a toast) when the filtered list would create a mixed
@@ -819,7 +894,34 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                     ? `Clear (${filteredDatasets.length})`
                     : `Select all (${filteredDatasets.length})`}
                 </Button>
+                <DatasetViewsDropdown
+                  label={loadingView ? 'Loading…' : 'Load view'}
+                  testId="eval-load-view-btn"
+                  onPick={handlePickView}
+                  disabled={loadingView}
+                  emptyHint="No saved views yet. Save one from the Datasets page."
+                />
               </div>
+
+              {activeView && (
+                <div
+                  className="flex items-center gap-2 text-xs border border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300 rounded-md px-2.5 py-1.5 self-start"
+                  data-testid="eval-active-view-chip"
+                >
+                  <span>Loaded view:</span>
+                  <span className="font-semibold">{activeView.name}</span>
+                  <span className="font-mono text-[10px] opacity-80">
+                    · {activeView.items?.length || 0} items
+                  </span>
+                  <button
+                    onClick={() => { setActiveView(null); setSelectedProblems([]); }}
+                    className="text-[10px] underline underline-offset-2 hover:text-foreground ml-1"
+                    data-testid="eval-active-view-clear-btn"
+                  >
+                    clear
+                  </button>
+                </div>
+              )}
 
               {selectedProblems.length > 0 && (
                 <div className="flex flex-wrap gap-1.5">

@@ -202,17 +202,21 @@ export default function EvalRuns() {
   // RunEvalModal pre-filled. Sourced once on mount from the URL; the params
   // are then stripped so closing + reopening starts clean.
   const [searchParams, setSearchParams] = useSearchParams();
-  const [deepLinkInitial, setDeepLinkInitial] = useState({ eph: '', agent: '' });
+  const [deepLinkInitial, setDeepLinkInitial] = useState({ eph: '', agent: '', viewId: '' });
   useEffect(() => {
-    if (searchParams.get('run') === '1') {
+    const runFlag = searchParams.get('run') === '1';
+    const viewId = (searchParams.get('view') || '').trim();
+    // Open the modal when either deep-link form is present.
+    if (runFlag || viewId) {
       const eph = (searchParams.get('eph') || '').trim();
       const agent = (searchParams.get('agent') || '').trim();
-      setDeepLinkInitial({ eph, agent });
+      setDeepLinkInitial({ eph, agent, viewId });
       setEvalModalOpen(true);
       const next = new URLSearchParams(searchParams);
       next.delete('run');
       next.delete('eph');
       next.delete('agent');
+      next.delete('view');
       setSearchParams(next, { replace: true });
     }
     // Run once on mount — the URL params are consumed and stripped, so we
@@ -732,13 +736,14 @@ export default function EvalRuns() {
         onClose={() => {
           setEvalModalOpen(false);
           // Drop the deep-link seed so the next manual open starts clean.
-          setDeepLinkInitial({ eph: '', agent: '' });
+          setDeepLinkInitial({ eph: '', agent: '', viewId: '' });
           fetchJobs();
           fetchStats();
           fetchGroupsMeta();
         }}
         initialEph={deepLinkInitial.eph}
         initialAgentName={deepLinkInitial.agent}
+        initialViewId={deepLinkInitial.viewId}
       />
 
       {/* Edit Group modal — rename + comment, optimistic PATCH */}

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
-import { Menu, Cpu, Home, GitCompare, MessageSquare, ActivitySquare, Database, CalendarClock, Boxes, Scale, FileCode2 } from 'lucide-react';
+import { Menu, Cpu, Home, GitCompare, MessageSquare, ActivitySquare, Database, CalendarClock, Boxes, Scale, FileCode2, BookMarked } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
 import { EnvSwitcher } from './EnvSwitcher';
 import { ApiHealthIndicator } from '@/components/evals/ApiHealthIndicator';
@@ -16,6 +16,7 @@ const navItems = [
   { label: 'Schedules', href: '/schedules', icon: CalendarClock },
   { label: 'Cortex Agents', href: '/cortex/agents', icon: Boxes },
   { label: 'Datasets', href: '/datasets', icon: Database },
+  { label: 'Dataset Views', href: '/dataset-views', icon: BookMarked },
   { label: 'Verifier Config', href: '/judge-config', icon: Scale },
   { label: 'Agent & Prompt Management', href: '/agent-prompt-management', icon: FileCode2 },
   { label: 'Compare', href: '/compare', icon: GitCompare },

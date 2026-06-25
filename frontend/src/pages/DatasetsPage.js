@@ -1,10 +1,12 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   listDatasets,
   listDatasetsByType,
   deleteDataset,
   getDatasetInstance,
   exportDatasetsCSV,
+  getDatasetView,
 } from '@/services/evalApi';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -17,11 +19,13 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Loader2, Search, Plus, Pencil, Trash2, RefreshCw, Database, X, ChevronLeft, ChevronRight, Upload, Download } from 'lucide-react';
+import { Loader2, Search, Plus, Pencil, Trash2, RefreshCw, Database, X, ChevronLeft, ChevronRight, Upload, Download, BookMarked, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { DatasetEditorModal } from '@/components/evals/DatasetEditorModal';
 import { DatasetPreviewModal } from '@/components/evals/DatasetPreviewModal';
 import { ImportDatasetsModal } from '@/components/evals/ImportDatasetsModal';
+import { SaveDatasetViewDialog } from '@/components/datasets/SaveDatasetViewDialog';
+import { DatasetViewsDropdown } from '@/components/datasets/DatasetViewsDropdown';
 import { parseApiError } from '@/lib/errorUtils';
 
 const DATASET_TYPES = [
@@ -70,14 +74,27 @@ export default function DatasetsPage() {
   const [selectedKeys, setSelectedKeys] = useState(new Set());
   const [exporting, setExporting] = useState(false);
 
+  // Dataset views (saved selections). When `activeView` is set the table
+  // filters down to its items only. The `?view=<id>` query param deep-links
+  // straight into a view (e.g. from the /dataset-views page or the sidebar).
+  const [activeView, setActiveView] = useState(null);
+  const [saveViewOpen, setSaveViewOpen] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+
   const fetchDatasets = useCallback(async () => {
     setLoading(true);
     try {
       let data;
-      if (typeFilter === 'all') {
-        data = await listDatasets({ limit: pageSize, offset: page * pageSize });
+      // When a view is active we need a wider window so all of its items
+      // are likely present (views may span types); the type filter is
+      // forced to 'all' and `filteredDatasets` narrows down to the view.
+      // Cap at 200 — the harness rejects higher values with 422.
+      const limit = activeView ? 200 : pageSize;
+      const offset = activeView ? 0 : page * pageSize;
+      if (activeView || typeFilter === 'all') {
+        data = await listDatasets({ limit, offset });
       } else {
-        data = await listDatasetsByType(typeFilter, { limit: pageSize, offset: page * pageSize });
+        data = await listDatasetsByType(typeFilter, { limit, offset });
       }
       setDatasets(data.datasets || []);
     } catch (error) {
@@ -87,7 +104,7 @@ export default function DatasetsPage() {
     } finally {
       setLoading(false);
     }
-  }, [typeFilter, page]);
+  }, [typeFilter, page, activeView]);
 
   useEffect(() => {
     fetchDatasets();
@@ -161,7 +178,15 @@ export default function DatasetsPage() {
   // Selection helpers (keys = `${dataset_type}/${instance_id}`)
   const keyOf = (ds) => `${ds.dataset_type}/${ds.instance_id || ds.id}`;
 
+  // Active-view key set for fast lookup. `null` when no view is loaded.
+  const activeViewKeys = useMemo(() => {
+    if (!activeView?.items) return null;
+    return new Set(activeView.items.map(it => `${it.dataset_type}/${it.instance_id}`));
+  }, [activeView]);
+
   const filteredDatasets = datasets.filter(ds => {
+    // First narrow by active view (if any).
+    if (activeViewKeys && !activeViewKeys.has(keyOf(ds))) return false;
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return (
@@ -221,6 +246,57 @@ export default function DatasetsPage() {
 
   const selectedCount = selectedRows.length;
 
+  // ─── Dataset Views: deep-link, load, save, clear ─────────────────────
+  // Deep link entry: /datasets?view=<id> loads the view on mount and
+  // strips the param (replace) so refresh stays clean.
+  useEffect(() => {
+    const viewId = searchParams.get('view');
+    if (viewId && (!activeView || activeView.view_id !== viewId)) {
+      (async () => {
+        try {
+          const v = await getDatasetView(viewId);
+          setActiveView(v);
+          setTypeFilter('all');
+          setPage(0);
+          toast.success(`Loaded view "${v.name}" — ${v.items.length} items`);
+        } catch (err) {
+          toast.error(parseApiError(err, `Could not load view ${viewId}`));
+          const next = new URLSearchParams(searchParams);
+          next.delete('view');
+          setSearchParams(next, { replace: true });
+        }
+      })();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const pickView = (view) => {
+    setActiveView(view);
+    setTypeFilter('all');
+    setPage(0);
+    clearSelection();
+    toast.success(`Loaded view "${view.name}" — ${view.items.length} items`);
+    const next = new URLSearchParams(searchParams);
+    next.set('view', view.view_id);
+    setSearchParams(next, { replace: true });
+  };
+
+  const clearActiveView = () => {
+    setActiveView(null);
+    clearSelection();
+    const next = new URLSearchParams(searchParams);
+    next.delete('view');
+    setSearchParams(next, { replace: true });
+  };
+
+  // Build the items payload from the current selection for "Save as view".
+  const selectionItemsForView = useMemo(
+    () => selectedRows
+      .map(r => ({ dataset_type: r.dataset_type, instance_id: r.instance_id }))
+      .filter(it => it.dataset_type && it.instance_id),
+    [selectedRows],
+  );
+
   const runExport = async (datasetType, instanceIds, label) => {
     setExporting(true);
     try {
@@ -276,6 +352,26 @@ export default function DatasetsPage() {
           <Button onClick={fetchDatasets} variant="outline" size="sm" data-testid="datasets-refresh-btn">
             <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
             Refresh
+          </Button>
+          <DatasetViewsDropdown
+            label="Views"
+            testId="datasets-views-dropdown"
+            onPick={pickView}
+          />
+          <Button
+            onClick={() => setSaveViewOpen(true)}
+            variant="outline"
+            size="sm"
+            disabled={selectionItemsForView.length === 0}
+            data-testid="datasets-save-view-btn"
+            title={
+              selectionItemsForView.length === 0
+                ? 'Select at least one row to save as a view'
+                : `Save the ${selectionItemsForView.length} selected row${selectionItemsForView.length === 1 ? '' : 's'} as a view`
+            }
+          >
+            <Save className="w-3.5 h-3.5 mr-1.5" />
+            Save as view{selectionItemsForView.length > 0 ? ` (${selectionItemsForView.length})` : ''}
           </Button>
           <TooltipProvider>
             <Tooltip>
@@ -340,7 +436,7 @@ export default function DatasetsPage() {
 
       {/* Filters */}
       <div className="flex items-center gap-3 flex-wrap">
-        <Select value={typeFilter} onValueChange={(v) => { setTypeFilter(v); setPage(0); }}>
+        <Select value={typeFilter} onValueChange={(v) => { setTypeFilter(v); setPage(0); }} disabled={!!activeView}>
           <SelectTrigger className="w-[220px]" data-testid="datasets-type-filter">
             <SelectValue />
           </SelectTrigger>
@@ -375,6 +471,24 @@ export default function DatasetsPage() {
               onClick={clearSelection}
               className="text-[10px] underline underline-offset-2 hover:text-foreground"
               data-testid="datasets-clear-selection-btn"
+            >
+              clear
+            </button>
+          </div>
+        )}
+        {activeView && (
+          <div
+            className="flex items-center gap-2 text-xs border border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300 rounded-md px-2.5 py-1.5"
+            data-testid="active-view-chip"
+          >
+            <BookMarked className="w-3 h-3" />
+            <span>Viewing:</span>
+            <span className="font-semibold" data-testid="active-view-name">{activeView.name}</span>
+            <span className="font-mono text-[10px] opacity-80">· {activeView.items?.length || 0} items</span>
+            <button
+              onClick={clearActiveView}
+              className="text-[10px] underline underline-offset-2 hover:text-foreground ml-1"
+              data-testid="active-view-clear-btn"
             >
               clear
             </button>
@@ -599,6 +713,18 @@ export default function DatasetsPage() {
         defaultType={typeFilter !== 'all' ? typeFilter : 'bug_bench'}
         onClose={() => setImportOpen(false)}
         onImported={handleImported}
+      />
+
+      {/* Save-as-view modal */}
+      <SaveDatasetViewDialog
+        open={saveViewOpen}
+        items={selectionItemsForView}
+        onClose={() => setSaveViewOpen(false)}
+        onSaved={(view) => {
+          // After saving, mark it as the active view so the user sees the
+          // round-trip immediately.
+          setActiveView(view);
+        }}
       />
 
       {/* Delete Confirmation */}
