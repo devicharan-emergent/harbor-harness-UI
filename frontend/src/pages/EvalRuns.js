@@ -578,20 +578,34 @@ export default function EvalRuns() {
                               {isUngrouped ? 'Ungrouped Jobs' : displayTitle}
                             </span>
                             {!isUngrouped && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-6 w-6 flex-shrink-0 text-muted-foreground hover:text-foreground"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  openEditGroupModal(group.groupId);
-                                }}
-                                data-testid={`edit-group-${group.groupId}`}
-                                aria-label="Edit group name and comment"
-                                title="Edit group name and comment"
-                              >
-                                <Pencil className="w-3 h-3" />
-                              </Button>
+                              <>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 flex-shrink-0 text-muted-foreground hover:text-foreground"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openEditGroupModal(group.groupId);
+                                  }}
+                                  data-testid={`edit-group-${group.groupId}`}
+                                  aria-label="Edit group name and comment"
+                                  title="Edit group name and comment"
+                                >
+                                  <Pencil className="w-3 h-3" />
+                                </Button>
+                                <a
+                                  href={`/evals/group/${group.groupId}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="inline-flex items-center justify-center h-6 w-6 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent flex-shrink-0"
+                                  data-testid={`open-group-${group.groupId}`}
+                                  aria-label="Open group detail in new tab"
+                                  title="Open group detail in new tab"
+                                >
+                                  <ExternalLink className="w-3 h-3" />
+                                </a>
+                              </>
                             )}
                             <Badge variant="secondary" className="text-[9px] font-mono" data-testid={`group-jobs-count-${group.groupId}`}>
                               {group.jobs.length} job{group.jobs.length !== 1 ? 's' : ''}

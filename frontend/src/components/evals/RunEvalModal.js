@@ -12,10 +12,11 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { listDatasets, listDatasetsByType, getDatasetForProblem, submitEvalJobs, submitEvalJobsWithEs, submitTestingAgentEval, checkAgentExists, getVerifierConfig, getDatasetView } from '@/services/evalApi';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
-import { Loader2, Rocket, FileText, Search, ChevronRight, Check, AlertCircle, X } from 'lucide-react';
+import { Loader2, Rocket, FileText, Search, ChevronRight, Check, AlertCircle, X, ChevronDown } from 'lucide-react';
 import { parseApiError } from '@/lib/errorUtils';
 import { useEnv } from '@/components/layout/EnvSwitcher';
 import { EphPicker } from '@/components/cortex/EphPicker';
@@ -321,7 +322,15 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
   // `group_run_id` suffix `-run-1` / `-run-2` / … so the harness sees N
   // distinct groups. Default = 1 (no suffix, original behaviour).
   const NUM_RUNS_MAX = 10;
-  const [numRuns, setNumRuns] = useState(1);
+  // Stored as a raw string so the input can be freely edited (backspace,
+  // empty, typing partial values). Clamped to [1..NUM_RUNS_MAX] only
+  // on submit (and onBlur, for the visible value).
+  const [numRunsRaw, setNumRunsRaw] = useState('1');
+  const numRuns = useMemo(() => {
+    const n = Math.trunc(Number(numRunsRaw));
+    if (!Number.isFinite(n) || n < 1) return 1;
+    return Math.min(NUM_RUNS_MAX, n);
+  }, [numRunsRaw]);
   // Progress indicator on the Submit button when numRuns > 1.
   const [runProgress, setRunProgress] = useState(null); // null | { current, total }
 
@@ -398,7 +407,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
       setAgentCheckMsg('');
       setModelNameOverride('');
       setModelOverrideTouched(false);
-      setNumRuns(1);
+      setNumRunsRaw('1');
       setRunProgress(null);
       setJudgeConfig(null);
       setScratchVerifier(null);
@@ -827,8 +836,8 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
             <Rocket className="w-5 h-5" />
             Run Evaluation
           </DialogTitle>
-          <p className="text-xs text-muted-foreground mt-1">
-            Pick problems, configure resources, then submit
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Pick problems → configure → submit
           </p>
         </DialogHeader>
 
@@ -1057,166 +1066,127 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
             <div className="space-y-4 py-2">
               {hasMixedTypes && (
                 <div
-                  className="flex items-start gap-2 rounded-md border border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300 px-3 py-2 text-[11px]"
+                  className="flex items-center gap-2 rounded-md border border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300 px-3 py-1.5 text-[11px]"
                   data-testid="mixed-types-warning"
                 >
-                  <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
-                  <span>
-                    You&apos;ve mixed <strong>testing_agent_bench</strong> problems with other
-                    dataset types. Submit them as separate batches — testing_agent_bench
-                    forks a prod job and uses a different harness endpoint.
-                  </span>
+                  <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span>Mixed types — submit testing_agent_bench separately.</span>
                 </div>
               )}
               {isTestingAgentMode && (
                 <div
-                  className="flex items-start gap-2 rounded-md border border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-300 px-3 py-2 text-[11px]"
+                  className="flex items-center gap-2 rounded-md border border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-300 px-3 py-1.5 text-[11px]"
                   data-testid="testing-agent-mode-banner"
                 >
-                  <Rocket className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
-                  <span>
-                    <strong>Testing Agent Bench mode.</strong> The harness will fork
-                    each prod job and run the testing agent against the dataset&apos;s
-                    HITL input + golden output. Infra config is sourced from the
-                    forked prod job, so only Group Run ID and User ID are needed.
-                  </span>
+                  <Rocket className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span>Testing Agent Bench mode — infra inherited from forked prod job.</span>
                 </div>
               )}
 
-              {/* Group name + Comment — always shown */}
+              {/* Group name — required, always visible */}
               <div>
                 <Label className="text-sm font-semibold">Group name *</Label>
-                <p className="text-[11px] text-muted-foreground mt-0.5 mb-2">
-                  Display name for this batch. The harness mints a stable UUID
-                  for the run group server-side — your name is just the label.
-                </p>
                 <Input
                   value={groupName}
                   onChange={e => setGroupName(e.target.value)}
                   placeholder="e.g. nightly, sonnet-vs-opus"
-                  className="font-mono text-sm"
+                  className="font-mono text-sm mt-1.5"
                   data-testid="eval-group-name"
                 />
               </div>
+
+              {/* Run Nx — compact inline pattern: "Run [N] x" */}
               <div>
-                <Label className="text-sm font-semibold">Comment <span className="text-muted-foreground font-normal">(optional)</span></Label>
-                <p className="text-[11px] text-muted-foreground mt-0.5 mb-2">
-                  Short note shown next to the group in the runs list.
-                </p>
-                <Textarea
-                  value={groupComment}
-                  onChange={e => setGroupComment(e.target.value)}
-                  rows={2}
-                  placeholder="What is this batch testing?"
-                  className="text-sm resize-none"
-                  data-testid="eval-group-comment"
-                />
+                <Label className="text-sm font-semibold">Runs</Label>
+                <div className="flex items-center gap-1.5 mt-1.5">
+                  <span className="text-sm text-muted-foreground font-mono">Run</span>
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    value={numRunsRaw}
+                    onChange={e => {
+                      // Allow any digit-only text (incl. empty). Strip
+                      // non-digits silently so paste of '3,000' becomes '3000'.
+                      const raw = (e.target.value || '').replace(/[^0-9]/g, '');
+                      setNumRunsRaw(raw);
+                    }}
+                    onBlur={() => {
+                      // Snap to a valid value on blur so the user sees the
+                      // effective number that will actually be submitted.
+                      const n = Math.trunc(Number(numRunsRaw));
+                      if (!Number.isFinite(n) || n < 1) { setNumRunsRaw('1'); return; }
+                      setNumRunsRaw(String(Math.min(NUM_RUNS_MAX, n)));
+                    }}
+                    className="font-mono text-sm w-16 text-center"
+                    data-testid="eval-num-runs"
+                  />
+                  <span className="text-sm text-muted-foreground font-mono">x</span>
+                  <span className="text-[10px] text-muted-foreground ml-2">max {NUM_RUNS_MAX}</span>
+                </div>
               </div>
 
-              {/* Number of Runs — always shown */}
-              <div>
-                <Label className="text-sm font-semibold">Number of Runs</Label>
-                <p className="text-[11px] text-muted-foreground mt-0.5 mb-2">
-                  How many times to repeat this batch. Each run gets its own{' '}
-                  <code className="font-mono">group_run_id</code> suffix{' '}
-                  (<code className="font-mono">-run-1</code>,{' '}
-                  <code className="font-mono">-run-2</code>, …) so the harness
-                  treats them as distinct groups. Max{' '}
-                  <span className="font-mono">{NUM_RUNS_MAX}</span>.
-                </p>
-                <Input
-                  type="number"
-                  min={1}
-                  max={NUM_RUNS_MAX}
-                  value={numRuns}
-                  onChange={e => {
-                    const n = Number(e.target.value);
-                    if (Number.isNaN(n)) return;
-                    setNumRuns(Math.min(NUM_RUNS_MAX, Math.max(1, Math.trunc(n))));
-                  }}
-                  className="font-mono text-sm w-28"
-                  data-testid="eval-num-runs"
-                />
-              </div>
+              {/* Comment — collapsed by default (optional) */}
+              <Collapsible>
+                <CollapsibleTrigger
+                  className="w-full flex items-center justify-between text-xs text-muted-foreground hover:text-foreground border-b border-border/40 pb-1.5 [&[data-state=open]>svg]:rotate-180"
+                  data-testid="toggle-comment"
+                >
+                  <span className="font-semibold">Comment{groupComment ? ' ·' : ''}{groupComment ? <span className="ml-1 italic font-normal text-foreground/80">{groupComment.length} chars</span> : ''}</span>
+                  <ChevronDown className="w-3.5 h-3.5 transition-transform" />
+                </CollapsibleTrigger>
+                <CollapsibleContent className="pt-2">
+                  <Textarea
+                    value={groupComment}
+                    onChange={e => setGroupComment(e.target.value)}
+                    rows={2}
+                    placeholder="What is this batch testing?"
+                    className="text-sm resize-none"
+                    data-testid="eval-group-comment"
+                  />
+                </CollapsibleContent>
+              </Collapsible>
 
               {!isTestingAgentMode && (
                 <>
-                  {/* Template */}
-                  <div>
-                    <Label className="text-sm font-semibold">Template Name</Label>
-                    <p className="text-[11px] text-muted-foreground mt-0.5 mb-2">Optional: start from a pre-built template snapshot</p>
-                    <Input
-                      value={templateName}
-                      onChange={e => setTemplateName(e.target.value)}
-                      placeholder="e.g. task_manager, ecom_store"
-                      className="font-mono text-sm"
-                      data-testid="eval-template-name"
-                    />
-                  </div>
+                  {/* Template — collapsed */}
+                  <Collapsible>
+                    <CollapsibleTrigger
+                      className="w-full flex items-center justify-between text-xs text-muted-foreground hover:text-foreground border-b border-border/40 pb-1.5 [&[data-state=open]>svg]:rotate-180"
+                      data-testid="toggle-template"
+                    >
+                      <span className="font-semibold">Template name{templateName ? <span className="ml-1 font-mono font-normal text-foreground/80">· {templateName}</span> : ''}</span>
+                      <ChevronDown className="w-3.5 h-3.5 transition-transform" />
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="pt-2">
+                      <Input
+                        value={templateName}
+                        onChange={e => setTemplateName(e.target.value)}
+                        placeholder="e.g. task_manager, ecom_store"
+                        className="font-mono text-sm"
+                        data-testid="eval-template-name"
+                      />
+                    </CollapsibleContent>
+                  </Collapsible>
 
-                  {/* Agent name override (free-text) + existence check */}
-                  <div>
-                    <Label className="text-sm font-semibold">Agent name</Label>
-                <p className="text-[11px] text-muted-foreground mt-0.5 mb-2">
-                  Optional. Type any agent name the harness/cortex recognizes
-                  (e.g. <code className="font-mono">full_stack_app_builder_cloud_v8_sonnet_4_5</code>).
-                  When set, sent as the batch-level <code className="font-mono">agent_name</code>.
-                </p>
-                <Input
-                  value={agentNameOverride}
-                  onChange={e => setAgentNameOverride(e.target.value)}
-                  placeholder="e.g. full_stack_app_builder_cloud_v8_sonnet_4_5"
-                  className="font-mono text-sm"
-                  data-testid="eval-agent-name-override"
-                />
-
-                {/* Eph name + verify button */}
-                <div className="mt-2 flex items-center gap-2">
-                  <Input
-                    value={ephName}
-                    onChange={e => setEphName(e.target.value)}
-                    placeholder="eph name (e.g. leadgen1)"
-                    className="font-mono text-xs h-8 flex-1"
-                    data-testid="eval-eph-name"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-8 text-xs"
-                    onClick={handleCheckAgent}
-                    disabled={checking || !ephName.trim() || !agentNameOverride.trim()}
-                    data-testid="check-agent-btn"
-                  >
-                    {checking ? (
-                      <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
-                    ) : (
-                      <Search className="w-3.5 h-3.5 mr-1" />
-                    )}
-                    Check
-                  </Button>
-                </div>
-
-                {/* Status pill */}
-                {agentVerified === true && (
-                  <div
-                    className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-mono text-emerald-600 dark:text-emerald-400"
-                    data-testid="agent-check-ok"
-                  >
-                    <Check className="w-3 h-3" />
-                    {agentCheckMsg}
-                  </div>
-                )}
-                {agentVerified === false && (
-                  <div
-                    className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-mono text-rose-600 dark:text-rose-400"
-                    data-testid="agent-check-fail"
-                  >
-                    <AlertCircle className="w-3 h-3" />
-                    {agentCheckMsg}
-                  </div>
-                )}
-              </div>
+                  {/* Agent name — collapsed; eph input REMOVED per spec */}
+                  <Collapsible>
+                    <CollapsibleTrigger
+                      className="w-full flex items-center justify-between text-xs text-muted-foreground hover:text-foreground border-b border-border/40 pb-1.5 [&[data-state=open]>svg]:rotate-180"
+                      data-testid="toggle-agent-name"
+                    >
+                      <span className="font-semibold">Agent name{agentNameOverride.trim() ? <span className="ml-1 font-mono font-normal text-foreground/80">· {agentNameOverride.trim()}</span> : ''}</span>
+                      <ChevronDown className="w-3.5 h-3.5 transition-transform" />
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="pt-2">
+                      <Input
+                        value={agentNameOverride}
+                        onChange={e => setAgentNameOverride(e.target.value)}
+                        placeholder="e.g. full_stack_app_builder_cloud_v8_sonnet_4_5"
+                        className="font-mono text-sm"
+                        data-testid="eval-agent-name-override"
+                      />
+                    </CollapsibleContent>
+                  </Collapsible>
                 </>
               )}
 
@@ -1224,11 +1194,8 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
               {isTestingAgentMode && (
                 <div>
                   <Label className="text-sm font-semibold">Agent Name (override)</Label>
-                  <p className="text-[11px] text-muted-foreground mt-0.5 mb-2">
-                    Optional. When set, overrides each dataset&apos;s
-                    {' '}<code className="font-mono">attributes.agent_name</code>
-                    {' '}for this submission only — useful for A/B testing a
-                    different testing agent against the same HITL + golden.
+                  <p className="text-[10px] text-muted-foreground mt-0.5 mb-1.5">
+                    Overrides <code className="font-mono">attributes.agent_name</code> for this run only.
                   </p>
                   <Input
                     value={agentNameOverride}
@@ -1244,13 +1211,8 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
               {isTestingAgentMode && (
                 <div>
                   <Label className="text-sm font-semibold">Model Name</Label>
-                  <p className="text-[11px] text-muted-foreground mt-0.5 mb-2">
-                    Pre-filled from the selected dataset&apos;s{' '}
-                    <code className="font-mono">attributes.model_name</code>.
-                    Edit to override for this run only — the dataset is not
-                    modified. Leave on{' '}
-                    <span className="font-mono">(default)</span> to use the
-                    agent&apos;s default model (key is omitted from the payload).
+                  <p className="text-[10px] text-muted-foreground mt-0.5 mb-1.5">
+                    Pre-filled from dataset. Leave on <span className="font-mono">(default)</span> to omit.
                   </p>
                   <ModelNamePicker
                     value={modelNameOverride}
@@ -1303,8 +1265,16 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 <>
               <Separator />
 
-              <div className="space-y-3">
-                <Label className="text-sm font-semibold">Resources</Label>
+              <Collapsible>
+                <CollapsibleTrigger
+                  className="w-full flex items-center justify-between text-xs text-muted-foreground hover:text-foreground border-b border-border/40 pb-1.5 [&[data-state=open]>svg]:rotate-180"
+                  data-testid="toggle-resources"
+                >
+                  <span className="font-semibold">Resources <span className="font-mono font-normal text-foreground/80 ml-1">· {cpus} cpu · {memoryMb} MB · {storageGb} GB</span></span>
+                  <ChevronDown className="w-3.5 h-3.5 transition-transform" />
+                </CollapsibleTrigger>
+                <CollapsibleContent className="pt-3">
+                  <div className="space-y-3">
                 <div className="grid grid-cols-3 gap-3">
                   <div>
                     <Label className="text-xs">CPUs</Label>
@@ -1348,7 +1318,9 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                     </div>
                   )}
                 </div>
-              </div>
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
               <Separator />
               <div>
                 <button onClick={() => setShowExpConfig(!showExpConfig)} className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1" data-testid="toggle-exp-config">

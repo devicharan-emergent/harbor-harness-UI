@@ -1133,7 +1133,19 @@ export default function JobDetail() {
                   <>
                     <div>
                       <dt className="text-muted-foreground">Group ID</dt>
-                      <dd className="font-mono mt-0.5 text-[10px] break-all">{job.group_run_id || job.group_id}</dd>
+                      <dd className="mt-0.5">
+                        <a
+                          href={`/evals/group/${job.group_run_id || job.group_id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-mono text-[10px] break-all text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300 underline-offset-2 hover:underline inline-flex items-center gap-1"
+                          data-testid="jobdetail-group-link"
+                          title="Open group detail in new tab"
+                        >
+                          {job.group_run_id || job.group_id}
+                          <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />
+                        </a>
+                      </dd>
                     </div>
                     <Separator />
                   </>
