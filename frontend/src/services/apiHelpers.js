@@ -38,8 +38,6 @@ function urlMatches(url, matchers) {
 // request whose URL matches any of the provided regexes.
 export function attachOwnership(axiosInstance, matchers) {
   axiosInstance.interceptors.request.use((config) => {
-    // No need for permissions for now
-    return config;
     const createdBy = getCreatedBy();
     if (!createdBy) return config;
 
@@ -54,7 +52,7 @@ export function attachOwnership(axiosInstance, matchers) {
       const body = config.data;
       if (body == null) {
         config.data = { created_by: createdBy };
-      } else if (typeof body === 'object' && !Array.isArray(body)) {
+      } else if (typeof body === 'object' && !Array.isArray(body) && !(body instanceof FormData)) {
         // Don't clobber an explicit caller-supplied value.
         if (body.created_by == null) {
           config.data = { ...body, created_by: createdBy };

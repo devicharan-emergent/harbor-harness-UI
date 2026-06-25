@@ -1649,6 +1649,80 @@ async def proxy_group_eval_jobs(
         raise HTTPException(status_code=500, detail=f"Eval API error: {str(e)}")
 
 
+# ── Group-run comments (BFF-only; stored in our Mongo, not the harness) ──
+# Each comment belongs to a group_run_id. Anyone authenticated can read +
+# add a comment; only the author can delete their own. This is intentionally
+# small — a simple lightweight discussion thread, not a full editor.
+@api_router.get("/eval/groups/{group_id}/comments")
+async def list_group_comments(group_id: str, request: Request):
+    # Auth optional for read so existing test sessions / browsers that
+    # didn't pass a token before this landed don't suddenly 401. Listing
+    # the comments doesn't leak more than is already exposed in the jobs.
+    docs = await db.group_run_comments.find(
+        {"group_id": group_id},
+        {"_id": 0},
+    ).sort("created_at", 1).to_list(length=500)
+    return {"comments": docs}
+
+
+@api_router.post("/eval/groups/{group_id}/comments")
+async def create_group_comment(group_id: str, body: dict, request: Request):
+    user = await _get_session_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="auth required")
+    text = (body or {}).get("text") or ""
+    text = text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+    if len(text) > 4000:
+        raise HTTPException(status_code=400, detail="text too long (max 4000 chars)")
+    now = datetime.now(timezone.utc)
+    doc = {
+        "comment_id": str(uuid.uuid4()),
+        "group_id": group_id,
+        "text": text,
+        "created_by_user_id": user.get("user_id"),
+        "created_by_email": user.get("email"),
+        "created_by_name": user.get("name") or user.get("email"),
+        # Store as ISO strings so JSONResponse can serialise without a
+        # custom encoder (mirrors how user_sessions.expires_at is stored
+        # when read back from Mongo).
+        "created_at": now.isoformat(),
+        "updated_at": now.isoformat(),
+    }
+    await db.group_run_comments.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.delete("/eval/groups/{group_id}/comments/{comment_id}")
+async def delete_group_comment(
+    group_id: str,
+    comment_id: str,
+    request: Request,
+):
+    user = await _get_session_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="auth required")
+    existing = await db.group_run_comments.find_one(
+        {"group_id": group_id, "comment_id": comment_id},
+        {"_id": 0},
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="comment not found")
+    if existing.get("created_by_user_id") != user.get("user_id"):
+        raise HTTPException(
+            status_code=403,
+            detail="only the comment author can delete this comment",
+        )
+    await db.group_run_comments.delete_one(
+        {"group_id": group_id, "comment_id": comment_id},
+    )
+    return {"ok": True, "deleted": comment_id}
+
+
+
+
 @api_router.get("/eval/datasets")
 async def proxy_datasets(
     limit: int = Query(50, ge=1, le=200),

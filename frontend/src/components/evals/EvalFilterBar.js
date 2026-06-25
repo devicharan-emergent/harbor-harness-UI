@@ -8,24 +8,40 @@ import { Search, SlidersHorizontal, X, Calendar } from 'lucide-react';
 // Shape of the `value` prop:
 //   { batch: string, agent: string, prompt: string,
 //     dateFrom: string (YYYY-MM-DD), dateTo: string (YYYY-MM-DD),
-//     mode: 'and' | 'or' }
+//     mode: 'and' | 'or',
+//     mineOnly: boolean }
+// `mineOnly` is also passed to the BFF jobs list as `created_by=<user_id>`
+// so it works across pagination (server-side filter) AND is enforced
+// client-side as a defence in depth on the predicate.
 
 export const EMPTY_FILTERS = {
   batch: '', agent: '', prompt: '', dateFrom: '', dateTo: '', mode: 'and',
+  mineOnly: false,
 };
 
 // Build the predicate function used to filter eval jobs. Exported so EvalRuns
 // can apply the same predicate to both the flat job list and the per-group
 // detail jobs fetched on expand.
-export function buildJobFilter(filters) {
+// `currentUserId` is the authenticated user's user_id (UUID) — when present
+// AND filters.mineOnly is on, jobs whose `created_by` doesn't match are
+// hidden. Server already filters, but stale cached lists or jobs from older
+// flows that didn't stamp `created_by` would otherwise leak through.
+export function buildJobFilter(filters, currentUserId = null) {
   const batch = (filters.batch || '').trim().toLowerCase();
   const agent = (filters.agent || '').trim().toLowerCase();
   const prompt = (filters.prompt || '').trim().toLowerCase();
   const from = filters.dateFrom ? new Date(filters.dateFrom + 'T00:00:00').getTime() : null;
   const to = filters.dateTo ? new Date(filters.dateTo + 'T23:59:59').getTime() : null;
   const mode = filters.mode === 'or' ? 'or' : 'and';
+  const mineOnly = Boolean(filters.mineOnly) && Boolean(currentUserId);
 
   return (job) => {
+    // Mine-only is a hard AND filter regardless of mode — it's an
+    // identity scope, not a "match any" criterion.
+    if (mineOnly) {
+      const owner = job.created_by || job.config?.created_by || '';
+      if (owner !== currentUserId) return false;
+    }
     const checks = [];
     if (batch) {
       const gid = (
@@ -84,8 +100,8 @@ export function EvalFilterBar({ value, onChange }) {
   }, [value]);
 
   const activeCount = useMemo(
-    () => advancedCount + (value.batch?.trim() ? 1 : 0),
-    [advancedCount, value.batch],
+    () => advancedCount + (value.batch?.trim() ? 1 : 0) + (value.mineOnly ? 1 : 0),
+    [advancedCount, value.batch, value.mineOnly],
   );
 
   return (
@@ -102,6 +118,19 @@ export function EvalFilterBar({ value, onChange }) {
             data-testid="filter-batch-input"
           />
         </div>
+
+        <Button
+          type="button"
+          variant={value.mineOnly ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => update({ mineOnly: !value.mineOnly })}
+          className="h-8 gap-1.5"
+          aria-pressed={Boolean(value.mineOnly)}
+          data-testid="filter-mine-only-toggle"
+          title="Show only eval runs created by me"
+        >
+          <span className="text-xs">Mine only</span>
+        </Button>
 
         <Button
           type="button"

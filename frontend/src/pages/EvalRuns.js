@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { getEvalStats, listEvalJobs, listGroupJobs, getEvalAggregate, cancelEvalJob } from '@/services/evalApi';
+import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -13,6 +14,7 @@ import { parseApiError } from '@/lib/errorUtils';
 import { RunEvalModal } from '@/components/evals/RunEvalModal';
 import { EvalFilterBar, EMPTY_FILTERS, buildJobFilter } from '@/components/evals/EvalFilterBar';
 import { OpenInChatButton } from '@/components/evals/OpenInChatButton';
+import { GroupCommentsPanel } from '@/components/evals/GroupCommentsPanel';
 
 const STATUS_CONFIG = {
   queued: { color: 'bg-amber-500', icon: Clock, label: 'Queued' },
@@ -181,6 +183,8 @@ function GroupAvgScore({ jobs }) {
 
 export default function EvalRuns() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const currentUserId = user?.user_id || null;
   const [stats, setStats] = useState(null);
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -237,19 +241,24 @@ export default function EvalRuns() {
       (filters.agent || '').trim() ||
       (filters.prompt || '').trim() ||
       filters.dateFrom ||
-      filters.dateTo,
+      filters.dateTo ||
+      filters.mineOnly,
     )
   ), [filters]);
 
   const fetchJobs = useCallback(async () => {
     setLoading(true);
     try {
+      // When "Mine only" is on we pass `created_by` to the server so the
+      // filter works across pagination (server-side narrowing) instead of
+      // only on whatever happens to be in the current page.
+      const mineParam = (filters.mineOnly && currentUserId) ? { created_by: currentUserId } : {};
       if (hasActiveFilter) {
         // Exhaustive fetch (capped) so client-side filters see everything.
         const all = [];
         const MAX_JOBS = 2000; // safety cap — stops well before OOM
         for (let offset = 0; offset < MAX_JOBS; offset += pageSize) {
-          const params = { limit: pageSize, offset };
+          const params = { limit: pageSize, offset, ...mineParam };
           if (selectedStatus !== 'all') params.status = selectedStatus;
           // eslint-disable-next-line no-await-in-loop
           const chunk = await listEvalJobs(params);
@@ -259,7 +268,7 @@ export default function EvalRuns() {
         }
         setJobs(all);
       } else {
-        const params = { limit: pageSize, offset: page * pageSize };
+        const params = { limit: pageSize, offset: page * pageSize, ...mineParam };
         if (selectedStatus !== 'all') params.status = selectedStatus;
         const data = await listEvalJobs(params);
         setJobs(data.jobs || []);
@@ -270,7 +279,7 @@ export default function EvalRuns() {
     } finally {
       setLoading(false);
     }
-  }, [selectedStatus, page, hasActiveFilter]);
+  }, [selectedStatus, page, hasActiveFilter, filters.mineOnly, currentUserId]);
 
   useEffect(() => { fetchStats(); }, []);
   useEffect(() => { fetchJobs(); }, [fetchJobs]);
@@ -279,7 +288,10 @@ export default function EvalRuns() {
 
   // Group jobs by group_run_id (falling back to legacy group_id for compatibility)
   // Filter first — groups with zero matching jobs disappear entirely.
-  const filterPredicate = useMemo(() => buildJobFilter(filters), [filters]);
+  const filterPredicate = useMemo(
+    () => buildJobFilter(filters, currentUserId),
+    [filters, currentUserId],
+  );
 
   const filteredJobs = useMemo(
     () => jobs.filter(filterPredicate),
@@ -497,13 +509,17 @@ export default function EvalRuns() {
                 </CollapsibleTrigger>
 
                 <CollapsibleContent>
-                  <div className="ml-6 mt-1 space-y-1 pb-2">
+                  <div className="ml-6 mt-1 space-y-2 pb-2">
                     {isLoading ? (
                       <div className="flex items-center justify-center py-6">
                         <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
                       </div>
                     ) : (<>
                       <GroupAggregateSummary aggregate={groupAggregates[group.groupId]} />
+                      {!isUngrouped && (
+                        <GroupCommentsPanel groupId={group.groupId} />
+                      )}
+                      <div className="space-y-1">
                       {groupJobs.map(job => (
                         <div
                           key={job.id}
@@ -558,6 +574,7 @@ export default function EvalRuns() {
                           <ExternalLink className="w-3 h-3 text-muted-foreground/40 flex-shrink-0" />
                         </div>
                       ))}
+                      </div>
                     </>)}
                   </div>
                 </CollapsibleContent>
