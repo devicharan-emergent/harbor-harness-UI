@@ -1156,11 +1156,15 @@ export default function JobDetail() {
             </CardHeader>
             <CardContent>
               <dl className="space-y-2 text-xs">
-                <div>
-                  <dt className="text-muted-foreground">Job ID</dt>
-                  <dd className="font-mono mt-0.5 text-[10px] break-all">{job.id}</dd>
-                </div>
-                <Separator />
+                {job.cortex_job_id && (
+                  <>
+                    <div>
+                      <dt className="text-muted-foreground">Cortex Job ID</dt>
+                      <dd className="font-mono mt-0.5 text-[10px] break-all">{job.cortex_job_id}</dd>
+                    </div>
+                    <Separator />
+                  </>
+                )}
                 <div>
                   <dt className="text-muted-foreground">Problem</dt>
                   <dd className="font-mono mt-0.5">{job.problem}</dd>
@@ -1246,6 +1250,11 @@ export default function JobDetail() {
                   </CollapsibleTrigger>
                   <CollapsibleContent>
                     <div className="space-y-2 pt-2">
+                      <div>
+                        <dt className="text-muted-foreground">Job ID</dt>
+                        <dd className="font-mono mt-0.5 text-[10px] break-all">{job.id}</dd>
+                      </div>
+                      <Separator />
                       {job.user_id && (
                         <>
                           <div>
@@ -1260,15 +1269,6 @@ export default function JobDetail() {
                           <div>
                             <dt className="text-muted-foreground">K8s Job</dt>
                             <dd className="font-mono mt-0.5 text-[10px] break-all">{job.k8s_job_name}</dd>
-                          </div>
-                          <Separator />
-                        </>
-                      )}
-                      {job.cortex_job_id && (
-                        <>
-                          <div>
-                            <dt className="text-muted-foreground">Cortex Job ID</dt>
-                            <dd className="font-mono mt-0.5 text-[10px] break-all">{job.cortex_job_id}</dd>
                           </div>
                           <Separator />
                         </>

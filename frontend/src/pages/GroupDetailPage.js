@@ -73,9 +73,15 @@ function GroupStatusBar({ jobs }) {
 function ConfigSnapshotCard({ firstJob }) {
   if (!firstJob) return null;
   const cfg = firstJob.config || {};
+  // For scratch_bench / bug_bench / test_report_bench the harness does
+  // NOT return a separate `model_name` — the model is baked into the
+  // agent_name itself (e.g. `..._sonnet_4_5`). Only testing_agent_bench
+  // jobs carry an explicit model_name. Same story for template_name.
+  // Render those cells only when they actually exist; show "—" only for
+  // Agent (which every job has).
   const agentName = getJobAgentName(firstJob) || '—';
-  const modelName = getJobModelName(firstJob) || '—';
-  const templateName = getJobTemplateName(firstJob) || '—';
+  const modelName = getJobModelName(firstJob);
+  const templateName = getJobTemplateName(firstJob);
   return (
     <Card data-testid="group-config-card">
       <CardHeader>
@@ -92,14 +98,34 @@ function ConfigSnapshotCard({ firstJob }) {
             <dt className="text-muted-foreground text-[10px] uppercase tracking-wide">Agent</dt>
             <dd className="font-mono mt-0.5 truncate" title={agentName} data-testid="group-config-agent">{agentName}</dd>
           </div>
-          <div>
-            <dt className="text-muted-foreground text-[10px] uppercase tracking-wide">Model</dt>
-            <dd className="font-mono mt-0.5 truncate" title={modelName} data-testid="group-config-model">{modelName}</dd>
-          </div>
-          <div>
-            <dt className="text-muted-foreground text-[10px] uppercase tracking-wide">Template</dt>
-            <dd className="font-mono mt-0.5 truncate" title={templateName} data-testid="group-config-template">{templateName}</dd>
-          </div>
+          {modelName ? (
+            <div>
+              <dt className="text-muted-foreground text-[10px] uppercase tracking-wide">Model</dt>
+              <dd className="font-mono mt-0.5 truncate" title={modelName} data-testid="group-config-model">{modelName}</dd>
+            </div>
+          ) : (
+            <div>
+              <dt className="text-muted-foreground text-[10px] uppercase tracking-wide">Model</dt>
+              <dd
+                className="mt-0.5 text-[10px] text-muted-foreground italic"
+                title="Model is encoded inside the agent name (e.g. ..._sonnet_4_5). Only testing_agent_bench runs send a separate model_name."
+                data-testid="group-config-model"
+              >
+                implicit (from agent)
+              </dd>
+            </div>
+          )}
+          {templateName ? (
+            <div>
+              <dt className="text-muted-foreground text-[10px] uppercase tracking-wide">Template</dt>
+              <dd className="font-mono mt-0.5 truncate" title={templateName} data-testid="group-config-template">{templateName}</dd>
+            </div>
+          ) : (
+            <div>
+              <dt className="text-muted-foreground text-[10px] uppercase tracking-wide">Template</dt>
+              <dd className="mt-0.5 text-[10px] text-muted-foreground italic" data-testid="group-config-template">none</dd>
+            </div>
+          )}
           <div>
             <dt className="text-muted-foreground text-[10px] uppercase tracking-wide">Resources</dt>
             <dd className="font-mono mt-0.5">

@@ -261,10 +261,16 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
   const [storageGb, setStorageGb] = useState(10);
   const [headed, setHeaded] = useState(true);
   const [forceBuild, setForceBuild] = useState(false);
-  // user_id is now sourced from the authenticated session (no UI). The
-  // user_id stamp is what the harness uses for job ownership lookups.
+  // user_id is seeded from the authenticated session but the user can
+  // override it from the Configure step (collapsed under "User ID").
   const { user } = useAuth();
-  const userId = user?.user_id || '';
+  const [userId, setUserId] = useState(user?.user_id || '');
+  // Keep userId synced with the auth user when the modal mounts and the
+  // session resolves.
+  useEffect(() => {
+    if (!userId && user?.user_id) setUserId(user.user_id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.user_id]);
 
   // Experiment config
   const [showExpConfig, setShowExpConfig] = useState(false);
@@ -1195,6 +1201,42 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                   </Collapsible>
                 </>
               )}
+
+              {/* User ID — collapsed; defaults to logged-in user, override
+                  when stamping jobs on behalf of another account */}
+              <Collapsible>
+                <CollapsibleTrigger
+                  className="w-full flex items-center justify-between text-xs text-muted-foreground hover:text-foreground border-b border-border/40 pb-1.5 [&[data-state=open]>svg]:rotate-180"
+                  data-testid="toggle-user-id"
+                >
+                  <span className="font-semibold">
+                    User ID
+                    <span className="ml-1 font-mono font-normal text-foreground/80 text-[10px]">
+                      · {userId ? `${userId.substring(0, 8)}…` : '(unset)'}
+                    </span>
+                  </span>
+                  <ChevronDown className="w-3.5 h-3.5 transition-transform" />
+                </CollapsibleTrigger>
+                <CollapsibleContent className="pt-2 space-y-1.5">
+                  <Input
+                    value={userId}
+                    onChange={e => setUserId(e.target.value)}
+                    placeholder="user_id uuid"
+                    className="font-mono text-xs"
+                    data-testid="eval-user-id"
+                  />
+                  {user?.user_id && userId !== user.user_id && (
+                    <button
+                      type="button"
+                      className="text-[10px] text-muted-foreground hover:text-foreground underline underline-offset-2"
+                      onClick={() => setUserId(user.user_id)}
+                      data-testid="eval-user-id-reset"
+                    >
+                      Reset to logged-in user
+                    </button>
+                  )}
+                </CollapsibleContent>
+              </Collapsible>
 
               {/* Agent name override — testing_agent_mode only */}
               {isTestingAgentMode && (

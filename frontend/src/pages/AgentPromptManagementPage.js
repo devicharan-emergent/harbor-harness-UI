@@ -44,12 +44,9 @@ export default function AgentPromptManagementPage() {
   };
 
   return (
-    <div className="space-y-3" data-testid="agent-prompt-management-page">
+    <div className="space-y-4" data-testid="agent-prompt-management-page">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-baseline gap-3 min-w-0">
-          <h1 className="text-xl font-semibold leading-tight truncate">Agent &amp; Prompt Management</h1>
-          <span className="text-[11px] text-muted-foreground hidden sm:inline">embedded view</span>
-        </div>
+        <h1 className="text-2xl font-bold">Agent &amp; Prompt Management</h1>
         <div className="flex items-center gap-1.5">
           <Button
             variant="ghost"
