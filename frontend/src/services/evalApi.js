@@ -12,28 +12,10 @@ const evalApiClient = axios.create({
   timeout: 30000,
 });
 
-// Attach the session token as ?access_token=<acm_session_token> on every
-// /api/eval/* request — protected routes (e.g. comments POST/DELETE) rely on
-// `_get_session_user` resolving the token from cookie / Authorization /
-// access_token query param. Without this interceptor the auth helper never
-// sees the token and returns 401.
-evalApiClient.interceptors.request.use((config) => {
-  let token = null;
-  try { token = window.localStorage.getItem('acm_session_token') || null; } catch { /* ignore */ }
-  if (token) {
-    config.params = { ...(config.params || {}), access_token: token };
-  }
-  return config;
-});
-
-// Inject created_by into write requests for eval-job + group-jobs endpoints.
-// Datasets, cortex agent checks, stats, and health are shared resources and
-// stay as-is. Reads (GET/DELETE) intentionally skip injection — server-side
-// `created_by` filtering for "Mine only" is opt-in by the caller passing the
-// param explicitly (see EvalRuns.fetchJobs).
+// Inject created_by into every eval-job + group-jobs request. Datasets,
+// cortex agent checks, stats, and health are shared resources and stay as-is.
 attachOwnership(evalApiClient, [
   /\/jobs(\/|$|-with-es$)/,
-  /\/testing-agent-evals(\/|$)/,
   /\/groups\/[^/]+\/jobs(\/|$)/,
 ]);
 
@@ -63,61 +45,6 @@ export const submitEvalJobsWithEs = async (payload) => {
 };
 
 /**
- * Submit a single testing_agent_bench eval (forks a prod job).
- * POST /api/eval/testing-agent-evals  →  harness /api/v1/testing-agent-evals
- * Body: { prod_job_id, agent_name, hitl_input, golden_output, model_name?,
- *         group_run_id, user_id?, created_by (injected) }
- * Returns: { jobs: [{ id, problem, status, k8s_job_name, created_at }] }
- */
-export const submitTestingAgentEval = async (payload) => {
-  const response = await evalApiClient.post('/testing-agent-evals', payload);
-  return response.data;
-};
-
-/**
- * Verifier-config CRUD (per-bench, singleton-per-bench). Stored in OUR
- * Mongo keyed by bench type ("testing_agent_bench" or "scratch_bench_phased").
- * The prompt MUST contain bench-specific tokens — server 400s otherwise.
- *
- * GET    /api/eval/verifier-config?bench=<bench>
- * PUT    /api/eval/verifier-config?bench=<bench>     { prompt, model }
- * POST   /api/eval/verifier-config/reset?bench=<bench>
- */
-export const getVerifierConfig = async (bench) => {
-  const response = await evalApiClient.get('/verifier-config', { params: { bench } });
-  return response.data;
-};
-
-export const updateVerifierConfig = async (bench, payload) => {
-  const response = await evalApiClient.put('/verifier-config', payload, { params: { bench } });
-  return response.data;
-};
-
-export const resetVerifierConfig = async (bench) => {
-  const response = await evalApiClient.post('/verifier-config/reset', null, { params: { bench } });
-  return response.data;
-};
-
-/**
- * Legacy judge-config wrappers — kept for any older callers; both
- * surfaces below have been migrated to the verifier-config endpoints.
- */
-export const getJudgeConfig = async () => {
-  const response = await evalApiClient.get('/judge-config');
-  return response.data;
-};
-
-export const updateJudgeConfig = async (payload) => {
-  const response = await evalApiClient.put('/judge-config', payload);
-  return response.data;
-};
-
-export const resetJudgeConfig = async () => {
-  const response = await evalApiClient.post('/judge-config/reset');
-  return response.data;
-};
-
-/**
  * Check whether a cortex agent exists in a given ephemeral DB.
  * GET /api/eval/cortex/agents/exists?eph_name=&agent_name=
  * Returns: { exists: boolean, eph_name, agent_name }
@@ -138,101 +65,6 @@ export const getEvalJob = async (jobId) => {
   const response = await evalApiClient.get(`/jobs/${jobId}`);
   return response.data;
 };
-
-// ============ Eval Run Groups (editable name + comment) ============
-
-/**
- * List eval run groups (paged).
- * GET /api/eval/eval-run-groups?limit=&offset=&created_by=
- * Returns { groups: [{ group_run_id, group_name, comment, batch_id, created_by, created_at, updated_at }], limit, offset }
- */
-export const listEvalRunGroups = async (params = {}) => {
-  const response = await evalApiClient.get('/eval-run-groups', { params });
-  return response.data;
-};
-
-/**
- * Get a single eval run group.
- * GET /api/eval/eval-run-groups/{group_run_id}
- * Returns the group object; throws 404 if not found.
- */
-export const getEvalRunGroup = async (groupRunId) => {
-  const response = await evalApiClient.get(`/eval-run-groups/${groupRunId}`);
-  return response.data;
-};
-
-/**
- * Rename / re-comment a group. PATCH semantics:
- *   omit field         → unchanged
- *   { group_name: 'x' } → rename (display only; jobs untouched)
- *   { comment: 'text' } → set
- *   { comment: '' }     → clear
- * Returns the updated group object.
- */
-export const patchEvalRunGroup = async (groupRunId, updates) => {
-  const body = {};
-  if (updates.group_name !== undefined) body.group_name = updates.group_name;
-  if (updates.comment !== undefined) body.comment = updates.comment;
-  const response = await evalApiClient.patch(
-    `/eval-run-groups/${groupRunId}`,
-    body,
-  );
-  return response.data;
-};
-
-// ============ Dataset Views (saved selections) ============
-// Shared local-Mongo views: every authenticated user can list + load any
-// view; only the author can edit / delete (server enforces 403).
-
-/**
- * List all saved dataset views (newest first).
- * GET /api/eval/dataset-views?limit=
- * Returns { views: [{view_id, name, description, items, created_by_email,
- *                    created_by_name, created_at, updated_at}], total }
- */
-export const listDatasetViews = async (params = {}) => {
-  const response = await evalApiClient.get('/dataset-views', { params });
-  return response.data;
-};
-
-export const getDatasetView = async (viewId) => {
-  const response = await evalApiClient.get(`/dataset-views/${viewId}`);
-  return response.data;
-};
-
-/**
- * Create a new view.
- * POST /api/eval/dataset-views
- * Body: { name, description?, items: [{dataset_type, instance_id}] }
- */
-export const createDatasetView = async ({ name, description, items }) => {
-  const response = await evalApiClient.post('/dataset-views', {
-    name,
-    description: description || '',
-    items,
-  });
-  return response.data;
-};
-
-/**
- * Update a view (rename, edit items, edit description). Author-only on
- * the server (403 for non-authors). PATCH semantics — omitted fields stay
- * unchanged.
- */
-export const updateDatasetView = async (viewId, updates) => {
-  const body = {};
-  if (updates.name !== undefined) body.name = updates.name;
-  if (updates.description !== undefined) body.description = updates.description;
-  if (updates.items !== undefined) body.items = updates.items;
-  const response = await evalApiClient.patch(`/dataset-views/${viewId}`, body);
-  return response.data;
-};
-
-export const deleteDatasetView = async (viewId) => {
-  const response = await evalApiClient.delete(`/dataset-views/${viewId}`);
-  return response.data;
-};
-
 
 /**
  * List all eval jobs with filters
@@ -374,77 +206,6 @@ export const updateDataset = async (datasetId, data) => {
 export const deleteDataset = async (datasetId) => {
   const response = await evalApiClient.delete(`/datasets/${datasetId}`);
   return response.data;
-};
-
-/**
- * Bulk-import datasets from one or more CSV files of the selected type.
- * POST /api/eval/datasets/import?dataset_type=<type>  (multipart `files`)
- * Returns the harness envelope verbatim:
- *   { created: [iid], skipped: [iid], errors: [{ index, instance_id, error }] }
- *
- * IMPORTANT: do NOT set Content-Type here. Setting it to
- * 'multipart/form-data' strips axios's auto-generated `; boundary=…`
- * parameter and FastAPI then can't parse the multipart body. Pass
- * `undefined` so the instance default (`application/json`) is removed
- * and axios+browser set the correct multipart Content-Type w/ boundary.
- */
-export const importDatasetsCSV = async (datasetType, files) => {
-  const fd = new FormData();
-  for (const f of files) fd.append('files', f);
-  const response = await evalApiClient.post(
-    `/datasets/import?dataset_type=${encodeURIComponent(datasetType)}`,
-    fd,
-    {
-      headers: { 'Content-Type': undefined },
-      timeout: 120000,
-    },
-  );
-  return response.data;
-};
-
-/**
- * Download dataset(s) as CSV (or a multi-type zip when datasetType="all").
- * GET /api/eval/datasets/export?dataset_type=T[&instance_id=…&instance_id=…]
- *
- * Self-triggers a browser download using the server-provided
- * Content-Disposition filename. Throws on non-2xx so callers can surface
- * a toast. Re-parses the blob error body back to JSON so `parseApiError`
- * gets the real message instead of "[object Blob]".
- */
-export const exportDatasetsCSV = async (datasetType, instanceIds = []) => {
-  const params = new URLSearchParams({ dataset_type: datasetType });
-  for (const iid of instanceIds) params.append('instance_id', iid);
-  let response;
-  try {
-    response = await evalApiClient.get(`/datasets/export?${params.toString()}`, {
-      responseType: 'blob',
-      timeout: 120000,
-    });
-  } catch (err) {
-    const blob = err?.response?.data;
-    if (blob && typeof blob.text === 'function') {
-      try {
-        const txt = await blob.text();
-        try { err.response.data = JSON.parse(txt); }
-        catch { err.response.data = { message: txt }; }
-      } catch { /* keep original */ }
-    }
-    throw err;
-  }
-  const cd = response.headers['content-disposition'] || response.headers['Content-Disposition'] || '';
-  const m = /filename\*?=(?:UTF-8'')?["']?([^"';]+)["']?/i.exec(cd);
-  const fallback = datasetType === 'all' ? 'datasets_export.zip' : `${datasetType}.csv`;
-  const filename = (m && decodeURIComponent(m[1])) || fallback;
-
-  const url = URL.createObjectURL(response.data);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-  return { filename };
 };
 
 /**

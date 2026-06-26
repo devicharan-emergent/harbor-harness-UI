@@ -8,56 +8,31 @@ import { Search, SlidersHorizontal, X, Calendar } from 'lucide-react';
 // Shape of the `value` prop:
 //   { batch: string, agent: string, prompt: string,
 //     dateFrom: string (YYYY-MM-DD), dateTo: string (YYYY-MM-DD),
-//     mode: 'and' | 'or',
-//     mineOnly: boolean }
-// `mineOnly` is also passed to the BFF jobs list as `created_by=<user_id>`
-// so it works across pagination (server-side filter) AND is enforced
-// client-side as a defence in depth on the predicate.
+//     mode: 'and' | 'or' }
 
 export const EMPTY_FILTERS = {
   batch: '', agent: '', prompt: '', dateFrom: '', dateTo: '', mode: 'and',
-  mineOnly: false,
 };
 
 // Build the predicate function used to filter eval jobs. Exported so EvalRuns
 // can apply the same predicate to both the flat job list and the per-group
 // detail jobs fetched on expand.
-// `currentUserCreatedBy` is the authenticated user's `created_by` identity
-// (now the email — the harness migrated off the user_id UUID). When present
-// AND filters.mineOnly is on, jobs whose `created_by` doesn't match are
-// hidden. Server already filters, but stale cached lists or jobs from older
-// flows that didn't stamp `created_by` would otherwise leak through.
-// `groupNameByRunId` is an optional `{ [group_run_id]: group_name }` map so
-// the "Search batch name" input matches against the friendly editable
-// `group_name` in addition to the raw immutable `group_run_id`. We OR the
-// two matches together — typing "smoke" matches a group named "Smoke test"
-// even if its run id is opaque.
-export function buildJobFilter(filters, currentUserCreatedBy = null, groupNameByRunId = null) {
+export function buildJobFilter(filters) {
   const batch = (filters.batch || '').trim().toLowerCase();
   const agent = (filters.agent || '').trim().toLowerCase();
   const prompt = (filters.prompt || '').trim().toLowerCase();
   const from = filters.dateFrom ? new Date(filters.dateFrom + 'T00:00:00').getTime() : null;
   const to = filters.dateTo ? new Date(filters.dateTo + 'T23:59:59').getTime() : null;
   const mode = filters.mode === 'or' ? 'or' : 'and';
-  const mineOnly = Boolean(filters.mineOnly) && Boolean(currentUserCreatedBy);
 
   return (job) => {
-    // Mine-only is a hard AND filter regardless of mode — it's an
-    // identity scope, not a "match any" criterion.
-    if (mineOnly) {
-      const owner = job.created_by || job.config?.created_by || '';
-      if (owner !== currentUserCreatedBy) return false;
-    }
     const checks = [];
     if (batch) {
       const gid = (
         job.group_run_id || job.group_id ||
         job.config?.group_run_id || job.config?.group_id || ''
-      );
-      const gidLower = gid.toLowerCase();
-      const gname = (groupNameByRunId && gid ? (groupNameByRunId[gid] || '') : '').toLowerCase();
-      // OR — match against either the raw run id OR the friendly group_name.
-      checks.push(gidLower.includes(batch) || (gname ? gname.includes(batch) : false));
+      ).toLowerCase();
+      checks.push(gid.includes(batch));
     }
     if (agent) {
       const name = (job.config?.experiments?.agent_name || '').toLowerCase();
@@ -109,8 +84,8 @@ export function EvalFilterBar({ value, onChange }) {
   }, [value]);
 
   const activeCount = useMemo(
-    () => advancedCount + (value.batch?.trim() ? 1 : 0) + (value.mineOnly ? 1 : 0),
-    [advancedCount, value.batch, value.mineOnly],
+    () => advancedCount + (value.batch?.trim() ? 1 : 0),
+    [advancedCount, value.batch],
   );
 
   return (
@@ -122,24 +97,11 @@ export function EvalFilterBar({ value, onChange }) {
           <Input
             value={value.batch}
             onChange={(e) => update({ batch: e.target.value })}
-            placeholder="Search by group name or batch id…"
+            placeholder="Search batch name…"
             className="h-8 pl-8 text-xs"
             data-testid="filter-batch-input"
           />
         </div>
-
-        <Button
-          type="button"
-          variant={value.mineOnly ? 'default' : 'outline'}
-          size="sm"
-          onClick={() => update({ mineOnly: !value.mineOnly })}
-          className="h-8 gap-1.5"
-          aria-pressed={Boolean(value.mineOnly)}
-          data-testid="filter-mine-only-toggle"
-          title="Show only eval runs created by me"
-        >
-          <span className="text-xs">Mine only</span>
-        </Button>
 
         <Button
           type="button"

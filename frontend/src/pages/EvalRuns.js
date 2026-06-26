@@ -1,27 +1,20 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { getEvalStats, listEvalJobs, listGroupJobs, getEvalAggregate, cancelEvalJob, listEvalRunGroups, patchEvalRunGroup } from '@/services/evalApi';
-import { getJobAgentName, getJobModelName } from '@/lib/jobShape';
-import { useAuth } from '@/contexts/AuthContext';
+import { getEvalStats, listEvalJobs, listGroupJobs, getEvalAggregate } from '@/services/evalApi';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
-import { Loader2, Clock, Cpu, CheckCircle, XCircle, Ban, ActivitySquare, RefreshCw, Plus, ChevronDown, ChevronRight, Layers, ExternalLink, Timer, Pencil, MessageSquare } from 'lucide-react';
+import { Loader2, Clock, Cpu, CheckCircle, XCircle, Ban, ActivitySquare, RefreshCw, Plus, ChevronDown, ChevronRight, Layers, ExternalLink, Timer } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { Progress } from '@/components/ui/progress';
-import { toast } from 'sonner';
-import { parseApiError } from '@/lib/errorUtils';
 import { RunEvalModal } from '@/components/evals/RunEvalModal';
 import { EvalFilterBar, EMPTY_FILTERS, buildJobFilter } from '@/components/evals/EvalFilterBar';
+import { OpenInChatButton } from '@/components/evals/OpenInChatButton';
 
 const STATUS_CONFIG = {
   queued: { color: 'bg-amber-500', icon: Clock, label: 'Queued' },
-  generating: { color: 'bg-violet-500', icon: Cpu, label: 'Preparing' },
+  generating: { color: 'bg-violet-500', icon: Cpu, label: 'Generating' },
   running: { color: 'bg-blue-500', icon: ActivitySquare, label: 'Running' },
   completed: { color: 'bg-emerald-500', icon: CheckCircle, label: 'Completed' },
   failed: { color: 'bg-red-500', icon: XCircle, label: 'Failed' },
@@ -69,49 +62,6 @@ function GroupStatusSummary({ jobs }) {
         );
       })}
     </div>
-  );
-}
-
-// ── CancelJobButton ────────────────────────────────────────────────────
-// Inline cancel button rendered next to the status pill on each row.
-// Only active jobs (queued / generating / running) can be cancelled; for
-// every other status we render nothing so the row stays compact.
-// Click is stopped so the parent row's navigate-to-detail handler doesn't
-// fire when the user is trying to cancel.
-const CANCELLABLE_STATUSES = new Set(['queued', 'generating', 'running']);
-function CancelJobButton({ jobId, status, onCancelled }) {
-  const [cancelling, setCancelling] = useState(false);
-  if (!CANCELLABLE_STATUSES.has(status)) return null;
-
-  const handleClick = async (e) => {
-    e.stopPropagation();
-    if (cancelling) return;
-    if (!window.confirm('Cancel this eval job? In-flight phases will be terminated.')) return;
-    setCancelling(true);
-    try {
-      await cancelEvalJob(jobId);
-      toast.success(`Job ${jobId.substring(0, 8)} cancelled`);
-      onCancelled && onCancelled(jobId);
-    } catch (err) {
-      toast.error(parseApiError(err, 'Failed to cancel job'));
-    } finally {
-      setCancelling(false);
-    }
-  };
-
-  return (
-    <Button
-      variant="ghost"
-      size="sm"
-      className="h-7 w-7 p-0 text-rose-600 hover:text-rose-700 hover:bg-rose-500/10 flex-shrink-0"
-      onClick={handleClick}
-      disabled={cancelling}
-      title="Cancel this job"
-      aria-label={`Cancel job ${jobId.substring(0, 8)}`}
-      data-testid={`cancel-job-${jobId}`}
-    >
-      {cancelling ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Ban className="w-3.5 h-3.5" />}
-    </Button>
   );
 }
 
@@ -186,11 +136,6 @@ function GroupAvgScore({ jobs }) {
 
 export default function EvalRuns() {
   const navigate = useNavigate();
-  const { user } = useAuth();
-  // The harness now stamps `created_by = <email>` on every owner-tagged row
-  // (changed from user_id UUID). Use the same value for the "Mine only"
-  // filter and the predicate so we match correctly post-migration.
-  const currentUserCreatedBy = user?.email || null;
   const [stats, setStats] = useState(null);
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -202,21 +147,17 @@ export default function EvalRuns() {
   // RunEvalModal pre-filled. Sourced once on mount from the URL; the params
   // are then stripped so closing + reopening starts clean.
   const [searchParams, setSearchParams] = useSearchParams();
-  const [deepLinkInitial, setDeepLinkInitial] = useState({ eph: '', agent: '', viewId: '' });
+  const [deepLinkInitial, setDeepLinkInitial] = useState({ eph: '', agent: '' });
   useEffect(() => {
-    const runFlag = searchParams.get('run') === '1';
-    const viewId = (searchParams.get('view') || '').trim();
-    // Open the modal when either deep-link form is present.
-    if (runFlag || viewId) {
+    if (searchParams.get('run') === '1') {
       const eph = (searchParams.get('eph') || '').trim();
       const agent = (searchParams.get('agent') || '').trim();
-      setDeepLinkInitial({ eph, agent, viewId });
+      setDeepLinkInitial({ eph, agent });
       setEvalModalOpen(true);
       const next = new URLSearchParams(searchParams);
       next.delete('run');
       next.delete('eph');
       next.delete('agent');
-      next.delete('view');
       setSearchParams(next, { replace: true });
     }
     // Run once on mount — the URL params are consumed and stripped, so we
@@ -231,32 +172,6 @@ export default function EvalRuns() {
   const [groupDetailJobs, setGroupDetailJobs] = useState({});
   const [loadingGroup, setLoadingGroup] = useState({});
   const [groupAggregates, setGroupAggregates] = useState({});
-
-  // Editable group metadata (group_name + comment) keyed by group_run_id.
-  // Sourced from GET /api/eval/eval-run-groups; jobs themselves don't carry
-  // these fields. Loaded alongside jobs on every fetch + refresh tick.
-  const [groupMeta, setGroupMeta] = useState({});
-  // Edit modal state: { open, groupRunId, name, comment, saving }
-  const [editModal, setEditModal] = useState({ open: false, groupRunId: '', name: '', comment: '', saving: false });
-
-  const fetchGroupsMeta = useCallback(async () => {
-    try {
-      const data = await listEvalRunGroups({ limit: 200 });
-      const list = data?.groups || data?.items || (Array.isArray(data) ? data : []);
-      const map = {};
-      for (const g of list) {
-        if (!g || !g.group_run_id) continue;
-        map[g.group_run_id] = {
-          group_name: g.group_name || '',
-          comment: g.comment || '',
-        };
-      }
-      setGroupMeta(map);
-    } catch (err) {
-      // Non-fatal — UI falls back to group_run_id rendering.
-      console.warn('Failed to fetch eval-run-groups metadata:', err);
-    }
-  }, []);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -277,24 +192,19 @@ export default function EvalRuns() {
       (filters.agent || '').trim() ||
       (filters.prompt || '').trim() ||
       filters.dateFrom ||
-      filters.dateTo ||
-      filters.mineOnly,
+      filters.dateTo,
     )
   ), [filters]);
 
   const fetchJobs = useCallback(async () => {
     setLoading(true);
     try {
-      // When "Mine only" is on we pass `created_by` to the server so the
-      // filter works across pagination (server-side narrowing) instead of
-      // only on whatever happens to be in the current page.
-      const mineParam = (filters.mineOnly && currentUserCreatedBy) ? { created_by: currentUserCreatedBy } : {};
       if (hasActiveFilter) {
         // Exhaustive fetch (capped) so client-side filters see everything.
         const all = [];
         const MAX_JOBS = 2000; // safety cap — stops well before OOM
         for (let offset = 0; offset < MAX_JOBS; offset += pageSize) {
-          const params = { limit: pageSize, offset, ...mineParam };
+          const params = { limit: pageSize, offset };
           if (selectedStatus !== 'all') params.status = selectedStatus;
           // eslint-disable-next-line no-await-in-loop
           const chunk = await listEvalJobs(params);
@@ -304,7 +214,7 @@ export default function EvalRuns() {
         }
         setJobs(all);
       } else {
-        const params = { limit: pageSize, offset: page * pageSize, ...mineParam };
+        const params = { limit: pageSize, offset: page * pageSize };
         if (selectedStatus !== 'all') params.status = selectedStatus;
         const data = await listEvalJobs(params);
         setJobs(data.jobs || []);
@@ -315,30 +225,16 @@ export default function EvalRuns() {
     } finally {
       setLoading(false);
     }
-  }, [selectedStatus, page, hasActiveFilter, filters.mineOnly, currentUserCreatedBy]);
+  }, [selectedStatus, page, hasActiveFilter]);
 
-  useEffect(() => { fetchStats(); fetchGroupsMeta(); }, []);
+  useEffect(() => { fetchStats(); }, []);
   useEffect(() => { fetchJobs(); }, [fetchJobs]);
   // When a filter toggles on, reset pagination so `page` never ends up stale.
   useEffect(() => { if (hasActiveFilter) setPage(0); }, [hasActiveFilter]);
 
   // Group jobs by group_run_id (falling back to legacy group_id for compatibility)
   // Filter first — groups with zero matching jobs disappear entirely.
-  // The predicate also gets a `{group_run_id: group_name}` resolver so the
-  // search input matches against the friendly editable group name in
-  // addition to the raw immutable `group_run_id`.
-  const groupNameByRunId = useMemo(() => {
-    const map = {};
-    for (const [gid, meta] of Object.entries(groupMeta || {})) {
-      if (meta?.group_name) map[gid] = meta.group_name;
-    }
-    return map;
-  }, [groupMeta]);
-
-  const filterPredicate = useMemo(
-    () => buildJobFilter(filters, currentUserCreatedBy, groupNameByRunId),
-    [filters, currentUserCreatedBy, groupNameByRunId],
-  );
+  const filterPredicate = useMemo(() => buildJobFilter(filters), [filters]);
 
   const filteredJobs = useMemo(
     () => jobs.filter(filterPredicate),
@@ -403,75 +299,18 @@ export default function EvalRuns() {
     return detail.filter(filterPredicate);
   };
 
-  // Unique agents in a group — uses the same fallback chain as JobDetail
-  // so scratch_bench (config.agent_name) and testing_agent_bench
-  // (config.experiments.agent_name) both light up.
+  // Unique agents in a group
   const getGroupAgents = (jobsList) => {
     const agents = new Set();
     for (const j of jobsList) {
-      const name = getJobAgentName(j);
+      const name = j.config?.experiments?.agent_name;
       if (name) agents.add(name);
     }
     return [...agents];
   };
 
-  // Open the edit modal pre-filled with the current name + comment.
-  const openEditGroupModal = (groupRunId) => {
-    const meta = groupMeta[groupRunId] || {};
-    setEditModal({
-      open: true,
-      groupRunId,
-      name: meta.group_name || '',
-      comment: meta.comment || '',
-      saving: false,
-    });
-  };
-
-  const closeEditGroupModal = () => {
-    setEditModal({ open: false, groupRunId: '', name: '', comment: '', saving: false });
-  };
-
-  // Optimistic PATCH: stamp the new values into local state immediately,
-  // then call the backend. On failure, revert to the previous snapshot
-  // (read off the modal's `groupRunId`) and toast the error.
-  const submitEditGroup = async () => {
-    const { groupRunId, name, comment } = editModal;
-    const trimmedName = (name || '').trim();
-    if (!trimmedName) {
-      toast.error('Group name is required');
-      return;
-    }
-    const prev = groupMeta[groupRunId] || { group_name: '', comment: '' };
-    setEditModal(prev2 => ({ ...prev2, saving: true }));
-    // Optimistic update
-    setGroupMeta(m => ({ ...m, [groupRunId]: { group_name: trimmedName, comment: comment || '' } }));
-    try {
-      const updated = await patchEvalRunGroup(groupRunId, {
-        group_name: trimmedName,
-        comment: comment || '',
-      });
-      // Sync from server response if it returns the canonical row.
-      if (updated && updated.group_run_id === groupRunId) {
-        setGroupMeta(m => ({
-          ...m,
-          [groupRunId]: {
-            group_name: updated.group_name || trimmedName,
-            comment: updated.comment || '',
-          },
-        }));
-      }
-      toast.success('Group updated');
-      closeEditGroupModal();
-    } catch (err) {
-      // Roll back
-      setGroupMeta(m => ({ ...m, [groupRunId]: prev }));
-      toast.error(parseApiError(err) || 'Failed to update group');
-      setEditModal(prev2 => ({ ...prev2, saving: false }));
-    }
-  };
-
   return (
-    <div className="space-y-6 pb-16" data-testid="eval-runs-page">
+    <div className="space-y-6" data-testid="eval-runs-page">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -479,7 +318,7 @@ export default function EvalRuns() {
           <p className="text-sm text-muted-foreground mt-1">Evaluation jobs grouped by batch ID</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button onClick={() => { fetchJobs(); fetchStats(); fetchGroupsMeta(); }} variant="outline" size="sm" data-testid="refresh-evals-btn">
+          <Button onClick={() => { fetchJobs(); fetchStats(); }} variant="outline" size="sm" data-testid="refresh-evals-btn">
             <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
             Refresh
           </Button>
@@ -492,27 +331,7 @@ export default function EvalRuns() {
 
       {/* Stats Bar */}
       {stats && (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3">
-          {/* Total — sum of all per-status counts. Clickable, resets selected
-              status to "all" for parity with the per-status cards below. */}
-          <Card
-            className={`cursor-pointer transition-all hover:scale-105 ${selectedStatus === 'all' ? 'ring-2 ring-ring' : ''}`}
-            onClick={() => { setSelectedStatus('all'); setPage(0); }}
-            data-testid="stat-card-total"
-          >
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <Layers className="w-4 h-4 text-muted-foreground" />
-                <div className="w-2 h-2 rounded-full bg-foreground" />
-              </div>
-              <div className="mt-2">
-                <div className="text-2xl font-bold" data-testid="stat-total-count">
-                  {Object.keys(STATUS_CONFIG).reduce((sum, s) => sum + (stats[s] || 0), 0)}
-                </div>
-                <div className="text-[10px] text-muted-foreground uppercase tracking-wide">Total</div>
-              </div>
-            </CardContent>
-          </Card>
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           {Object.entries(STATUS_CONFIG).map(([status, config]) => {
             const Icon = config.icon;
             const count = stats[status] || 0;
@@ -549,16 +368,15 @@ export default function EvalRuns() {
         >
           All
         </Button>
-        {Object.entries(STATUS_CONFIG).map(([status, config]) => (
+        {Object.keys(STATUS_CONFIG).map(status => (
           <Button
             key={status}
             variant={selectedStatus === status ? 'default' : 'ghost'}
             size="sm"
             onClick={() => { setSelectedStatus(status); setPage(0); }}
-            className="h-7 text-xs"
-            data-testid={`status-filter-${status}`}
+            className="h-7 text-xs capitalize"
           >
-            {config.label}
+            {status}
           </Button>
         ))}
       </div>
@@ -585,9 +403,6 @@ export default function EvalRuns() {
             const groupJobs = getGroupJobs(group);
             const agents = getGroupAgents(groupJobs);
             const isUngrouped = group.groupId === '_ungrouped';
-            const meta = !isUngrouped ? (groupMeta[group.groupId] || {}) : {};
-            const displayTitle = meta.group_name || group.groupId;
-            const groupComment = meta.comment || '';
 
             return (
               <Collapsible key={group.groupId} open={Boolean(isOpen)} onOpenChange={() => toggleGroup(group.groupId)}>
@@ -600,61 +415,16 @@ export default function EvalRuns() {
                           {isOpen ? <ChevronDown className="w-4 h-4 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
                         </div>
 
-                        {/* Group title: display name (or fallback to group_run_id) + edit pencil */}
+                        {/* Group ID */}
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
                             <Layers className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-                            <span
-                              className="text-sm font-semibold truncate"
-                              data-testid={`group-name-${group.groupId}`}
-                              title={isUngrouped ? 'Ungrouped Jobs' : `${displayTitle}\n${group.groupId}`}
-                            >
-                              {isUngrouped ? 'Ungrouped Jobs' : displayTitle}
+                            <span className="font-mono text-sm font-semibold truncate" data-testid={`group-id-${group.groupId}`}>
+                              {isUngrouped ? 'Ungrouped Jobs' : group.groupId}
                             </span>
-                            {!isUngrouped && (
-                              <>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6 flex-shrink-0 text-muted-foreground hover:text-foreground"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    openEditGroupModal(group.groupId);
-                                  }}
-                                  data-testid={`edit-group-${group.groupId}`}
-                                  aria-label="Edit group name and comment"
-                                  title="Edit group name and comment"
-                                >
-                                  <Pencil className="w-3 h-3" />
-                                </Button>
-                                <a
-                                  href={`/evals/group/${group.groupId}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="inline-flex items-center justify-center h-6 w-6 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent flex-shrink-0"
-                                  data-testid={`open-group-${group.groupId}`}
-                                  aria-label="Open group detail in new tab"
-                                  title="Open group detail in new tab"
-                                >
-                                  <ExternalLink className="w-3 h-3" />
-                                </a>
-                              </>
-                            )}
-                            <Badge variant="secondary" className="text-[9px] font-mono" data-testid={`group-jobs-count-${group.groupId}`}>
-                              {group.jobs.length} job{group.jobs.length !== 1 ? 's' : ''}
-                            </Badge>
+                            <Badge variant="secondary" className="text-[9px] font-mono">{group.jobs.length} job{group.jobs.length !== 1 ? 's' : ''}</Badge>
                           </div>
                           <div className="flex items-center gap-2 mt-1">
-                            {!isUngrouped && meta.group_name && (
-                              <span
-                                className="text-[9px] font-mono text-muted-foreground/70 truncate"
-                                data-testid={`group-id-sub-${group.groupId}`}
-                                title={group.groupId}
-                              >
-                                {group.groupId}
-                              </span>
-                            )}
                             {agents.length > 0 && agents.slice(0, 3).map(a => (
                               <Badge key={a} variant="outline" className="text-[9px] font-mono px-1.5 py-0 bg-blue-500/5 border-blue-500/20 text-blue-600 dark:text-blue-400">
                                 {a}
@@ -672,20 +442,6 @@ export default function EvalRuns() {
                         {/* Average score */}
                         <GroupAvgScore jobs={group.jobs} />
 
-                        {/* Comment (right of jobs/status/score, left of time).
-                            Truncated to keep the row compact; full text in the
-                            native title tooltip. Hidden when empty. */}
-                        {!isUngrouped && groupComment && (
-                          <div
-                            className="flex items-center gap-1 max-w-[240px] flex-shrink-0 text-[10px] text-muted-foreground italic"
-                            data-testid={`group-comment-${group.groupId}`}
-                            title={groupComment}
-                          >
-                            <MessageSquare className="w-3 h-3 flex-shrink-0 opacity-60" />
-                            <span className="truncate">{groupComment}</span>
-                          </div>
-                        )}
-
                         {/* Created time */}
                         <span className="text-[10px] text-muted-foreground flex-shrink-0">
                           {formatDistanceToNow(new Date(group.latestCreated), { addSuffix: true })}
@@ -696,14 +452,13 @@ export default function EvalRuns() {
                 </CollapsibleTrigger>
 
                 <CollapsibleContent>
-                  <div className="ml-6 mt-1 space-y-2 pb-2">
+                  <div className="ml-6 mt-1 space-y-1 pb-2">
                     {isLoading ? (
                       <div className="flex items-center justify-center py-6">
                         <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
                       </div>
                     ) : (<>
                       <GroupAggregateSummary aggregate={groupAggregates[group.groupId]} />
-                      <div className="space-y-1">
                       {groupJobs.map(job => (
                         <div
                           key={job.id}
@@ -715,24 +470,16 @@ export default function EvalRuns() {
                           <div className="flex-1 min-w-0">
                             <div className="font-mono font-medium truncate">{job.problem}</div>
                             <div className="flex items-center gap-1.5 mt-0.5">
-                              {(() => {
-                                const an = getJobAgentName(job);
-                                const mn = getJobModelName(job);
-                                return (
-                                  <>
-                                    {an && (
-                                      <Badge variant="outline" className="text-[9px] font-mono px-1 py-0 bg-blue-500/5 border-blue-500/20 text-blue-600 dark:text-blue-400" data-testid={`agent-badge-${job.id}`}>
-                                        {an}
-                                      </Badge>
-                                    )}
-                                    {mn && (
-                                      <Badge variant="outline" className="text-[9px] font-mono px-1 py-0" data-testid={`model-badge-${job.id}`}>
-                                        {mn}
-                                      </Badge>
-                                    )}
-                                  </>
-                                );
-                              })()}
+                              {job.config?.experiments?.agent_name && (
+                                <Badge variant="outline" className="text-[9px] font-mono px-1 py-0 bg-blue-500/5 border-blue-500/20 text-blue-600 dark:text-blue-400" data-testid={`agent-badge-${job.id}`}>
+                                  {job.config.experiments.agent_name}
+                                </Badge>
+                              )}
+                              {job.config?.experiments?.model_name && (
+                                <Badge variant="outline" className="text-[9px] font-mono px-1 py-0" data-testid={`model-badge-${job.id}`}>
+                                  {job.config.experiments.model_name}
+                                </Badge>
+                              )}
                               <span className="text-[9px] text-muted-foreground/50 font-mono">{job.id.substring(0, 8)}</span>
                             </div>
                           </div>
@@ -740,35 +487,25 @@ export default function EvalRuns() {
                           {/* Status */}
                           <StatusBadge status={job.status} />
 
-                          {/* Cancel (only for active jobs) */}
-                          <CancelJobButton
-                            jobId={job.id}
-                            status={job.status}
-                            onCancelled={fetchJobs}
-                          />
-
                           {/* Score */}
                           <ScoreBadges job={job} />
+
+                          {/* Open in Chat (harbor agent-service trajectory) */}
+                          <OpenInChatButton
+                            jobId={job.id}
+                            status={job.status}
+                            compact
+                            className="h-7 px-2 flex-shrink-0"
+                          />
 
                           {/* Time */}
                           <span className="text-[10px] text-muted-foreground flex-shrink-0 w-24 text-right">
                             {formatDistanceToNow(new Date(job.created_at), { addSuffix: true })}
                           </span>
 
-                          <a
-                            href={`/evals/${job.id}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                            className="text-muted-foreground/60 hover:text-foreground flex-shrink-0"
-                            data-testid={`open-job-newtab-${job.id}`}
-                            title="Open job in new tab"
-                          >
-                            <ExternalLink className="w-3 h-3" />
-                          </a>
+                          <ExternalLink className="w-3 h-3 text-muted-foreground/40 flex-shrink-0" />
                         </div>
                       ))}
-                      </div>
                     </>)}
                   </div>
                 </CollapsibleContent>
@@ -794,82 +531,13 @@ export default function EvalRuns() {
         onClose={() => {
           setEvalModalOpen(false);
           // Drop the deep-link seed so the next manual open starts clean.
-          setDeepLinkInitial({ eph: '', agent: '', viewId: '' });
+          setDeepLinkInitial({ eph: '', agent: '' });
           fetchJobs();
           fetchStats();
-          fetchGroupsMeta();
         }}
         initialEph={deepLinkInitial.eph}
         initialAgentName={deepLinkInitial.agent}
-        initialViewId={deepLinkInitial.viewId}
       />
-
-      {/* Edit Group modal — rename + comment, optimistic PATCH */}
-      <Dialog
-        open={editModal.open}
-        onOpenChange={(open) => { if (!open && !editModal.saving) closeEditGroupModal(); }}
-      >
-        <DialogContent className="sm:max-w-md" data-testid="edit-group-dialog">
-          <DialogHeader>
-            <DialogTitle>Edit eval run group</DialogTitle>
-            <DialogDescription>
-              Update the display name and comment. The underlying{' '}
-              <code className="font-mono text-[11px]">group_run_id</code> never changes.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div>
-              <Label htmlFor="edit-group-name" className="text-xs">Group name</Label>
-              <Input
-                id="edit-group-name"
-                value={editModal.name}
-                onChange={(e) => setEditModal(s => ({ ...s, name: e.target.value }))}
-                placeholder="e.g. Smoke test — sonnet-4-5"
-                disabled={editModal.saving}
-                className="mt-1.5"
-                data-testid="edit-group-name-input"
-                autoFocus
-              />
-            </div>
-            <div>
-              <Label htmlFor="edit-group-comment" className="text-xs">Comment (optional)</Label>
-              <Textarea
-                id="edit-group-comment"
-                value={editModal.comment}
-                onChange={(e) => setEditModal(s => ({ ...s, comment: e.target.value }))}
-                placeholder="Anything you want to remember about this run…"
-                disabled={editModal.saving}
-                rows={3}
-                className="mt-1.5 text-sm"
-                data-testid="edit-group-comment-input"
-              />
-            </div>
-            <div className="text-[10px] text-muted-foreground font-mono break-all" data-testid="edit-group-id-readonly">
-              group_run_id: {editModal.groupRunId}
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={closeEditGroupModal}
-              disabled={editModal.saving}
-              data-testid="edit-group-cancel-btn"
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              onClick={submitEditGroup}
-              disabled={editModal.saving || !(editModal.name || '').trim()}
-              data-testid="edit-group-save-btn"
-            >
-              {editModal.saving && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
-              Save
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

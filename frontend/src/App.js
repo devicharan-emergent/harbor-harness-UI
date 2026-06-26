@@ -10,16 +10,14 @@ import AgentList from "@/pages/AgentList";
 import AgentEditor from "@/pages/AgentEditor";
 import CompareView from "@/pages/CompareView";
 import VersionHistory from "@/pages/VersionHistory";
+import ChatWizard from "@/pages/ChatWizard";
 import EvalRuns from "@/pages/EvalRuns";
 import JobDetail from "@/pages/JobDetail";
 import DatasetsPage from "@/pages/DatasetsPage";
-import DatasetViewsPage from "@/pages/DatasetViewsPage";
-import GroupDetailPage from "@/pages/GroupDetailPage";
-import JudgeConfigPage from "@/pages/JudgeConfigPage";
-import AgentPromptManagementPage from "@/pages/AgentPromptManagementPage";
 import SchedulesList from "@/pages/SchedulesList";
 import ScheduleEditor from "@/pages/ScheduleEditor";
 import ScheduleDetail from "@/pages/ScheduleDetail";
+import CortexAgents from "@/pages/CortexAgents";
 import Login from "@/pages/Login";
 import AuthCallback from "@/pages/AuthCallback";
 
@@ -55,17 +53,15 @@ const router = createBrowserRouter([
           { path: "/agents/:id/clone", element: <AgentEditor isClone /> },
           { path: "/compare", element: <CompareView /> },
           { path: "/agents/:id/history", element: <VersionHistory /> },
+          { path: "/wizard", element: <ChatWizard /> },
           { path: "/evals", element: <EvalRuns /> },
-          { path: "/evals/group/:groupRunId", element: <GroupDetailPage /> },
           { path: "/evals/:id", element: <JobDetail /> },
           { path: "/datasets", element: <DatasetsPage /> },
-          { path: "/dataset-views", element: <DatasetViewsPage /> },
-          { path: "/judge-config", element: <JudgeConfigPage /> },
-          { path: "/agent-prompt-management", element: <AgentPromptManagementPage /> },
           { path: "/schedules", element: <SchedulesList /> },
           { path: "/schedules/new", element: <ScheduleEditor /> },
           { path: "/schedules/:id", element: <ScheduleDetail /> },
           { path: "/schedules/:id/edit", element: <ScheduleEditor /> },
+          { path: "/cortex/agents", element: <CortexAgents /> },
         ],
       },
     ],
