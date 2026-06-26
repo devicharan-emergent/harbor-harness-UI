@@ -27,7 +27,12 @@ export const EMPTY_FILTERS = {
 // AND filters.mineOnly is on, jobs whose `created_by` doesn't match are
 // hidden. Server already filters, but stale cached lists or jobs from older
 // flows that didn't stamp `created_by` would otherwise leak through.
-export function buildJobFilter(filters, currentUserCreatedBy = null) {
+// `groupNameByRunId` is an optional `{ [group_run_id]: group_name }` map so
+// the "Search batch name" input matches against the friendly editable
+// `group_name` in addition to the raw immutable `group_run_id`. We OR the
+// two matches together — typing "smoke" matches a group named "Smoke test"
+// even if its run id is opaque.
+export function buildJobFilter(filters, currentUserCreatedBy = null, groupNameByRunId = null) {
   const batch = (filters.batch || '').trim().toLowerCase();
   const agent = (filters.agent || '').trim().toLowerCase();
   const prompt = (filters.prompt || '').trim().toLowerCase();
@@ -48,8 +53,11 @@ export function buildJobFilter(filters, currentUserCreatedBy = null) {
       const gid = (
         job.group_run_id || job.group_id ||
         job.config?.group_run_id || job.config?.group_id || ''
-      ).toLowerCase();
-      checks.push(gid.includes(batch));
+      );
+      const gidLower = gid.toLowerCase();
+      const gname = (groupNameByRunId && gid ? (groupNameByRunId[gid] || '') : '').toLowerCase();
+      // OR — match against either the raw run id OR the friendly group_name.
+      checks.push(gidLower.includes(batch) || (gname ? gname.includes(batch) : false));
     }
     if (agent) {
       const name = (job.config?.experiments?.agent_name || '').toLowerCase();
@@ -114,7 +122,7 @@ export function EvalFilterBar({ value, onChange }) {
           <Input
             value={value.batch}
             onChange={(e) => update({ batch: e.target.value })}
-            placeholder="Search batch name…"
+            placeholder="Search by group name or batch id…"
             className="h-8 pl-8 text-xs"
             data-testid="filter-batch-input"
           />

@@ -325,9 +325,20 @@ export default function EvalRuns() {
 
   // Group jobs by group_run_id (falling back to legacy group_id for compatibility)
   // Filter first — groups with zero matching jobs disappear entirely.
+  // The predicate also gets a `{group_run_id: group_name}` resolver so the
+  // search input matches against the friendly editable group name in
+  // addition to the raw immutable `group_run_id`.
+  const groupNameByRunId = useMemo(() => {
+    const map = {};
+    for (const [gid, meta] of Object.entries(groupMeta || {})) {
+      if (meta?.group_name) map[gid] = meta.group_name;
+    }
+    return map;
+  }, [groupMeta]);
+
   const filterPredicate = useMemo(
-    () => buildJobFilter(filters, currentUserCreatedBy),
-    [filters, currentUserCreatedBy],
+    () => buildJobFilter(filters, currentUserCreatedBy, groupNameByRunId),
+    [filters, currentUserCreatedBy, groupNameByRunId],
   );
 
   const filteredJobs = useMemo(
@@ -461,7 +472,7 @@ export default function EvalRuns() {
   };
 
   return (
-    <div className="space-y-6" data-testid="eval-runs-page">
+    <div className="space-y-6 pb-16" data-testid="eval-runs-page">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -482,7 +493,27 @@ export default function EvalRuns() {
 
       {/* Stats Bar */}
       {stats && (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3">
+          {/* Total — sum of all per-status counts. Clickable, resets selected
+              status to "all" for parity with the per-status cards below. */}
+          <Card
+            className={`cursor-pointer transition-all hover:scale-105 ${selectedStatus === 'all' ? 'ring-2 ring-ring' : ''}`}
+            onClick={() => { setSelectedStatus('all'); setPage(0); }}
+            data-testid="stat-card-total"
+          >
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <Layers className="w-4 h-4 text-muted-foreground" />
+                <div className="w-2 h-2 rounded-full bg-foreground" />
+              </div>
+              <div className="mt-2">
+                <div className="text-2xl font-bold" data-testid="stat-total-count">
+                  {Object.keys(STATUS_CONFIG).reduce((sum, s) => sum + (stats[s] || 0), 0)}
+                </div>
+                <div className="text-[10px] text-muted-foreground uppercase tracking-wide">Total</div>
+              </div>
+            </CardContent>
+          </Card>
           {Object.entries(STATUS_CONFIG).map(([status, config]) => {
             const Icon = config.icon;
             const count = stats[status] || 0;
@@ -519,15 +550,16 @@ export default function EvalRuns() {
         >
           All
         </Button>
-        {Object.keys(STATUS_CONFIG).map(status => (
+        {Object.entries(STATUS_CONFIG).map(([status, config]) => (
           <Button
             key={status}
             variant={selectedStatus === status ? 'default' : 'ghost'}
             size="sm"
             onClick={() => { setSelectedStatus(status); setPage(0); }}
-            className="h-7 text-xs capitalize"
+            className="h-7 text-xs"
+            data-testid={`status-filter-${status}`}
           >
-            {status}
+            {config.label}
           </Button>
         ))}
       </div>
@@ -732,7 +764,17 @@ export default function EvalRuns() {
                             {formatDistanceToNow(new Date(job.created_at), { addSuffix: true })}
                           </span>
 
-                          <ExternalLink className="w-3 h-3 text-muted-foreground/40 flex-shrink-0" />
+                          <a
+                            href={`/evals/${job.id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-muted-foreground/60 hover:text-foreground flex-shrink-0"
+                            data-testid={`open-job-newtab-${job.id}`}
+                            title="Open job in new tab"
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
                         </div>
                       ))}
                       </div>
