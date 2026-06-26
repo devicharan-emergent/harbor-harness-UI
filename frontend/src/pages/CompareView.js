@@ -24,18 +24,7 @@ export default function CompareView() {
 
   useEffect(() => {
     agentApi.list().then(data => {
-      // Defensive dedupe: the harness occasionally returns the same agent
-      // twice when an agent has multiple active versions / aliases. Keep
-      // the first occurrence of each `id` so Agent A and Agent B dropdowns
-      // don't show duplicate rows.
-      const seen = new Set();
-      const unique = [];
-      for (const a of data || []) {
-        if (!a?.id || seen.has(a.id)) continue;
-        seen.add(a.id);
-        unique.push(a);
-      }
-      setAgents(unique);
+      setAgents(data);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, []);
