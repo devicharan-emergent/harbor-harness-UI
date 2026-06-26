@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { listDatasets, listDatasetsByType, getDatasetForProblem, submitEvalJobs, submitEvalJobsWithEs, submitTestingAgentEval, checkAgentExists, getVerifierConfig, getDatasetView } from '@/services/evalApi';
 import { listAgents } from '@/services/cortexApi';
+import { agentApi } from '@/lib/api';
 import { useCreatedBy } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { Loader2, Rocket, FileText, Search, ChevronRight, Check, AlertCircle, X, ChevronDown } from 'lucide-react';
@@ -312,14 +313,35 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
   // null = not yet probed; otherwise the readiness object from the API.
   const [submitEphReadiness, setSubmitEphReadiness] = useState(null);
 
-  // Agent registry synced from the upstream Cortex "All agents" list for
-  // the selected eph. Drives the Agent Name combobox so users see the
-  // exact ids that would resolve at submit-time. When no eph is selected
-  // (or fetch fails), the combobox stays open as free-text.
-  const [agentOptions, setAgentOptions] = useState([]);
+  // Agent registry. Two sources merge into the Agent Name combobox so it
+  // always has something to show:
+  //   1) `prodAgents` — pulled from /api/agents on modal open. This is the
+  //      canonical "all agents in production" catalog, eph-independent.
+  //   2) `ephAgents`  — pulled from listAgents(submitEph) when the user
+  //      picks an eph. Drives the combobox when an eph is selected so
+  //      users only see what's actually resolvable on that runner.
+  // Model presets are derived from `prodAgents` (`.model.model_id`) so the
+  // Model combobox stays in sync with what's actually deployable.
+  const [prodAgents, setProdAgents] = useState([]);
+  const [ephAgents, setEphAgents] = useState([]);
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await agentApi.list();
+        if (cancelled) return;
+        setProdAgents(Array.isArray(data) ? data : []);
+      } catch {
+        if (!cancelled) setProdAgents([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [open]);
+
   useEffect(() => {
     if (!submitEph) {
-      setAgentOptions([]);
+      setEphAgents([]);
       return;
     }
     let cancelled = false;
@@ -330,14 +352,31 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
         const ids = (data?.agents || [])
           .map((a) => a?.agent_id)
           .filter((id) => typeof id === 'string' && id);
-        // Defensive dedupe (harness occasionally surfaces alias+canonical).
-        setAgentOptions(Array.from(new Set(ids)));
+        setEphAgents(Array.from(new Set(ids)));
       } catch {
-        if (!cancelled) setAgentOptions([]);
+        if (!cancelled) setEphAgents([]);
       }
     })();
     return () => { cancelled = true; };
   }, [submitEph]);
+
+  // Effective agent option list: prefer eph-scoped when present, else
+  // production catalog (id field on /api/agents is the canonical agent id).
+  const agentOptions = useMemo(() => {
+    if (ephAgents.length > 0) return ephAgents;
+    return Array.from(new Set(prodAgents.map(a => a?.id).filter(Boolean)));
+  }, [ephAgents, prodAgents]);
+
+  // Model option list derived from production agents. Dedupe across the
+  // catalog so the same `model.model_id` only shows once even if many
+  // agents share it. Empty array → ModelNamePicker falls back to its
+  // built-in MODEL_NAME_PRESETS constant.
+  const modelOptions = useMemo(() => {
+    const ids = prodAgents
+      .map(a => a?.model?.model_id)
+      .filter((m) => typeof m === 'string' && m);
+    return Array.from(new Set(ids));
+  }, [prodAgents]);
 
   // Template
   const [templateName, setTemplateName] = useState('');
@@ -1240,12 +1279,14 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                       onChange={setAgentNameOverride}
                       options={agentOptions}
                       placeholder="Search agents…"
-                      searchPlaceholder={submitEph
-                        ? 'Search agents on this eph…'
-                        : 'Pick an eph first, or type a custom agent id…'}
-                      emptyText={submitEph
-                        ? 'No agents found — type to add a custom id'
-                        : 'No eph selected — type a custom agent id'}
+                      searchPlaceholder={
+                        submitEph
+                          ? 'Search agents on this eph…'
+                          : ephAgents.length === 0 && prodAgents.length > 0
+                            ? 'Search prod agents (no eph selected)…'
+                            : 'Search agents…'
+                      }
+                      emptyText="No match — type to commit a custom agent id"
                       testId="eval-agent-name-override"
                     />
                   </div>
@@ -1308,6 +1349,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                       setModelNameOverride(v);
                       setModelOverrideTouched(true);
                     }}
+                    options={modelOptions}
                     testId="eval-testing-model-override"
                   />
                 </div>
@@ -1363,6 +1405,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 <ModelNamePicker
                   value={expModelName}
                   onChange={setExpModelName}
+                  options={modelOptions}
                   testId="eval-exp-model-name"
                 />
               </div>
