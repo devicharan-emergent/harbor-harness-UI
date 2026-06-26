@@ -6,7 +6,7 @@ import { Server, Cloud } from 'lucide-react';
 
 const ENVS = {
   dev: {
-    label: 'Dev',
+    label: 'Prod',
     icon: Server,
     cortexUrl: 'http://agentsdk.internal-staging.emergentagent.com',
   },
@@ -70,7 +70,7 @@ export function EnvSwitcher() {
         <SelectContent>
           <SelectItem value="dev">
             <span className="flex items-center gap-1.5">
-              <Server className="w-3 h-3" /> Dev
+              <Server className="w-3 h-3" /> Prod
             </span>
           </SelectItem>
           <SelectItem value="ephemeral">

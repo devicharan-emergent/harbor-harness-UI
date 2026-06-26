@@ -1,17 +1,19 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getEvalJob, cancelEvalJob, getDatasetForProblem, updateBreakpoint } from '@/services/evalApi';
+import { getJobAgentName, getJobModelName } from '@/lib/jobShape';
+import { getPhaseLabel, getJobStatusLabel } from '@/lib/phaseLabels';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { toast } from 'sonner';
-import { ArrowLeft, Copy, XCircle, Loader2, CheckCircle, Clock, AlertTriangle, Cpu, ActivitySquare, Ban, FileText, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react';
+import { ArrowLeft, Copy, XCircle, Loader2, CheckCircle, Clock, AlertTriangle, Cpu, ActivitySquare, Ban, FileText, ChevronDown, ChevronUp, ChevronRight, ExternalLink, Info } from 'lucide-react';
 import { formatDistanceToNow, formatDuration, intervalToDuration } from 'date-fns';
 import { LintRuleBreakdown } from '@/components/evals/LintRuleBreakdown';
-import { OpenInChatButton } from '@/components/evals/OpenInChatButton';
 
 const STATUS_ICONS = {
   queued: Clock,
@@ -21,6 +23,23 @@ const STATUS_ICONS = {
   failed: XCircle,
   cancelled: Ban,
 };
+
+// Phases representing "real work" the agent is actively doing. Everything
+// else (queue waits, preview-comes-online polling, post-run lint/cleanup)
+// is treated as overhead and folded into a single summary line by default.
+// The user can flip the "Show all phases" toggle to reveal every step so
+// per-phase durations sum to the wall-clock elapsed time.
+const MAJOR_PHASES = new Set(['harbor_running', 'browser_testing']);
+
+// Format a positive duration in seconds as "Xm Ys" / "Xs" — matches the
+// per-step row formatting elsewhere in the timeline.
+function fmtSecs(secs) {
+  if (secs == null || isNaN(secs)) return null;
+  if (secs < 60) return `${secs.toFixed(secs < 10 ? 1 : 0)}s`;
+  const m = Math.floor(secs / 60);
+  const s = Math.round(secs % 60);
+  return `${m}m ${s}s`;
+}
 
 export default function JobDetail() {
   const { id } = useParams();
@@ -33,6 +52,11 @@ export default function JobDetail() {
   const [datasetLoading, setDatasetLoading] = useState(false);
   const [showFullPS, setShowFullPS] = useState(false);
   const [showTests, setShowTests] = useState(false);
+  // Progress timeline density toggle — `false` shows only the "real work"
+  // phases (harbor_running + browser_testing). `true` reveals every phase
+  // including queue + preview wait + lintiq + cleanup so the per-phase
+  // durations sum to the wall-clock total.
+  const [showAllPhases, setShowAllPhases] = useState(false);
 
   const isActive = job && ['queued', 'generating', 'running'].includes(job.status);
 
@@ -140,26 +164,33 @@ export default function JobDetail() {
               <ArrowLeft className="w-4 h-4" />
             </Button>
             <h1 className="text-2xl font-bold">Eval Job</h1>
-            <Badge variant="outline" className="font-mono text-xs">
+            <Badge variant="outline" className="font-mono text-xs" data-testid="job-status-badge">
               <StatusIcon className="w-3 h-3 mr-1" />
-              {job.status}
+              {getJobStatusLabel(job.status)}
             </Badge>
           </div>
           <p className="text-xs text-muted-foreground ml-[52px]">
             Problem: <span className="font-mono">{job.problem}</span>
           </p>
-          {job.config?.experiments?.agent_name && (
-            <div className="flex items-center gap-1.5 ml-[52px] mt-1">
-              <Badge variant="outline" className="text-[10px] font-mono bg-blue-500/5 border-blue-500/20 text-blue-600 dark:text-blue-400" data-testid="job-agent-badge">
-                {job.config.experiments.agent_name}
-              </Badge>
-              {job.config?.experiments?.model_name && (
-                <Badge variant="outline" className="text-[10px] font-mono" data-testid="job-model-badge">
-                  {job.config.experiments.model_name}
-                </Badge>
-              )}
-            </div>
-          )}
+          {(() => {
+            const agentName = getJobAgentName(job);
+            const modelName = getJobModelName(job);
+            if (!agentName && !modelName) return null;
+            return (
+              <div className="flex items-center gap-1.5 ml-[52px] mt-1">
+                {agentName && (
+                  <Badge variant="outline" className="text-[10px] font-mono bg-blue-500/5 border-blue-500/20 text-blue-600 dark:text-blue-400" data-testid="job-agent-badge">
+                    {agentName}
+                  </Badge>
+                )}
+                {modelName && (
+                  <Badge variant="outline" className="text-[10px] font-mono" data-testid="job-model-badge">
+                    {modelName}
+                  </Badge>
+                )}
+              </div>
+            );
+          })()}
         </div>
         <div className="flex items-center gap-2">
           {isActive && (
@@ -172,11 +203,26 @@ export default function JobDetail() {
             <Loader2 className="w-3.5 h-3.5 mr-1.5" />
             Refresh
           </Button>
-          <Button variant="outline" size="sm" onClick={handleCopyId} className="h-8">
+          <Button variant="outline" size="sm" onClick={handleCopyId} className="h-8" data-testid="jobdetail-copy-id">
             <Copy className="w-3.5 h-3.5 mr-1.5" />
             Copy ID
           </Button>
-          <OpenInChatButton jobId={job.id} status={job.status} className="h-8" />
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8"
+            data-testid="jobdetail-copy-link"
+            onClick={() => {
+              const url = window.location.origin + `/evals/${job.id}`;
+              navigator.clipboard.writeText(url).then(
+                () => toast.success('Deep link copied'),
+                () => toast.error('Could not copy link'),
+              );
+            }}
+          >
+            <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
+            Copy link
+          </Button>
           {isActive && (
             <>
             <Button
@@ -288,15 +334,27 @@ export default function JobDetail() {
                 <div className="space-y-3">
                   {(() => {
                     let phaseNum = 0;
+                    // Best-effort total phase count: prefer any history step's
+                    // metadata.total_phases, fall back to live progress.
+                    const totalPhases =
+                      job.progress.history.find((s) => s.metadata?.total_phases)?.metadata?.total_phases
+                      ?? job.progress.metadata?.total_phases
+                      ?? null;
                     const items = [];
                     job.progress.history.forEach((step, idx) => {
+                      const isMajor = MAJOR_PHASES.has(step.phase);
+                      // Hide non-major (overhead) steps when collapsed —
+                      // they're summarised below in the Overhead row.
+                      if (!showAllPhases && !isMajor) return;
                       // Insert phase divider before every harbor_running
                       if (step.phase === 'harbor_running') {
                         phaseNum++;
                         items.push(
                           <div key={`phase-${phaseNum}`} className="flex items-center gap-2 py-1.5">
                             <div className="h-px flex-1 bg-border" />
-                            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2">Phase {phaseNum}</span>
+                            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2">
+                              Phase {phaseNum}{totalPhases ? ` of ${totalPhases}` : ''}
+                            </span>
                             <div className="h-px flex-1 bg-border" />
                           </div>
                         );
@@ -307,21 +365,18 @@ export default function JobDetail() {
                             <div className="w-6 h-6 rounded-full bg-emerald-100 dark:bg-emerald-900 flex items-center justify-center">
                               <CheckCircle className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                             </div>
-                            {(idx < job.progress.history.length - 1 || (isActive && job.progress.phase)) && (
-                              <div className="w-px h-8 bg-border mt-1" />
-                            )}
+                            <div className="w-px h-8 bg-border mt-1" />
                           </div>
                           <div className="flex-1 pb-3">
-                            <p className="text-sm font-medium">{step.phase}</p>
+                            <p className="text-sm font-medium" data-testid={`progress-step-${idx}-label`}>
+                              {getPhaseLabel(step, { phaseNum: step.phase === 'harbor_running' ? phaseNum : undefined, totalPhases })}
+                            </p>
                             {step.duration_seconds !== undefined && (
                               <p className="text-xs text-muted-foreground font-mono mt-0.5">
-                                {step.duration_seconds < 60
-                                  ? `${step.duration_seconds.toFixed(1)}s`
-                                  : `${Math.floor(step.duration_seconds / 60)}m ${Math.round(step.duration_seconds % 60)}s`
-                                }
+                                {fmtSecs(step.duration_seconds)}
                               </p>
                             )}
-                            {step.duration && !step.duration_seconds && (
+                            {step.duration && step.duration_seconds === undefined && (
                               <p className="text-xs text-muted-foreground font-mono mt-0.5">{step.duration}</p>
                             )}
                             {(step.metadata?.preview_url || step.metadata?.url) && (
@@ -350,7 +405,12 @@ export default function JobDetail() {
                         )}
                       </div>
                       <div className="flex-1">
-                        <p className="text-sm font-medium">{job.progress.phase === 'phase_breakpoint' ? 'Breakpoint — Paused for manual testing' : job.progress.phase}</p>
+                        <p className="text-sm font-medium" data-testid="progress-current-label">
+                          {getPhaseLabel(
+                            { phase: job.progress.phase, metadata: job.progress.metadata },
+                            { totalPhases: job.progress.metadata?.total_phases },
+                          )}
+                        </p>
                         {job.progress.message && (
                           <p className="text-xs text-muted-foreground mt-0.5">{job.progress.message}</p>
                         )}
@@ -396,6 +456,83 @@ export default function JobDetail() {
                       </div>
                     </div>
                   )}
+                  {/* Overhead summary + density toggle. Aggregates every
+                      non-major phase (queued / preview_* / lintiq_* /
+                      cleanup_* / harbor_starting / harbor_completed /
+                      browser_completed / phase_breakpoint) into a single
+                      line. Hovering the value reveals the per-bucket
+                      breakdown so users can see exactly where the
+                      unattributed wall-clock time went. */}
+                  {(() => {
+                    const buckets = {
+                      'Queue': 0,
+                      'Preview wait': 0,
+                      'Code quality (lintiq)': 0,
+                      'Cleanup': 0,
+                      'Build setup': 0,
+                      'Other overhead': 0,
+                    };
+                    const bucketOf = (phase) => {
+                      if (phase === 'queued') return 'Queue';
+                      if (phase === 'preview_waiting' || phase === 'preview_ready') return 'Preview wait';
+                      if (phase === 'lintiq_running' || phase === 'lintiq_completed') return 'Code quality (lintiq)';
+                      if (phase === 'cleanup_starting' || phase === 'cleanup_completed') return 'Cleanup';
+                      if (phase === 'harbor_starting' || phase === 'harbor_completed' || phase === 'browser_completed') return 'Build setup';
+                      return 'Other overhead';
+                    };
+                    let overheadTotal = 0;
+                    for (const s of job.progress.history) {
+                      if (MAJOR_PHASES.has(s.phase)) continue;
+                      const d = Number(s.duration_seconds);
+                      if (!Number.isFinite(d) || d <= 0) continue;
+                      buckets[bucketOf(s.phase)] += d;
+                      overheadTotal += d;
+                    }
+                    if (overheadTotal <= 0) return null;
+                    const breakdownLines = Object.entries(buckets)
+                      .filter(([, secs]) => secs > 0)
+                      .sort((a, b) => b[1] - a[1]);
+                    return (
+                      <div className="pt-1">
+                        <Separator className="mb-2" />
+                        <div className="flex justify-between text-xs items-center">
+                          <span className="text-muted-foreground inline-flex items-center gap-1">
+                            Overhead
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Info className="w-3 h-3 text-muted-foreground/60 hover:text-muted-foreground cursor-help" />
+                                </TooltipTrigger>
+                                <TooltipContent className="max-w-xs">
+                                  <p className="text-[11px] font-semibold mb-1">Where the un-shown time went</p>
+                                  <ul className="text-[10px] font-mono space-y-0.5">
+                                    {breakdownLines.map(([bucket, secs]) => (
+                                      <li key={bucket} className="flex justify-between gap-3">
+                                        <span>{bucket}</span>
+                                        <span>{fmtSecs(secs)}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </span>
+                          <span className="font-mono" data-testid="progress-overhead">
+                            {fmtSecs(overheadTotal)}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowAllPhases(v => !v)}
+                          className="text-[10px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1 mt-1.5"
+                          data-testid="progress-toggle-all-phases"
+                        >
+                          {showAllPhases ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                          {showAllPhases ? 'Hide minor phases' : 'Show all phases'}
+                        </button>
+                      </div>
+                    );
+                  })()}
                   {/* Total Elapsed */}
                   {job.finished_at && job.created_at && (
                     <>
@@ -730,12 +867,13 @@ export default function JobDetail() {
                                     </pre>
                                   </div>
                                 )}
-                                {test.kernel_session_id && (
+                                {(test.replay_url || test.kernel_session_id) && (
                                   <a
-                                    href={`https://dashboard.onkernel.com/browsers/${test.kernel_session_id}`}
+                                    href={test.replay_url || `https://dashboard.onkernel.com/browsers/${test.kernel_session_id}`}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="inline-flex items-center gap-1 text-[10px] text-blue-500 hover:text-blue-400 font-mono underline"
+                                    data-testid={`watch-replay-${phaseIdx}-${testIdx}`}
                                   >
                                     Watch Replay
                                   </a>
@@ -746,8 +884,54 @@ export default function JobDetail() {
                         );
                       })}
 
-                      {/* Phase Lint Report */}
-                      {phase.lint_report && phase.lint_report.raw_output?.files?.some(f => f.error_count > 0) && (
+                      {/* Extra bugs — agent-reported issues NOT in golden.
+                          Rendered in blue to clearly distinguish from the
+                          golden test rows above (pass=green, fail=red).
+                          Source: phase.extra[] (array of strings, populated
+                          by the verifier on testing_agent_bench runs). */}
+                      {Array.isArray(phase.extra) && phase.extra.length > 0 && (
+                        <div className="mt-3 space-y-1.5" data-testid={`phase-${phaseIdx}-extra-bugs`}>
+                          <div className="flex items-center gap-2 px-1">
+                            <span className="text-[10px] uppercase tracking-wider font-semibold text-blue-600 dark:text-blue-400">
+                              Extra bugs found by agent
+                            </span>
+                            <Badge
+                              variant="outline"
+                              className="text-[9px] font-mono text-blue-600 border-blue-500/30 bg-blue-500/10"
+                              data-testid={`phase-${phaseIdx}-extra-count`}
+                            >
+                              {phase.extra.length}
+                            </Badge>
+                            <span className="text-[10px] text-muted-foreground italic">
+                              not in golden — bonus findings
+                            </span>
+                          </div>
+                          {phase.extra.map((bug, extraIdx) => (
+                            <div
+                              key={extraIdx}
+                              className="flex items-start gap-2 px-3 py-2 rounded-lg border border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300 text-xs"
+                              data-testid={`extra-bug-${phaseIdx}-${extraIdx}`}
+                            >
+                              <Info className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-blue-500 dark:text-blue-400" />
+                              <span className="flex-1 leading-relaxed whitespace-pre-wrap break-words">
+                                {bug}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Phase Lint Report — handles three shapes:
+                          (a) populated: raw_output.files[] with errors → full breakdown
+                          (b) degraded:   lint_report.error string → red chip
+                          (c) clean:      score present, no errors → small green chip */}
+                      {phase.lint_report && (() => {
+                        const lr = phase.lint_report;
+                        const hasFileErrors = lr.raw_output?.files?.some(f => f.error_count > 0);
+                        const errMsg = lr.error || lr.message;
+                        const score = lr.normalized_score ?? lr.overall_score ?? phase.lint_score;
+                        if (hasFileErrors) {
+                          return (
                         <Collapsible className="mt-2">
                           <div className="rounded-lg border border-red-400/20 bg-red-50/40 dark:bg-red-950/20">
                             {/* Header / trigger */}
@@ -807,7 +991,38 @@ export default function JobDetail() {
                             </CollapsibleContent>
                           </div>
                         </Collapsible>
-                      )}
+                          );
+                        }
+                        // Degraded — lint service returned an error string
+                        if (errMsg) {
+                          return (
+                            <div
+                              className="mt-2 rounded-lg border border-amber-400/30 bg-amber-50/40 dark:bg-amber-950/20 px-3 py-2 text-[11px] flex items-center gap-2"
+                              data-testid={`phase-${phaseIdx}-lint-error`}
+                            >
+                              <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 flex-shrink-0" />
+                              <span className="text-amber-700 dark:text-amber-400 font-semibold">Lint Report unavailable</span>
+                              <span className="text-muted-foreground font-mono text-[10px] truncate" title={errMsg}>· {errMsg}</span>
+                            </div>
+                          );
+                        }
+                        // Clean — score present but no errors, just show a green chip
+                        if (score != null) {
+                          return (
+                            <div
+                              className="mt-2 rounded-lg border border-emerald-400/30 bg-emerald-50/40 dark:bg-emerald-950/20 px-3 py-2 text-[11px] flex items-center gap-2"
+                              data-testid={`phase-${phaseIdx}-lint-clean`}
+                            >
+                              <CheckCircle className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                              <span className="text-emerald-700 dark:text-emerald-400 font-semibold">Lint Report</span>
+                              <span className="text-muted-foreground font-mono text-[10px]">
+                                · no issues · score {(Number(score) * 100).toFixed(0)}%
+                              </span>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
 
                       {phaseIdx < phaseResults.length - 1 && <Separator />}
                     </div>
@@ -1009,7 +1224,21 @@ export default function JobDetail() {
             const previewUrl = previewReady ? meta.preview_url : null;
             const temporalUrl = meta.temporal_url;
             const cortexJobId = meta.cortex_job_id || job.cortex_job_id;
-            if (!previewUrl && !temporalUrl && !cortexJobId) return null;
+            const groupRunId = job.group_run_id || job.group_id;
+
+            // Pre-fill `p_group_set_1` on the Redash comparison dashboards
+            // with this job's group_run_id; leave p_group_set_2 unset so
+            // the user picks the comparison group on Redash side.
+            // `JSON.stringify(["x"])` → `["x"]` → URL-encoded for Redash.
+            const buildRedashUrl = (dashId, extraParams = '') => {
+              if (!groupRunId) return null;
+              const groupArr = encodeURIComponent(JSON.stringify([groupRunId]));
+              return `https://redash.internal-apps.emergentagent.com/dashboards/${dashId}?p_agent_name=All&p_group_set_1=${groupArr}&p_model=All${extraParams}`;
+            };
+            const redashSummaryUrl = buildRedashUrl(730);
+            const redashToolUrl = buildRedashUrl(731, '&p_tool=execute_bash&p_window_end=All');
+
+            if (!previewUrl && !temporalUrl && !cortexJobId && !redashSummaryUrl) return null;
             return (
               <Card>
                 <CardHeader className="pb-2">
@@ -1039,10 +1268,44 @@ export default function JobDetail() {
                     </a>
                   )}
                   {cortexJobId && (
-                    <div className="flex items-center gap-2 text-xs">
+                    <a
+                      href={`https://app.emergent.sh/home?job_id=${cortexJobId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 text-xs text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300 underline-offset-2 hover:underline"
+                      data-testid="quicklinks-cortex"
+                      title="Open the Cortex job in Emergent in a new tab"
+                    >
+                      <ExternalLink className="w-3 h-3 flex-shrink-0" />
                       <span className="text-muted-foreground">Cortex:</span>
-                      <span className="font-mono text-[10px]">{cortexJobId}</span>
-                    </div>
+                      <span className="font-mono text-[10px] break-all">{cortexJobId}</span>
+                    </a>
+                  )}
+                  {redashSummaryUrl && (
+                    <a
+                      href={redashSummaryUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                      data-testid="quicklinks-redash-summary"
+                      title="Open Eval Data Comparison (dashboard 730) with this group preselected"
+                    >
+                      <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                      Eval Data Comparison
+                    </a>
+                  )}
+                  {redashToolUrl && (
+                    <a
+                      href={redashToolUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                      data-testid="quicklinks-redash-tools"
+                      title="Open Eval Tool-Usage Comparison (dashboard 731) with this group preselected"
+                    >
+                      <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                      Eval Tool-Usage Comparison
+                    </a>
                   )}
                 </CardContent>
               </Card>
@@ -1055,93 +1318,63 @@ export default function JobDetail() {
             </CardHeader>
             <CardContent>
               <dl className="space-y-2 text-xs">
-                <div>
-                  <dt className="text-muted-foreground">Job ID</dt>
-                  <dd className="font-mono mt-0.5 text-[10px] break-all">{job.id}</dd>
-                </div>
-                <Separator />
+                {job.cortex_job_id && (
+                  <>
+                    <div>
+                      <dt className="text-muted-foreground">Cortex Job ID</dt>
+                      <dd className="font-mono mt-0.5 text-[10px] break-all">{job.cortex_job_id}</dd>
+                    </div>
+                    <Separator />
+                  </>
+                )}
                 <div>
                   <dt className="text-muted-foreground">Problem</dt>
                   <dd className="font-mono mt-0.5">{job.problem}</dd>
                 </div>
                 <Separator />
-                {job.config?.experiments?.agent_name && (
-                  <>
-                    <div>
-                      <dt className="text-muted-foreground">Agent</dt>
-                      <dd className="font-mono mt-0.5">{job.config.experiments.agent_name}</dd>
-                    </div>
-                    <Separator />
-                  </>
-                )}
-                {job.config?.experiments?.model_name && (
-                  <>
-                    <div>
-                      <dt className="text-muted-foreground">Model</dt>
-                      <dd className="font-mono mt-0.5">{job.config.experiments.model_name}</dd>
-                    </div>
-                    <Separator />
-                  </>
-                )}
-                {job.user_id && (
-                  <>
-                    <div>
-                      <dt className="text-muted-foreground">User ID</dt>
-                      <dd className="font-mono mt-0.5">{job.user_id}</dd>
-                    </div>
-                    <Separator />
-                  </>
-                )}
+                {(() => {
+                  const agentName = getJobAgentName(job);
+                  const modelName = getJobModelName(job);
+                  return (
+                    <>
+                      {agentName && (
+                        <>
+                          <div>
+                            <dt className="text-muted-foreground">Agent</dt>
+                            <dd className="font-mono mt-0.5 break-all">{agentName}</dd>
+                          </div>
+                          <Separator />
+                        </>
+                      )}
+                      {modelName && (
+                        <>
+                          <div>
+                            <dt className="text-muted-foreground">Model</dt>
+                            <dd className="font-mono mt-0.5 break-all">{modelName}</dd>
+                          </div>
+                          <Separator />
+                        </>
+                      )}
+                    </>
+                  );
+                })()}
                 {(job.group_run_id || job.group_id) && (
                   <>
                     <div>
                       <dt className="text-muted-foreground">Group ID</dt>
-                      <dd className="font-mono mt-0.5 text-[10px] break-all">{job.group_run_id || job.group_id}</dd>
-                    </div>
-                    <Separator />
-                  </>
-                )}
-                {job.k8s_job_name && (
-                  <>
-                    <div>
-                      <dt className="text-muted-foreground">K8s Job</dt>
-                      <dd className="font-mono mt-0.5 text-[10px]">{job.k8s_job_name}</dd>
-                    </div>
-                    <Separator />
-                  </>
-                )}
-                {job.cortex_job_id && (
-                  <>
-                    <div>
-                      <dt className="text-muted-foreground">Cortex Job ID</dt>
-                      <dd className="font-mono mt-0.5 text-[10px]">{job.cortex_job_id}</dd>
-                    </div>
-                    <Separator />
-                  </>
-                )}
-                {job.eval_metrics?.kernel_session_id && (
-                  <>
-                    <div>
-                      <dt className="text-muted-foreground">Session</dt>
-                      <dd className="font-mono mt-0.5 text-[10px]">{job.eval_metrics.kernel_session_id}</dd>
-                    </div>
-                    <Separator />
-                  </>
-                )}
-                {job.eval_metrics?.task_name && (
-                  <>
-                    <div>
-                      <dt className="text-muted-foreground">Task</dt>
-                      <dd className="font-mono mt-0.5 text-[10px]">{job.eval_metrics.task_name}</dd>
-                    </div>
-                    <Separator />
-                  </>
-                )}
-                {job.eval_metrics?.dataset && (
-                  <>
-                    <div>
-                      <dt className="text-muted-foreground">Dataset</dt>
-                      <dd className="font-mono mt-0.5 text-[10px]">{job.eval_metrics.dataset}</dd>
+                      <dd className="mt-0.5">
+                        <a
+                          href={`/evals/group/${job.group_run_id || job.group_id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-mono text-[10px] break-all text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300 underline-offset-2 hover:underline inline-flex items-center gap-1"
+                          data-testid="jobdetail-group-link"
+                          title="Open group detail in new tab"
+                        >
+                          {job.group_run_id || job.group_id}
+                          <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />
+                        </a>
+                      </dd>
                     </div>
                     <Separator />
                   </>
@@ -1150,24 +1383,6 @@ export default function JobDetail() {
                   <dt className="text-muted-foreground">Created</dt>
                   <dd className="mt-0.5">{formatDistanceToNow(new Date(job.created_at), { addSuffix: true })}</dd>
                 </div>
-                {job.started_at && (
-                  <>
-                    <Separator />
-                    <div>
-                      <dt className="text-muted-foreground">Started</dt>
-                      <dd className="mt-0.5">{formatDistanceToNow(new Date(job.started_at), { addSuffix: true })}</dd>
-                    </div>
-                  </>
-                )}
-                {job.updated_at && (
-                  <>
-                    <Separator />
-                    <div>
-                      <dt className="text-muted-foreground">Updated</dt>
-                      <dd className="mt-0.5">{formatDistanceToNow(new Date(job.updated_at), { addSuffix: true })}</dd>
-                    </div>
-                  </>
-                )}
                 {job.finished_at && (
                   <>
                     <Separator />
@@ -1185,70 +1400,309 @@ export default function JobDetail() {
                     </div>
                   </>
                 )}
+
+                {/* "More" — infra IDs + secondary timestamps tucked away */}
+                <Collapsible className="pt-1">
+                  <CollapsibleTrigger
+                    className="w-full flex items-center justify-between text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground py-1 [&[data-state=open]>svg]:rotate-180"
+                    data-testid="jobdetail-more-toggle"
+                  >
+                    <span className="font-semibold">More details</span>
+                    <ChevronDown className="w-3 h-3 transition-transform" />
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <div className="space-y-2 pt-2">
+                      <div>
+                        <dt className="text-muted-foreground">Job ID</dt>
+                        <dd className="font-mono mt-0.5 text-[10px] break-all">{job.id}</dd>
+                      </div>
+                      <Separator />
+                      {job.user_id && (
+                        <>
+                          <div>
+                            <dt className="text-muted-foreground">User ID</dt>
+                            <dd className="font-mono mt-0.5 text-[10px] break-all">{job.user_id}</dd>
+                          </div>
+                          <Separator />
+                        </>
+                      )}
+                      {job.k8s_job_name && (
+                        <>
+                          <div>
+                            <dt className="text-muted-foreground">K8s Job</dt>
+                            <dd className="font-mono mt-0.5 text-[10px] break-all">{job.k8s_job_name}</dd>
+                          </div>
+                          <Separator />
+                        </>
+                      )}
+                      {job.eval_metrics?.kernel_session_id && (
+                        <>
+                          <div>
+                            <dt className="text-muted-foreground">Session</dt>
+                            <dd className="font-mono mt-0.5 text-[10px] break-all">{job.eval_metrics.kernel_session_id}</dd>
+                          </div>
+                          <Separator />
+                        </>
+                      )}
+                      {job.eval_metrics?.task_name && (
+                        <>
+                          <div>
+                            <dt className="text-muted-foreground">Task</dt>
+                            <dd className="font-mono mt-0.5 text-[10px]">{job.eval_metrics.task_name}</dd>
+                          </div>
+                          <Separator />
+                        </>
+                      )}
+                      {job.eval_metrics?.dataset && (
+                        <>
+                          <div>
+                            <dt className="text-muted-foreground">Dataset</dt>
+                            <dd className="font-mono mt-0.5 text-[10px]">{job.eval_metrics.dataset}</dd>
+                          </div>
+                          <Separator />
+                        </>
+                      )}
+                      {job.started_at && (
+                        <>
+                          <div>
+                            <dt className="text-muted-foreground">Started</dt>
+                            <dd className="mt-0.5">{formatDistanceToNow(new Date(job.started_at), { addSuffix: true })}</dd>
+                          </div>
+                          <Separator />
+                        </>
+                      )}
+                      {job.updated_at && (
+                        <div>
+                          <dt className="text-muted-foreground">Updated</dt>
+                          <dd className="mt-0.5">{formatDistanceToNow(new Date(job.updated_at), { addSuffix: true })}</dd>
+                        </div>
+                      )}
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
               </dl>
             </CardContent>
           </Card>
 
-          {/* Config Info */}
+          {/* Config Info — collapsed by default; raw JSON is verbose */}
           {job.config && (
             <Card>
-              <CardHeader>
-                <CardTitle className="text-sm">Config</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <pre className="text-[10px] font-mono bg-muted/50 p-3 rounded-lg overflow-auto max-h-[200px]">
-                  {JSON.stringify(job.config, null, 2)}
-                </pre>
-              </CardContent>
+              <Collapsible>
+                <CollapsibleTrigger className="w-full text-left [&[data-state=open]>div>svg]:rotate-180">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                    <CardTitle className="text-sm">Config</CardTitle>
+                    <ChevronDown className="w-3.5 h-3.5 text-muted-foreground transition-transform" />
+                  </CardHeader>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <CardContent>
+                    <pre className="text-[10px] font-mono bg-muted/50 p-3 rounded-lg overflow-auto max-h-[200px]">
+                      {JSON.stringify(job.config, null, 2)}
+                    </pre>
+                  </CardContent>
+                </CollapsibleContent>
+              </Collapsible>
             </Card>
           )}
 
-          {/* Submission Config */}
+          {/* Submission Config — small, but still secondary; collapse */}
           {job.config && (
             <Card data-testid="submission-config-card">
-              <CardHeader>
-                <CardTitle className="text-sm">Submission Config</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <dl className="space-y-2 text-xs">
-                  <div className="flex justify-between">
-                    <dt className="text-muted-foreground">CPUs</dt>
-                    <dd className="font-mono">{job.config.cpus ?? 2}</dd>
-                  </div>
-                  <Separator />
-                  <div className="flex justify-between">
-                    <dt className="text-muted-foreground">Memory</dt>
-                    <dd className="font-mono">{job.config.memory ?? 8192} MB</dd>
-                  </div>
-                  <Separator />
-                  <div className="flex justify-between">
-                    <dt className="text-muted-foreground">Storage</dt>
-                    <dd className="font-mono">{job.config.storage ?? 10} GB</dd>
-                  </div>
-                  <Separator />
-                  <div className="flex justify-between">
-                    <dt className="text-muted-foreground">Cloud</dt>
-                    <dd className="font-mono">{job.config.cloud ? 'Yes' : 'No'}</dd>
-                  </div>
-                </dl>
-              </CardContent>
+              <Collapsible>
+                <CollapsibleTrigger className="w-full text-left [&[data-state=open]>div>svg]:rotate-180">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                    <CardTitle className="text-sm">Submission Config</CardTitle>
+                    <ChevronDown className="w-3.5 h-3.5 text-muted-foreground transition-transform" />
+                  </CardHeader>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <CardContent>
+                    <dl className="space-y-2 text-xs">
+                      <div className="flex justify-between">
+                        <dt className="text-muted-foreground">CPUs</dt>
+                        <dd className="font-mono">{job.config.cpus ?? 2}</dd>
+                      </div>
+                      <Separator />
+                      <div className="flex justify-between">
+                        <dt className="text-muted-foreground">Memory</dt>
+                        <dd className="font-mono">{job.config.memory ?? 8192} MB</dd>
+                      </div>
+                      <Separator />
+                      <div className="flex justify-between">
+                        <dt className="text-muted-foreground">Storage</dt>
+                        <dd className="font-mono">{job.config.storage ?? 10} GB</dd>
+                      </div>
+                      <Separator />
+                      <div className="flex justify-between">
+                        <dt className="text-muted-foreground">Cloud</dt>
+                        <dd className="font-mono">{job.config.cloud ? 'Yes' : 'No'}</dd>
+                      </div>
+                    </dl>
+                  </CardContent>
+                </CollapsibleContent>
+              </Collapsible>
             </Card>
           )}
 
-          {/* Phase Results */}
+          {/* LLM Judge — Raw Request / Raw Response */}
+          {(() => {
+            // Aggregate raw_request + raw_response across phases. The
+            // harness writes these as `raw_request` / `raw_response`
+            // directly on the phase_result. Older / non-testing-agent
+            // runs don't have either field → render nothing.
+            const judgePhases = phaseResults
+              .map((p, idx) => ({
+                idx: p.phase_index !== undefined ? p.phase_index : idx,
+                req: p.raw_request || '',
+                resp: p.raw_response || '',
+              }))
+              .filter((p) => p.req || p.resp);
+            if (judgePhases.length === 0) return null;
+            return (
+              <Card data-testid="llm-judge-raw-card">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm flex items-center gap-2">
+                    LLM Judge — Raw Request / Raw Response
+                    <Badge variant="outline" className="text-[10px] font-mono">
+                      {judgePhases.length} phase{judgePhases.length !== 1 ? 's' : ''}
+                    </Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {judgePhases.map((p) => (
+                    <JudgeRawBlock
+                      key={`judge-${p.idx}`}
+                      phaseIndex={p.idx}
+                      request={p.req}
+                      response={p.resp}
+                    />
+                  ))}
+                </CardContent>
+              </Card>
+            );
+          })()}
+
+          {/* Phase Results — raw JSON, collapsed by default */}
           {job.phase_results && (
             <Card>
-              <CardHeader>
-                <CardTitle className="text-sm">Phase Results</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <pre className="text-[10px] font-mono bg-muted/50 p-3 rounded-lg overflow-auto max-h-[200px]">
-                  {JSON.stringify(job.phase_results, null, 2)}
-                </pre>
-              </CardContent>
+              <Collapsible>
+                <CollapsibleTrigger className="w-full text-left [&[data-state=open]>div>svg]:rotate-180">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                    <CardTitle className="text-sm">Phase Results (raw)</CardTitle>
+                    <ChevronDown className="w-3.5 h-3.5 text-muted-foreground transition-transform" />
+                  </CardHeader>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <CardContent>
+                    <pre className="text-[10px] font-mono bg-muted/50 p-3 rounded-lg overflow-auto max-h-[200px]">
+                      {JSON.stringify(job.phase_results, null, 2)}
+                    </pre>
+                  </CardContent>
+                </CollapsibleContent>
+              </Collapsible>
             </Card>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── LLM Judge raw req/resp block ───────────────────────────────────────
+function JudgeRawBlock({ phaseIndex, request, response }) {
+  const [reqOpen, setReqOpen] = useState(false);
+  const [respOpen, setRespOpen] = useState(false);
+
+  const copy = async (text, label) => {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(`${label} copied`);
+    } catch {
+      toast.error(`Failed to copy ${label}`);
+    }
+  };
+
+  return (
+    <div className="rounded-md border bg-muted/20" data-testid={`judge-raw-block-${phaseIndex}`}>
+      <div className="px-3 py-1.5 border-b bg-muted/40 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+        Phase {phaseIndex + 1}
+      </div>
+      <div className="p-2 space-y-2">
+        {request ? (
+          <Collapsible open={reqOpen} onOpenChange={setReqOpen}>
+            <div className="flex items-center justify-between gap-2">
+              <CollapsibleTrigger
+                className="flex items-center gap-1.5 text-[11px] font-medium hover:text-primary transition-colors"
+                data-testid={`judge-raw-request-toggle-${phaseIndex}`}
+              >
+                <ChevronRight className={`w-3 h-3 transition-transform ${reqOpen ? 'rotate-90' : ''}`} />
+                Raw Request
+                <Badge variant="outline" className="text-[9px] font-mono ml-1">
+                  {request.length} chars
+                </Badge>
+              </CollapsibleTrigger>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-[10px]"
+                onClick={() => copy(request, 'Raw request')}
+                data-testid={`judge-raw-request-copy-${phaseIndex}`}
+              >
+                <Copy className="w-3 h-3 mr-1" /> Copy
+              </Button>
+            </div>
+            <CollapsibleContent className="mt-1.5">
+              <pre
+                className="text-[10px] font-mono bg-background border rounded p-2 overflow-auto max-h-[400px] whitespace-pre-wrap leading-relaxed"
+                data-testid={`judge-raw-request-content-${phaseIndex}`}
+              >
+                {request}
+              </pre>
+            </CollapsibleContent>
+          </Collapsible>
+        ) : (
+          <div className="text-[10px] text-muted-foreground italic px-1">
+            Raw request not captured for this phase.
+          </div>
+        )}
+        {response ? (
+          <Collapsible open={respOpen} onOpenChange={setRespOpen}>
+            <div className="flex items-center justify-between gap-2">
+              <CollapsibleTrigger
+                className="flex items-center gap-1.5 text-[11px] font-medium hover:text-primary transition-colors"
+                data-testid={`judge-raw-response-toggle-${phaseIndex}`}
+              >
+                <ChevronRight className={`w-3 h-3 transition-transform ${respOpen ? 'rotate-90' : ''}`} />
+                Raw Response
+                <Badge variant="outline" className="text-[9px] font-mono ml-1">
+                  {response.length} chars
+                </Badge>
+              </CollapsibleTrigger>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-[10px]"
+                onClick={() => copy(response, 'Raw response')}
+                data-testid={`judge-raw-response-copy-${phaseIndex}`}
+              >
+                <Copy className="w-3 h-3 mr-1" /> Copy
+              </Button>
+            </div>
+            <CollapsibleContent className="mt-1.5">
+              <pre
+                className="text-[10px] font-mono bg-background border rounded p-2 overflow-auto max-h-[400px] whitespace-pre-wrap leading-relaxed"
+                data-testid={`judge-raw-response-content-${phaseIndex}`}
+              >
+                {response}
+              </pre>
+            </CollapsibleContent>
+          </Collapsible>
+        ) : (
+          <div className="text-[10px] text-muted-foreground italic px-1">
+            Raw response not captured for this phase.
+          </div>
+        )}
       </div>
     </div>
   );

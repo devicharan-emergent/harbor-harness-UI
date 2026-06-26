@@ -38,8 +38,6 @@ function urlMatches(url, matchers) {
 // request whose URL matches any of the provided regexes.
 export function attachOwnership(axiosInstance, matchers) {
   axiosInstance.interceptors.request.use((config) => {
-    // No need for permissions for now
-    return config;
     const createdBy = getCreatedBy();
     if (!createdBy) return config;
 
@@ -47,21 +45,25 @@ export function attachOwnership(axiosInstance, matchers) {
     if (!urlMatches(fullUrl, matchers)) return config;
 
     const method = (config.method || 'get').toLowerCase();
-    if (method === 'get' || method === 'delete') {
-      config.params = { ...(config.params || {}), created_by: createdBy };
-    } else {
-      // POST / PUT / PATCH -> JSON body
-      const body = config.data;
-      if (body == null) {
-        config.data = { created_by: createdBy };
-      } else if (typeof body === 'object' && !Array.isArray(body)) {
-        // Don't clobber an explicit caller-supplied value.
-        if (body.created_by == null) {
-          config.data = { ...body, created_by: createdBy };
-        }
-      }
-      // For non-object payloads (FormData, string, array) we leave it alone.
+    // Only stamp `created_by` on writes. Reads (GET/DELETE) intentionally
+    // do NOT get the param — that's an opt-in ownership filter the caller
+    // must pass explicitly (see EvalRuns "Mine only" toggle), not identity
+    // stamping. Mixing them made every GET /jobs ride with `created_by`
+    // and the toggle effectively became a no-op at the network layer.
+    if (method !== 'post' && method !== 'put' && method !== 'patch') {
+      return config;
     }
+    // POST / PUT / PATCH -> JSON body
+    const body = config.data;
+    if (body == null) {
+      config.data = { created_by: createdBy };
+    } else if (typeof body === 'object' && !Array.isArray(body) && !(body instanceof FormData)) {
+      // Don't clobber an explicit caller-supplied value.
+      if (body.created_by == null) {
+        config.data = { ...body, created_by: createdBy };
+      }
+    }
+    // For non-object payloads (FormData, string, array) we leave it alone.
     return config;
   });
 }

@@ -1,0 +1,53 @@
+{
+  "summary": "Verified Run Evaluation multi-select testing_agent_bench batching fix. Frontend now correctly emits EXACTLY ONE POST /api/eval/testing-agent-evals with the spec-shaped items[] body. However, the upstream harness (EVAL_API_BASE/api/v1/testing-agent-evals) does NOT yet accept items[] batching — it returns HTTP 500 'invalid problem format \"testing_agent_bench/\": expected dataset/instance_id' for both 2-item and 1-item items[] bodies. The legacy single-eval shape (top-level prod_job_id/agent_name/...) still returns 200, proving the proxy is pass-through and the breakage is server-side at the harness, not in the FE/BE in this repo.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/eval/testing-agent-evals (proxy → harness /api/v1/testing-agent-evals)",
+        "issue": "Upstream harness rejects every items[] body — including the exact reference curl from the task — with HTTP 500 detail \"invalid problem format \\\"testing_agent_bench/\\\": expected dataset/instance_id\". Both 1-item and 2-item items[] payloads fail identically. The legacy flat body (top-level prod_job_id+agent_name+hitl_input+golden_output) still succeeds with 200 + jobs[]. Conclusion: the harness has NOT actually been updated to accept items[]; the FE fix is correct but cannot land end-to-end until the harness deploy ships.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Submit testing_agent_bench batch (2 datasets)",
+        "issue": "FE behaviour is correct (single POST, correct items[] shape) but the modal surfaces an error toast/failure because the harness 500s. Once the harness ships items[] support, this will resolve automatically — no FE change needed. Currently: success toast 'Submitted N testing-agent eval(s)' does NOT appear; submit modal stays open with the failure path.",
+        "affected_selectors": ["[data-testid=\"submit-eval-button\"]"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "BLOCKER: Coordinate with the harness team to confirm/deploy items[] batching support at {EVAL_API_BASE}/api/v1/testing-agent-evals. The task description claims it landed, but live calls (incl. the exact reference curl) still 500 with 'invalid problem format testing_agent_bench/'. Frontend cannot meaningfully complete the end-to-end submit until this is fixed.",
+    "Once harness ships items[]: re-test 2-dataset submit, single-dataset submit, agent_name override propagation, and the 3 model_name override scenarios (A/B/C) — all FE wiring is already in place and verified."
+  ],
+  "critical_code_review_comments": [
+    "/app/frontend/src/components/evals/RunEvalModal.js handleSubmit testing_agent_mode branch (lines 479-540): batched body construction is correct — items[] built one entry per selected dataset, group_run_id + user_id at top level only, model_name key omitted when resolvedModel is empty, override-touched logic correct.",
+    "/app/frontend/src/services/apiHelpers.js attachOwnership has `return config;` at line 42 (early return), so created_by is NEVER injected on any request (confirmed: top-level keys captured were exactly [group_run_id, items, user_id] with no created_by). This appears intentional per the inline comment 'No need for permissions for now', but it contradicts the task spec which says 'created_by injected by axios interceptor'. Flagging for awareness — likely pre-existing, not a fork-iter regression."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "0% (harness items[] endpoint failing)",
+    "frontend": "100% (request body shape verified correct)"
+  },
+  "test_credentials": "localStorage acm_session_token = 'pw_emergent_gate_post' on https://ui-preview-debug.internal.preview.emergentagent.com (user_id 0ee59a27-db9c-4647-aeee-f72173fcd757, email TEST_pw_user@emergent.com)",
+  "seed_data_creation": "None. Used existing testing_agent_bench fixtures: testing_agent_bench/b16eab51-6ef8-45d3-895a-9331f65437a1 and testing_agent_bench/e6151bcf-108f-4022-8c17-0500fc979239 (both have attributes.agent_name=full_stack_app_builder_cloud_v8_sonnet_4_5, model_name=claude-sonnet-4-5).",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Frontend body shape verified via Playwright network capture — ONE POST per submit, top-level {group_run_id, items, user_id}, each items[] entry has {prod_job_id, agent_name, hitl_input, golden_output, model_name?}, no forbidden keys at either level. The harness blocker means downstream behaviours (success toast 'Submitted N testing-agent eval(s)', modal close, /evals navigation, regression of agent_name/model_name overrides) could not be verified end-to-end. Only 2 testing_agent_bench fixtures exist in the upstream env (no smoke-fork-* / prefill-model-1 rows referenced in the task) — fixture set is smaller than the task's reference list.",
+  "rca of the issue": {
+    "fe_root_cause_fix_verified": "RunEvalModal.handleSubmit testing_agent_mode branch now builds ONE batched body { group_run_id, user_id, items:[…] } and calls submitTestingAgentEval(body) exactly once (no loop). Captured request shape during 2-dataset submit: top-level keys = ['group_run_id', 'items', 'user_id']; items.length = 2; each item has prod_job_id/agent_name/hitl_input/golden_output/model_name; no group_run_id/user_id inside items; no prod_job_id/hitl_input/golden_output/agent_name/model_name at top level. Matches spec exactly.",
+    "remaining_blocker_root_cause": "Upstream harness at {EVAL_API_BASE}/api/v1/testing-agent-evals appears to still be running the OLD validation (expects top-level dataset/instance-style problem field). When it sees items[] it falls through to a default 'testing_agent_bench/' + empty-string concat path and 500s. Proof: reference curl from task body returns the same error verbatim; legacy single-eval (no items[]) returns 200.",
+    "reproduction_steps": [
+      "curl -X POST $REACT_APP_BACKEND_URL/api/eval/testing-agent-evals -H 'Content-Type: application/json' -d '{\"group_run_id\":\"qa-batch-1\",\"user_id\":\"6e01d102-2641-44a2-89b8-039927baefde\",\"items\":[{\"prod_job_id\":\"smoke-1\",\"agent_name\":\"testing-agent-v3\",\"hitl_input\":\"x\",\"golden_output\":\"y\"}]}'  → 500 invalid problem format",
+      "Same endpoint with LEGACY flat body {group_run_id,user_id,prod_job_id,agent_name,hitl_input,golden_output} → 200 jobs[]",
+      "UI: open Run Eval → filter Testing Agent Bench → select both fixtures → fill group id → Next → Next → Submit → exactly ONE POST captured with correct items[] body → 500 from harness"
+    ],
+    "mitigation": "No FE/BE change in this repo can fix this — the harness must be updated to accept the items[] shape (or, alternatively, the FE could be reverted to LOOP submission using a per-iteration suffixed group_run_id; but that re-introduces the original bug for users who want a shared group label). Recommended: keep FE batched fix and unblock by shipping the harness items[] handler."
+  }
+}

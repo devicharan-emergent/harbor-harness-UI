@@ -20,6 +20,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { createDataset, updateDataset } from '@/services/evalApi';
+import { ModelNamePicker } from './ModelNamePicker';
 import { parseApiError } from '@/lib/errorUtils';
 import { toast } from 'sonner';
 import {
@@ -40,6 +41,7 @@ const DATASET_TYPE_OPTIONS = [
   { value: 'scratch_bench_phased', label: 'Scratch Bench (Phased)' },
   { value: 'bug_bench', label: 'Bug Bench' },
   { value: 'test_report_bench', label: 'Test Report Bench' },
+  { value: 'testing_agent_bench', label: 'Testing Agent Bench' },
 ];
 
 // ── XML helpers (phased mode only) ──────────────────────────────────────
@@ -111,19 +113,32 @@ export function parseProblemPhases(xml) {
 
 // Parse natural_language_tests into an array of arrays of test case strings.
 // One outer entry per phase; inner array contains each <test_case> body.
+// Also tolerates legacy `<test>…</test>` (singular, no wrapper) — some
+// hand-written CSVs and external tools emit that shape. We only fall back
+// to <test> when no <test_case> nodes were found in the phase body, so
+// canonical files are unaffected.
 export function parseTestsPhases(xml) {
   if (!xml || typeof xml !== 'string') return [];
   const phaseRe = /<phase\b[^>]*>([\s\S]*?)<\/phase>/gi;
-  const testRe = /<test_case\b[^>]*>([\s\S]*?)<\/test_case>/gi;
+  const testCaseRe = /<test_case\b[^>]*>([\s\S]*?)<\/test_case>/gi;
+  // \b after `test` matches `>` / space / `/` but not `_` — so this regex
+  // doesn't accidentally also fire on `<test_case>`.
+  const testFallbackRe = /<test\b[^>]*>([\s\S]*?)<\/test\s*>/gi;
   const out = [];
   let pm;
   while ((pm = phaseRe.exec(xml)) !== null) {
     const body = pm[1];
     const tests = [];
     let tm;
-    while ((tm = testRe.exec(body)) !== null) {
+    while ((tm = testCaseRe.exec(body)) !== null) {
       const t = decodeEntities(tm[1]).trim();
       if (t) tests.push(t);
+    }
+    if (tests.length === 0) {
+      while ((tm = testFallbackRe.exec(body)) !== null) {
+        const t = decodeEntities(tm[1]).trim();
+        if (t) tests.push(t);
+      }
     }
     out.push(tests);
   }
@@ -193,7 +208,14 @@ const STEPS = [
   { n: 3, label: 'Tags & Attributes' },
 ];
 
-function StepIndicator({ step, setStep }) {
+// testing_agent_bench renames step 2 — task + golden, not phases.
+const TESTING_AGENT_STEPS = [
+  { n: 1, label: 'Metadata' },
+  { n: 2, label: 'Task & Golden' },
+  { n: 3, label: 'Tags & Attributes' },
+];
+
+function StepIndicator({ step, setStep, steps = STEPS }) {
   return (
     <div
       className="flex items-center gap-1.5 py-1"
@@ -201,7 +223,7 @@ function StepIndicator({ step, setStep }) {
       aria-label="Wizard steps"
       data-testid="wizard-step-indicator"
     >
-      {STEPS.map((s, idx) => {
+      {steps.map((s, idx) => {
         const isActive = step === s.n;
         const isDone = step > s.n;
         const clickable = isDone; // only allow going back via the indicator
@@ -237,7 +259,7 @@ function StepIndicator({ step, setStep }) {
               </span>
               <span className="text-xs font-medium truncate">{s.label}</span>
             </button>
-            {idx < STEPS.length - 1 && (
+            {idx < steps.length - 1 && (
               <div
                 className={`h-px flex-shrink-0 w-4 ${
                   step > s.n ? 'bg-emerald-500' : 'bg-border'
@@ -562,12 +584,18 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
   const [bugDescription, setBugDescription] = useState('');
   const [bugFixStatus, setBugFixStatus] = useState('');
 
+  // testing_agent_bench-specific
+  const [hitlInput, setHitlInput] = useState('');
+  const [goldenOutput, setGoldenOutput] = useState('');
+
   const [saving, setSaving] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [step, setStep] = useState(1); // 1: metadata, 2: phases, 3: tags + attributes
 
   const isPhasedType = datasetType === 'scratch_bench_phased';
+  const isTestingAgentBench = datasetType === 'testing_agent_bench';
   const usePhasedEditor = isPhasedType && !rawMode;
+  const activeSteps = isTestingAgentBench ? TESTING_AGENT_STEPS : STEPS;
 
   useEffect(() => {
     if (!open) return;
@@ -611,6 +639,17 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
       setTestingHitl(attrs.testing_hitl || '');
       setBugDescription(attrs.Bug_description || '');
       setBugFixStatus(attrs.Bug_fix_status || '');
+
+      // testing_agent_bench: HITL/golden live in the same columns the
+      // scratch wizard renders as raw XML; surface them in the dedicated
+      // textareas when editing.
+      if (t === 'testing_agent_bench') {
+        setHitlInput(dataset.problem_statement || '');
+        setGoldenOutput(dataset.natural_language_tests || '');
+      } else {
+        setHitlInput('');
+        setGoldenOutput('');
+      }
     } else {
       setDatasetType('scratch_bench_phased');
       setInstanceId('');
@@ -631,6 +670,8 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
       setTestingHitl('');
       setBugDescription('');
       setBugFixStatus('');
+      setHitlInput('');
+      setGoldenOutput('');
     }
   }, [open, dataset]);
 
@@ -642,6 +683,11 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
         setProblemStatement('');
         setNaturalLanguageTests('');
         setRawMode(false);
+      } else if (newType === 'testing_agent_bench') {
+        setProblemStatement('');
+        setNaturalLanguageTests('');
+        setHitlInput('');
+        setGoldenOutput('');
       } else {
         setProblemStatement('');
         setNaturalLanguageTests('');
@@ -694,6 +740,13 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
       if (testingHitl) attrs.testing_hitl = testingHitl;
       if (bugDescription) attrs.Bug_description = bugDescription;
       if (bugFixStatus) attrs.Bug_fix_status = bugFixStatus;
+    } else if (datasetType === 'testing_agent_bench') {
+      // agent_name required; model_name omitted if blank; prod_job_id
+      // mirrors instance_id so the harness can recover the prod job even
+      // if the row's instance_id is later renamed.
+      if (agentName.trim()) attrs.agent_name = agentName.trim();
+      if (modelName.trim()) attrs.model_name = modelName.trim();
+      if (instanceId.trim()) attrs.prod_job_id = instanceId.trim();
     }
     return attrs;
   };
@@ -724,6 +777,19 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
           return false;
         }
       }
+    } else if (isTestingAgentBench) {
+      if (!hitlInput.trim()) {
+        toast.error('HITL Input is required');
+        return false;
+      }
+      if (!goldenOutput.trim()) {
+        toast.error('Golden Output is required');
+        return false;
+      }
+      if (!agentName.trim()) {
+        toast.error('Agent Name is required');
+        return false;
+      }
     } else {
       if (!problemStatement.trim()) {
         toast.error('Problem Statement is required');
@@ -752,6 +818,9 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
         const filled = (p.tests || []).filter((t) => t.text && t.text.trim());
         return filled.length > 0;
       });
+    }
+    if (isTestingAgentBench) {
+      return hitlInput.trim() && goldenOutput.trim();
     }
     return problemStatement.trim() && naturalLanguageTests.trim();
   };
@@ -782,6 +851,9 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
               return;
             }
           }
+        } else if (isTestingAgentBench) {
+          if (!hitlInput.trim()) toast.error('HITL Input is required');
+          else toast.error('Golden Output is required');
         } else if (!problemStatement.trim()) {
           toast.error('Problem Statement is required');
         } else {
@@ -805,8 +877,18 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
   const handleConfirmSave = async () => {
     setSaving(true);
     try {
-      const problem = usePhasedEditor ? generatedProblemXml : problemStatement;
-      const tests = usePhasedEditor ? generatedTestsXml : naturalLanguageTests;
+      let problem, tests;
+      if (isTestingAgentBench) {
+        // HITL → problem_statement, Golden → natural_language_tests.
+        problem = hitlInput;
+        tests = goldenOutput;
+      } else if (usePhasedEditor) {
+        problem = generatedProblemXml;
+        tests = generatedTestsXml;
+      } else {
+        problem = problemStatement;
+        tests = naturalLanguageTests;
+      }
       const payload = {
         dataset_type: datasetType,
         problem_statement: problem,
@@ -814,9 +896,15 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
         description: description,
         tags: tags,
         attributes: buildAttributes(),
-        // Harness requires a non-null problem_set_ids on the row.
-        problem_set_ids: 'data-sets',
       };
+      // Scratch/bug/test-report wizard rows still need the legacy
+      // problem_set_ids tag. testing_agent_bench is created without it.
+      if (!isTestingAgentBench) {
+        payload.problem_set_ids = 'data-sets';
+      } else {
+        // Harness convention: name = "<dataset_type>/<instance_id>".
+        payload.name = `${datasetType}/${instanceId.trim()}`;
+      }
 
       if (isEditing) {
         await updateDataset(dataset.id, payload);
@@ -859,7 +947,7 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
           </DialogHeader>
 
           {/* Step indicator */}
-          <StepIndicator step={step} setStep={setStep} />
+          <StepIndicator step={step} setStep={setStep} steps={activeSteps} />
 
           <div className="flex-1 overflow-y-auto no-scrollbar min-h-0">
             <div className="space-y-5 py-2">
@@ -888,16 +976,23 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
                   </div>
                   <div>
                     <Label className="text-xs font-medium">
-                      Instance ID {!isEditing && '*'}
+                      {isTestingAgentBench ? 'Production Job ID' : 'Instance ID'} {!isEditing && '*'}
                     </Label>
                     <Input
                       value={instanceId}
                       onChange={(e) => setInstanceId(e.target.value)}
-                      placeholder="e.g. my-problem-name"
+                      placeholder={isTestingAgentBench ? 'e.g. job-abc123' : 'e.g. my-problem-name'}
                       className="mt-1 font-mono text-sm"
                       disabled={isEditing}
                       data-testid="dataset-instance-id-input"
                     />
+                    {isTestingAgentBench && (
+                      <p className="text-[10px] text-muted-foreground mt-1">
+                        The prod job to fork. The testing agent will replay its run
+                        against the HITL input and judge the result against the golden
+                        output.
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -914,63 +1009,97 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
               </div>
               )}
 
-              {/* ── STEP 2 — Phases / Raw editor ─────────────────────── */}
+              {/* ── STEP 2 — Phases / Raw editor / Task & Golden ───── */}
               {step === 2 && (
               <div className="space-y-4">
-              {/* Phased OR raw editor */}
-              {isPhasedType && (
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label className="text-xs font-medium">
-                      Phases *
-                    </Label>
-                    <p className="text-[11px] text-muted-foreground mt-0.5">
-                      Add one or more phases. Write in plain text — XML is generated for
-                      you at create time.
-                    </p>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 text-[11px]"
-                    onClick={() => setRawMode((v) => !v)}
-                    data-testid="toggle-raw-mode"
-                  >
-                    <Code2 className="w-3 h-3 mr-1" />
-                    {rawMode ? 'Switch to phased editor' : 'Edit raw XML'}
-                  </Button>
-                </div>
-              )}
-
-              {usePhasedEditor ? (
-                <PhasedEditor phases={phases} setPhases={setPhases} />
-              ) : (
+              {isTestingAgentBench ? (
                 <>
                   <div>
-                    <Label className="text-xs font-medium">
-                      Problem Statement *
-                    </Label>
+                    <Label className="text-xs font-medium">HITL Input *</Label>
+                    <p className="text-[11px] text-muted-foreground mt-0.5 mb-1">
+                      The human-in-the-loop reply that will be fed to the testing
+                      agent when it forks the prod job.
+                    </p>
                     <Textarea
-                      value={problemStatement}
-                      onChange={(e) => setProblemStatement(e.target.value)}
-                      placeholder="Enter the problem statement..."
-                      className="mt-1 font-mono text-xs min-h-[120px]"
-                      data-testid="dataset-problem-statement-textarea"
+                      value={hitlInput}
+                      onChange={(e) => setHitlInput(e.target.value)}
+                      placeholder="Paste the HITL message the testing agent should send…"
+                      className="font-mono text-xs min-h-[140px]"
+                      data-testid="dataset-hitl-input-textarea"
                     />
                   </div>
                   <div>
-                    <Label className="text-xs font-medium">
-                      Natural Language Tests *
-                    </Label>
+                    <Label className="text-xs font-medium">Golden Output *</Label>
+                    <p className="text-[11px] text-muted-foreground mt-0.5 mb-1">
+                      The expected final result the agent&apos;s run will be judged
+                      against.
+                    </p>
                     <Textarea
-                      value={naturalLanguageTests}
-                      onChange={(e) => setNaturalLanguageTests(e.target.value)}
-                      placeholder="Enter test cases..."
-                      className="mt-1 font-mono text-xs min-h-[80px]"
-                      data-testid="dataset-nl-tests-textarea"
+                      value={goldenOutput}
+                      onChange={(e) => setGoldenOutput(e.target.value)}
+                      placeholder="Paste the expected golden output…"
+                      className="font-mono text-xs min-h-[140px]"
+                      data-testid="dataset-golden-output-textarea"
                     />
                   </div>
+                </>
+              ) : (
+                <>
+                  {isPhasedType && (
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label className="text-xs font-medium">
+                          Phases *
+                        </Label>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          Add one or more phases. Write in plain text — XML is generated for
+                          you at create time.
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-[11px]"
+                        onClick={() => setRawMode((v) => !v)}
+                        data-testid="toggle-raw-mode"
+                      >
+                        <Code2 className="w-3 h-3 mr-1" />
+                        {rawMode ? 'Switch to phased editor' : 'Edit raw XML'}
+                      </Button>
+                    </div>
+                  )}
+
+                  {usePhasedEditor ? (
+                    <PhasedEditor phases={phases} setPhases={setPhases} />
+                  ) : (
+                    <>
+                      <div>
+                        <Label className="text-xs font-medium">
+                          Problem Statement *
+                        </Label>
+                        <Textarea
+                          value={problemStatement}
+                          onChange={(e) => setProblemStatement(e.target.value)}
+                          placeholder="Enter the problem statement..."
+                          className="mt-1 font-mono text-xs min-h-[120px]"
+                          data-testid="dataset-problem-statement-textarea"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs font-medium">
+                          Natural Language Tests *
+                        </Label>
+                        <Textarea
+                          value={naturalLanguageTests}
+                          onChange={(e) => setNaturalLanguageTests(e.target.value)}
+                          placeholder="Enter test cases..."
+                          className="mt-1 font-mono text-xs min-h-[80px]"
+                          data-testid="dataset-nl-tests-textarea"
+                        />
+                      </div>
+                    </>
+                  )}
                 </>
               )}
               </div>
@@ -1183,6 +1312,41 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
                     </div>
                   </div>
                 )}
+
+                {datasetType === 'testing_agent_bench' && (
+                  <div className="space-y-3">
+                    <div>
+                      <Label className="text-xs">Agent Name *</Label>
+                      <Input
+                        value={agentName}
+                        onChange={(e) => setAgentName(e.target.value)}
+                        placeholder="e.g. testing-agent-v3-gpt-5-2-codex"
+                        className="mt-1 text-sm font-mono"
+                        data-testid="attr-agent-name"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Model Name</Label>
+                      <div className="mt-1">
+                        <ModelNamePicker
+                          value={modelName}
+                          onChange={setModelName}
+                          testId="attr-model-name"
+                        />
+                      </div>
+                      <p className="text-[10px] text-muted-foreground mt-1">
+                        Optional. Stored on the dataset as{' '}
+                        <code className="font-mono">attributes.model_name</code>.
+                        Pick a preset, leave default (blank) for the agent&apos;s default,
+                        or choose Custom… to enter a free-text model id.
+                      </p>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">
+                      Required: <span className="font-mono">agent_name</span>.
+                      The harness scopes the eval to this testing agent name.
+                    </p>
+                  </div>
+                )}
               </div>
               </div>
               )}
@@ -1245,7 +1409,7 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Eye className="w-5 h-5" />
-              Review generated XML
+              {isTestingAgentBench ? 'Review payload' : 'Review generated XML'}
             </DialogTitle>
             <p className="text-xs text-muted-foreground mt-1">
               This is exactly what will be saved for{' '}
@@ -1259,33 +1423,49 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <Label className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">
-                  Problem statement XML
+                  {isTestingAgentBench ? 'HITL Input → problem_statement' : 'Problem statement XML'}
                 </Label>
                 <Badge variant="outline" className="text-[10px] font-mono">
-                  {usePhasedEditor ? `${phases.length} phase(s)` : 'raw'}
+                  {isTestingAgentBench
+                    ? 'text'
+                    : usePhasedEditor
+                      ? `${phases.length} phase(s)`
+                      : 'raw'}
                 </Badge>
               </div>
               <pre
                 className="rounded-md border bg-muted/30 p-3 text-[11px] font-mono overflow-auto max-h-[260px] whitespace-pre-wrap"
                 data-testid="preview-problem-xml"
               >
-                {usePhasedEditor ? generatedProblemXml : problemStatement}
+                {isTestingAgentBench
+                  ? hitlInput
+                  : usePhasedEditor
+                    ? generatedProblemXml
+                    : problemStatement}
               </pre>
             </div>
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <Label className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">
-                  Natural language tests XML
+                  {isTestingAgentBench ? 'Golden Output → natural_language_tests' : 'Natural language tests XML'}
                 </Label>
                 <Badge variant="outline" className="text-[10px] font-mono">
-                  {usePhasedEditor ? `${phases.length} phase(s)` : 'raw'}
+                  {isTestingAgentBench
+                    ? 'text'
+                    : usePhasedEditor
+                      ? `${phases.length} phase(s)`
+                      : 'raw'}
                 </Badge>
               </div>
               <pre
                 className="rounded-md border bg-muted/30 p-3 text-[11px] font-mono overflow-auto max-h-[260px] whitespace-pre-wrap"
                 data-testid="preview-tests-xml"
               >
-                {usePhasedEditor ? generatedTestsXml : naturalLanguageTests}
+                {isTestingAgentBench
+                  ? goldenOutput
+                  : usePhasedEditor
+                    ? generatedTestsXml
+                    : naturalLanguageTests}
               </pre>
             </div>
           </div>

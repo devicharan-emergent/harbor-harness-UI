@@ -1,0 +1,30 @@
+{
+  "summary": "Frontend-only spec for the new inline Cancel-Job button on /evals job rows verified end-to-end. All 11 requirements from the review request pass: button renders ONLY for active statuses (queued/generating/running); is correctly positioned between StatusBadge (idx 1) and OpenInChatButton (idx 3) inside each eval-job-row; has data-testid='cancel-job-<jobId>', aria-label='Cancel job <8charPrefix>', title='Cancel this job', and ghost h-7/w-7 + text-rose-600 classes; click stops row navigation (URL stays /evals); window.confirm fires with the exact spec text; dismiss → 0 DELETE; OK → exactly 1 DELETE /api/eval/jobs/<jobId>; mid-flight the button is disabled and Loader2 spinner replaces Ban icon; on 2xx success the success toast 'Job <prefix> cancelled' appears (sonner) and a GET /api/eval/jobs refresh fires; on 5xx failure the parsed server message toasts (verified 'harness cancel error') and the button reverts to enabled+Ban with no row removal. Regression spot-check: clicking the problem-name area still navigates to /evals/<jobId>. Inactive statuses (completed, failed, cancelled) render zero cancel buttons (verified across all three tabs).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/eval/jobs/aggregate?group_id=<TEST_iter25_*>", "issue": "Returns 500 for several TEST_iter25_* group_run_ids (e.g. TEST_iter25_failmid2_..., TEST_iter25_single_..., TEST_iter25_multirun_...). UI handles the failure gracefully (catch + console.error) and the expand still works using the in-memory group jobs, but the aggregate summary card never appears for those groups. Pre-existing; unrelated to the cancel-button change."},
+      {"endpoint": "GET /api/eval/groups/<TEST_iter25_*>/jobs", "issue": "Same TEST_iter25_* group_run_ids return 500 from the groups/<id>/jobs endpoint. UI falls back to the page's in-memory job list. Pre-existing; unrelated to this change."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "EvalRuns.js is 596 lines — within budget but approaching the 700-line threshold; extracting CancelJobButton, StatusBadge, ScoreBadges, GroupAggregateSummary, GroupAvgScore, GroupStatusSummary into /components/evals/ would simplify future iterations.",
+    "CancelJobButton.onCancelled is invoked only on success (line 89). The contract in the request says 'On success, refresh the jobs list (fetchJobs)' — implementation honors this correctly. No issue.",
+    "parseApiError fallback string 'Failed to cancel job' (line 91) is used when the server response has no parseable message; with the live harness this is unlikely to surface but is reasonable.",
+    "Pre-existing: /api/eval/jobs/aggregate and /api/eval/groups/{id}/jobs are returning 500 for some TEST_iter25_* group ids — not in scope of this task but worth flagging to the backend owner."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only task)", "frontend": "100% (11/11 spec items passed)"},
+  "seed_data_creation": "None. Used the existing pw_emergent_gate_post session and live active eval jobs already on /evals.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "CancelJobButton lives in /app/frontend/src/pages/EvalRuns.js (lines 70-111). data-testid format: cancel-job-<full uuid>. For testing the success path, route('**/api/eval/jobs/<id>') with a small asyncio.sleep before fulfilling 200 so the spinner state is observable; instant mocks return so fast the React state flicker is < 200ms and the spinner cannot be captured visually. Active rows are readily available on /evals (queued+running counters > 0 most of the time). The aggregate/groups 500s on TEST_iter25_* groups are a backend issue unrelated to this PR; UI handles them gracefully.",
+  "rca of the issue": "n/a — no bug found in the cancel-button implementation."
+}

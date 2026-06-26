@@ -1,0 +1,23 @@
+{
+  "summary": "Iter 23: validated judge-config singleton CRUD + JudgeConfigDialog editor + summary card on RunEvalModal Step 2 + judge_prompt/judge_model stamping on batched testing-agent submit + JudgeRawBlock card on JobDetail. ALL backend tests pass (6/6 pytest) and ALL frontend flows verified via Playwright network interception, including: default summary card shows model + 707 chars + 'default' badge; dialog token-badge validation disables Save when {golden}/{candidate} missing; saving custom prompt+model updates summary (removes 'default' badge) AND stamps the exact custom strings as top-level keys on POST /api/eval/testing-agent-evals; Reset to Default restores in-code defaults (verified via server GET is_default:true, len 707, gemini-flash-latest); default-state submit ALSO stamps the default judge_prompt+judge_model (acceptable Form #1 per spec). Iter-22 batched single-POST regression preserved (exactly 1 POST per submit, items[] = N entries, no per-item duplication). Scratch_bench regression clean (POST /api/eval/jobs body has keys ['evals','group_run_id','user_id'] only — NO judge_prompt/judge_model, does NOT hit /testing-agent-evals). JobDetail raw card renders only when ≥1 phase has judge_raw_request|judge_raw_response, copies content to clipboard, and is hidden on plain scratch_bench results.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": { "ui_bugs": [], "integration_issues": [], "design_issues": [] },
+  "test_report_links": [
+    "/app/backend/tests/test_judge_config.py",
+    "/app/test_reports/pytest/pytest_iter23.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "JudgeConfigDialog Reset to Default leaves the dialog OPEN after reset (only refreshes its in-dialog state to show 'unsaved · using default' badge). The summary card behind it updates correctly via the onSaved callback, but the user has to click Cancel to dismiss. Minor UX nit — not blocking. Spec didn't require auto-close on reset, so flagging only.",
+    "RunEvalModal handleSubmit testing_agent branch stamps judge_prompt/judge_model UNCONDITIONALLY (whenever judgeConfig is loaded), including when the server returned is_default:true. This matches one of the two acceptable spec forms and produces deterministic harness behaviour — preferred. No issue, just noting because spec accepted either form.",
+    "Backend _validate_judge_prompt error messages use 'judge_prompt cannot be empty' / 'must contain the literal token {golden|candidate}' — clear & matches client-side validation hints. Good."
+  ],
+  "updated_files": ["/app/backend/tests/test_judge_config.py"],
+  "success_rate": { "backend": "100% (6/6)", "frontend": "100% (all 14 spec items verified)" },
+  "test_credentials": "localStorage acm_session_token='pw_emergent_gate_post' on https://ui-preview-debug.internal.preview.emergentagent.com (user_id 0ee59a27-db9c-4647-aeee-f72173fcd757, TEST_pw_user@emergent.com).",
+  "seed_data_creation": "None — used the 2 existing testing_agent_bench fixtures returned by the upstream API; created 3 transient eval runs (TEST_iter23_judge / TEST_iter23_def2 / TEST_iter23_scratch) as a side-effect of batch-submit tests. Judge config left in DEFAULT state at end of run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Frontend wiring fully verified: judge-config-summary, open-judge-config, judge-config-dialog, judge-prompt-textarea, judge-model-select (+ Custom… input), judge-config-save/cancel/reset, llm-judge-raw-card, judge-raw-block-<idx>, judge-raw-{request|response}-{toggle|content|copy}-<idx> all present and behave per spec. Network capture confirmed: testing_agent submit POST body shape is { group_run_id, user_id, items[…], judge_prompt, judge_model } and ONE POST per submit. Scratch_bench POST body is { evals, group_run_id, user_id } with NO judge keys. The iter-22 harness-side 500 blocker for items[] is no longer reproducing — both 2-item submits in this run succeeded with green 'Submitted 2 testing-agent eval(s)' toasts, so harness items[] handler appears to have shipped. Mongo collection `judge_config` singleton _id='default' confirmed via PUT→GET roundtrip and reset removal.",
+  "rca of the issue": "N/A — no defects found."
+}

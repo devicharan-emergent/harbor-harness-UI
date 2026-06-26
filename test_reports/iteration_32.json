@@ -1,0 +1,26 @@
+{
+  "summary": "Verified the RunEvalModal multi-run agent_name fix end-to-end via Playwright with network interception on /api/eval/jobs*. All 3 expected scenarios (PRIMARY multi-run empty-override, override-wins, single-run no-regression) pass. Fallback to initialAgentName and the no-payload-when-falsy case were validated via code review. No real harness submissions occurred (route.fulfill mocked the responses), so no cleanup is required.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Note for E1: testid in the original review-request was slightly off — the actual submit button uses data-testid=\"submit-eval-button\" (not submit-evals-btn), and dataset rows use data-testid=\"dataset-item-${name}\" (not select-dataset-row). The fix code itself is fine; just keep these testids consistent in future test scripts."
+  ],
+  "critical_code_review_comments": [
+    "RunEvalModal.js line 593-597 derivedAgentName chain (override → initialAgentName → selectedProblems[0].attributes.agent_name) is correct.",
+    "RunEvalModal.js line 696 guards with `if (derivedAgentName)` so a truly-empty derived value is omitted from the wire payload — matches the NO-REGRESSION requirement that the FE should never send a falsy agent_name.",
+    "The fix only touches the non-testing_agent_bench branch; the testing_agent_bench branch (line 610) still resolves agent per-item via trimmedAgentOverride || attrs.agent_name as before — no regression there."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "skipped", "frontend": "100%"},
+  "test_credentials": "localStorage acm_session_token='pw_emergent_gate_post' (user 0ee59a27-db9c-4647-aeee-f72173fcd757) — as provided.",
+  "seed_data_creation": "None. Submitted requests were intercepted client-side via Playwright page.route + route.fulfill — they never reached the BFF, so no group_run_id was created and no harness pollution exists.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "If retesting this flow, the correct selectors are: new-eval-btn, dataset-item-{name} (e.g. dataset-item-scratch_bench_phased/ai_travel_concierge_qa), eval-next-step, eval-group-id, eval-num-runs, eval-agent-name-override (standard path) vs eval-testing-agent-name-override (testing-agent-bench path), submit-eval-button. The scratch_bench_phased dataset 'ai_travel_concierge_qa' has attributes.agent_name='full_stack_app_builder_cloud_v8_opus_4_5' baked in and is a reliable seed for this test.",
+  "rca of the issue": "Pre-fix: handleSubmit built the per-run payload with `payload.agent_name = trimmedAgentOverride` only when the override input was non-empty, so multi-run submissions where the user relied on the dataset's baked-in attributes.agent_name (or the initialAgentName deep-link prop) dropped the field entirely from every POST. The harness then rejected/mis-routed those jobs. Fix: compute a single `derivedAgentName` once before the run loop from override → initialAgentName → selectedProblems[0].attributes.agent_name, then set `payload.agent_name` from it in every iteration (only when truthy). Verified all 3 POSTs in a runsCount=3 submission carry the correct agent_name and unique -run-N group_run_id suffixes."
+}

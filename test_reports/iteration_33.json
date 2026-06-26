@@ -1,0 +1,51 @@
+{
+  "summary": "Frontend-only verification of `created_by = user.email` migration (was user_id UUID). Used Playwright with page.route() interception to capture POST/GET bodies + query params on /api/eval/jobs, /api/eval/jobs-with-es, and /api/eval/groups/{id}/comments. All four FIX-VERIFY checks + both NO-REGRESSION checks PASSED. No bugs introduced.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "verification_results": {
+    "PRIMARY_post_jobs_created_by_is_email": {
+      "passed": true,
+      "evidence": "3 POSTs to /api/eval/jobs each carried body.created_by = 'TEST_pw_user@emergent.com' (NOT the UUID 0ee59a27-...). Routes were fulfilled with a 200 stub so no real harness pollution.",
+      "sample_body": "{\"user_id\":\"<modal-form user_id field>\",\"group_run_id\":\"TEST_pw_iter33_grp-...-run-1\",\"evals\":[{\"problem\":\"scratch_bench_phased/ai_travel_concierge_qa\",...}],\"agent_name\":\"TEST_pw_agent_iter33\",\"created_by\":\"TEST_pw_user@emergent.com\"}"
+    },
+    "FIX_VERIFY_2_comments_post_no_created_by": {
+      "passed": true,
+      "evidence": "POST /api/eval/groups/<gid>/comments body was exactly {\"text\":\"TEST_pw_comment_iter33\"} — no created_by field. apiHelpers regex matchers [/jobs(\\/|$|-with-es$)/, /testing-agent-evals(\\/|$)/, /groups\\/[^/]+\\/jobs(\\/|$)/] correctly skip /comments routes. Rendered comment row displayed author name 'PW Test User (Emergent)' (the user's display name from the seeded session, not the email — that is the GroupCommentsPanel default and unchanged by this fix)."
+    },
+    "FIX_VERIFY_3_mine_only_query_param": {
+      "passed": true,
+      "evidence_on": "GET /api/eval/jobs?limit=100&offset=0&created_by=TEST_pw_user%40emergent.com&access_token=pw_emergent_gate_post (email URL-encoded). NO UUID anywhere.",
+      "evidence_off": "GET /api/eval/jobs?limit=100&offset=0&access_token=pw_emergent_gate_post — created_by param completely absent."
+    },
+    "FIX_VERIFY_4_client_predicate": {
+      "passed": true,
+      "evidence": "Code review of /app/frontend/src/components/evals/EvalFilterBar.js buildJobFilter(): when mineOnly && currentUserCreatedBy, predicate compares `(job.created_by || job.config?.created_by) === currentUserCreatedBy` where currentUserCreatedBy = user.email (EvalRuns.js line 190). Jobs stamped with legacy user_id UUID will fail this string equality and be hidden — matches the requirement."
+    },
+    "NO_REGRESSION_multi_run_agent_name": {
+      "passed": true,
+      "evidence": "numRuns=3 produced exactly 3 sequential POSTs to /api/eval/jobs, each with agent_name='TEST_pw_agent_iter33' at top-level of the body (not under evals[].experiments — top-level is the actual harness payload shape) and group_run_id suffixed -run-1, -run-2, -run-3. iter32 multi-run loop intact."
+    },
+    "NO_REGRESSION_logged_out": {
+      "passed": true,
+      "evidence": "After localStorage.removeItem('acm_session_token') + hard reload, route guard redirected to /login (cannot reach /evals to inspect comment textarea placeholder directly). Code path verified: AuthContext.setUser(null) calls setCreatedBy(null); apiHelpers.attachOwnership early-returns when getCreatedBy() is falsy — no injection branch reached. GroupCommentsPanel placeholder ternary uses `user ? 'Add a comment about this run…' : 'Sign in to add a comment'` (line 166 of GroupCommentsPanel.js)."
+    }
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "EvalFilterBar.js header comment (line 13) still says 'mineOnly is also passed to the BFF jobs list as created_by=<user_id>' — stale doc; should now read <email>. Cosmetic, no functional impact.",
+    "EvalRuns.js fetchJobs useCallback dep array (line 285) correctly includes currentUserCreatedBy after the rename — good. eslint-disable-next-line on line 218 unchanged — fine."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "n/a (frontend-only)", "frontend": "100%" },
+  "test_credentials": "localStorage.acm_session_token = 'pw_emergent_gate_post' (user_id 0ee59a27-db9c-4647-aeee-f72173fcd757, email TEST_pw_user@emergent.com). Per /app/memory/test_credentials.md.",
+  "seed_data_creation": "None — used existing seeded session. All POSTs were intercepted with page.route() + route.fulfill(200, stub) so no real eval jobs or comments were created in the harness or Mongo.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "If iter33 fix re-tested: use the same pw_emergent_gate_post token, use page.route() to capture POST bodies on /api/eval/jobs and /api/eval/groups/<gid>/comments, and to read URL params on GET /api/eval/jobs (Mine-only toggle). Fulfill rather than continue so we don't pollute the harness. RunEvalModal navigation requires (1) selecting a dataset on step 1, (2) filling eval-group-id (required) and eval-num-runs on step 2, (3) eval-agent-name-override for the agent_name top-level field. submit-eval-button is on step 3.",
+  "rca_of_the_issue": "Not a bug investigation — fix verification only. Pre-fix the apiHelpers axios interceptor stamped body.created_by with user.user_id (UUID) and the Mine-only filter passed/compared the UUID; post-fix all three sites (AuthContext setCreatedBy/useCreatedBy, EvalRuns.currentUserCreatedBy + buildJobFilter call site, EvalFilterBar.buildJobFilter parameter rename) consistently read/write user.email. Captured network evidence confirms the rename took effect end-to-end."
+}

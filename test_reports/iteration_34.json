@@ -1,0 +1,82 @@
+{
+  "summary": "Verified removal of (1) 'Target eph' picker block, (2) 'User ID' input block in RunEvalModal Step 2, and (3) the entire Comments feature on group runs (UI + API + backend routes + Mongo collection). All deletions confirmed via DOM probes, backend curl, code grep, and DB inspection. No-regression checks: Mine-only filter still issues created_by=TEST_pw_user@emergent.com and unsets it on toggle off. POST-body field presence (user_id/created_by/agent_name) verified by code review of RunEvalModal.js (lines 256-257 source userId from useAuth, lines 649/699 still emit user_id; iter32/33 wiring for agent_name/created_by untouched) — Playwright submit was not reached in 3 attempts due to modal Step-1→Step-2 advance flakiness in the headless preview env (the dataset radio re-deselects intermittently after clicking Next). Backend hot-reload reflected the route deletions cleanly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "removal_verification": {
+    "removal_1_target_eph": {
+      "code_grep_target_eph_label": "absent in RunEvalModal.js",
+      "code_grep_check_readiness": "absent in RunEvalModal.js",
+      "code_grep_readiness_disabled": "absent in RunEvalModal.js",
+      "dom_label_target_eph": "False (not on page)",
+      "dom_button_check_readiness": "False (not on page)",
+      "note": "test-id 'eval-eph-name' (line 1053) STILL EXISTS but as part of the agent-check feature (Check button, hidden inside !isTestingAgentMode block) — this is a DIFFERENT control from the deleted 'Target eph' picker. The review's testing note that 'eval-eph-name must NOT exist in Step 2' contradicts the spec ('only the Target eph SECTION was removed'); code+screenshots confirm the deleted block (Target eph label, eph input, Check readiness button, readiness-disabled warning) is fully gone. The remaining eval-eph-name input is the agent-check eph (paired with check-agent-btn)."
+    },
+    "removal_2_user_id_block": {
+      "dom_testid_eval_user_id": "False (absent)",
+      "dom_label_user_id": "False (absent)",
+      "dom_helper_uuid_forwarded": "False (absent)",
+      "code_grep": "no 'UUID forwarded' string in RunEvalModal.js; userId is now derived constant from useAuth()"
+    },
+    "removal_3a_comments_panel_ui": {
+      "dom_testid_group_comments_prefix": "False (40 group rows visible, none expose group-comments-*)",
+      "dom_testid_group_comment_input_prefix": "False",
+      "dom_testid_group_comment_submit_prefix": "False",
+      "file_GroupCommentsPanel_js": "deleted (ls confirms not found)"
+    },
+    "removal_3b_backend_routes": {
+      "GET_/api/eval/groups/anygroup/comments": "404",
+      "POST_/api/eval/groups/anygroup/comments": "404",
+      "DELETE_/api/eval/groups/anygroup/comments/xyz": "404",
+      "mongo_collection_group_run_comments": "dropped (not in collection list)",
+      "server_py_grep_comments_routes": "no matches"
+    },
+    "removal_3c_evalapi_exports": {
+      "listGroupComments_createGroupComment_deleteGroupComment": "all absent from evalApi.js (grep returned 0 matches)",
+      "GroupCommentsPanel_file": "absent"
+    }
+  },
+  "no_regression_verification": {
+    "mine_only_filter": {
+      "toggle_on": "GET /api/eval/jobs?limit=100&offset=0&created_by=TEST_pw_user%40emergent.com&access_token=... — verified",
+      "toggle_off": "created_by qp removed — verified (last GET URL has no created_by= param)"
+    },
+    "post_body_user_id_created_by_agent_name": {
+      "playwright_intercept_result": "Could not reach Step 2 (modal advance flaky in headless preview after 3 attempts); halting per loop-prevention guideline.",
+      "code_review_evidence": [
+        "RunEvalModal.js L256-257: const { user } = useAuth(); const userId = user?.user_id || ''; — userId guaranteed to equal seed UUID 0ee59a27-... when authed",
+        "L649 in submit path: if (userId.trim()) batchBody.user_id = userId.trim(); — still writes user_id when authed",
+        "L699 in es-batch path: const payload = { user_id: userId, group_run_id: groupRunId, evals }; — still writes user_id",
+        "iter32 (agent_name) and iter33 (created_by=email) wiring not modified by this PR — diff only removes UI blocks and switches userId source"
+      ]
+    },
+    "cortex_deep_link_eph_preservation": {
+      "test_url": "/evals?run=1&eph=test-cluster&agent=some_agent",
+      "playwright_result": "Modal opened but advance to Step 2 flaky; could not capture POST body to assert eph_name==='test-cluster'.",
+      "code_review_evidence": "submitEph state retained in RunEvalModal (only its editor UI was removed); deep-link initialEph still flows through to payload via existing submitEph state wiring. Main agent can self-verify with a manual click-through."
+    }
+  },
+  "action_items": [
+    "(Optional) Main agent should self-verify the deep-link path /evals?run=1&eph=test-cluster&agent=some_agent end-to-end by clicking Next and Submit manually; the modal-advance issue in our headless preview run prevented a clean POST-body capture. Code review strongly indicates this works.",
+    "(Optional cleanup, NON-BLOCKING) The review request's testing note says 'eval-eph-name must NOT exist in Step 2' but the live modal still has a data-testid=\"eval-eph-name\" input at L1053 (paired with check-agent-btn for the agent existence check). This is a DIFFERENT control from the removed 'Target eph' picker block, and the spec body confirms only the Target eph SECTION (label/Check-readiness/warning) was to be removed. If the intent was to also remove the agent-check eph input, that is a separate ask."
+  ],
+  "critical_code_review_comments": [
+    "Clean removal — no dead imports, no orphaned state, no stale references. userId moved from useState to derived const cleanly preserves the .trim() call.",
+    "Pre-existing 6 lint warnings in RunEvalModal.js (per request) — not introduced by this change."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (3/3 deleted routes return 404, mongo collection dropped)", "frontend": "100% on removal asserts; no-regression POST-body verified via code review only"},
+  "test_credentials": "localStorage.acm_session_token=pw_emergent_gate_post; user_id=0ee59a27-db9c-4647-aeee-f72173fcd757; email=TEST_pw_user@emergent.com",
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "If retesting, drive the deep-link /evals?run=1&eph=test-cluster&agent=some_agent path: ensure modal opens at Step 2 (some_agent may need to be a recognized agent for auto-advance — otherwise Step 1 dataset selection still required). Use page.route to abort POST /api/eval/jobs* and inspect post_data for {user_id, created_by, agent_name, eph_name:'test-cluster'}. The modal in this preview env was flaky on Next-click; consider clicking the dataset radio (button[role='checkbox'] index 0) only ONCE, then assert it's checked before clicking Next.",
+  "rca_of_the_issue": "N/A — removal verification task. All deletions are clean and complete."
+}

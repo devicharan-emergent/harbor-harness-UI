@@ -42,7 +42,7 @@ export function AuthProvider({ children }) {
   // Wrap setUser so every state change mirrors into the ownership helper.
   const setUser = useCallback((next) => {
     setUserState(next);
-    setCreatedBy(next?.user_id || null);
+    setCreatedBy(next?.email || null);
   }, []);
 
   const checkAuth = useCallback(async () => {
@@ -106,9 +106,10 @@ export function useAuth() {
   return ctx;
 }
 
-// Convenience: stable UUID threaded through all harness CRUD as created_by.
-// We use the internal user_id (UUID) — never email, which can change.
+// Convenience: identity stamp threaded through all harness CRUD as created_by.
+// We use the user's email — it's the human-readable identifier the harness
+// dashboards display in their filters, audit logs, and group-run owner pills.
 export function useCreatedBy() {
   const { user } = useAuth();
-  return user?.user_id || null;
+  return user?.email || null;
 }

@@ -31,7 +31,7 @@
   ],
   "updated_files": ["/app/backend/tests/test_auth.py"],
   "success_rate": {"backend": "100% (6/6 auth tests pass)", "frontend": "Unauthenticated gating 100% (5/5); authenticated flow UNVERIFIED due to CORS blocker"},
-  "test_credentials": "No real Google creds used. Seeded MongoDB user + user_sessions directly: user_id=0ee59a27-db9c-4647-aeee-f72173fcd757, session_token=pw_test_1034c53aab0f4e8d94e9ff3a692f9da5 (in test_database DB). Seeded rows left in DB for retest.",
+  "test_credentials": "No real Google creds used. Seeded MongoDB user + user_sessions directly: user_id=ui-preview-debug, session_token=pw_test_1034c53aab0f4e8d94e9ff3a692f9da5 (in test_database DB). Seeded rows left in DB for retest.",
   "seed_data_creation": "Inserted one TEST_pw_user@example.com into users + matching user_sessions row. Test fixtures in test_auth.py self-clean after each run.",
   "retest_needed": true,
   "main_agent_can_self_test": false,
