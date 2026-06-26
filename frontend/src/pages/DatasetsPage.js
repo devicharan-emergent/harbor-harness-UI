@@ -27,6 +27,7 @@ import { DatasetPreviewModal } from '@/components/evals/DatasetPreviewModal';
 import { ImportDatasetsModal } from '@/components/evals/ImportDatasetsModal';
 import { SaveDatasetViewDialog } from '@/components/datasets/SaveDatasetViewDialog';
 import { DatasetViewsDropdown } from '@/components/datasets/DatasetViewsDropdown';
+import { AddItemsToViewModal } from '@/components/datasets/AddItemsToViewModal';
 import { parseApiError } from '@/lib/errorUtils';
 
 const DATASET_TYPES = [
@@ -76,14 +77,13 @@ export default function DatasetsPage() {
   const [exporting, setExporting] = useState(false);
 
   // Dataset views (saved selections). When `activeView` is set:
-  //  • the view's items are pre-selected (cross-page selection persists)
-  //  • by default we narrow the table to *only* show those items
-  //    (`showViewItemsOnly` ON), with a wider GET window so all of the
-  //    view's items are fetched in one go. The user can toggle the
-  //    filter off via the chip's "show all" link to add new items.
+  //  • the table is narrowed to ONLY items in the view (client-side filter)
+  //  • the view's items are pre-selected so multi-row actions still work
+  //  • per-row "Remove from view" + a toolbar "Add items" button manage
+  //    membership; no edit-mode toggle, no bulk re-selection flow.
   const [activeView, setActiveView] = useState(null);
   const [saveViewOpen, setSaveViewOpen] = useState(false);
-  const [showViewItemsOnly, setShowViewItemsOnly] = useState(true);
+  const [addItemsOpen, setAddItemsOpen] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
   const fetchDatasets = useCallback(async () => {
@@ -93,7 +93,7 @@ export default function DatasetsPage() {
       // When narrowing to a loaded view's items, widen the fetch window
       // so every item in the view actually shows up (the harness caps
       // limit=200). Otherwise use normal pagination.
-      const narrowToView = activeView && showViewItemsOnly;
+      const narrowToView = !!activeView;
       const limit = narrowToView ? 200 : pageSize;
       const offset = narrowToView ? 0 : page * pageSize;
       if (narrowToView || typeFilter === 'all') {
@@ -109,7 +109,7 @@ export default function DatasetsPage() {
     } finally {
       setLoading(false);
     }
-  }, [typeFilter, page, activeView, showViewItemsOnly]);
+  }, [typeFilter, page, activeView]);
 
   useEffect(() => {
     fetchDatasets();
@@ -184,17 +184,17 @@ export default function DatasetsPage() {
   const keyOf = (ds) => `${ds.dataset_type}/${ds.instance_id || ds.id}`;
 
   // Active-view key set for fast lookup. `null` when no view is loaded.
-  // NOTE: only used for the "highlight rows that belong to the view"
-  // visual cue — the table is NOT narrowed when a view is loaded so the
-  // user can add/remove items freely. The view's items are pre-selected
-  // (see pickView), so "Save as new view" / "Update view" can build the
-  // payload from the full selectedKeys Set.
+  // When a view IS loaded we narrow the table to ONLY those items — the
+  // page becomes the canonical "view editor" UI. Add/remove is per-row +
+  // a toolbar "Add items" modal that searches the full dataset catalog.
   const activeViewKeys = useMemo(() => {
     if (!activeView?.items) return null;
     return new Set(activeView.items.map(it => `${it.dataset_type}/${it.instance_id}`));
   }, [activeView]);
 
   const filteredDatasets = datasets.filter(ds => {
+    // Narrow to view items first — drops everything not in the view.
+    if (activeViewKeys && !activeViewKeys.has(keyOf(ds))) return false;
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return (
@@ -305,33 +305,45 @@ export default function DatasetsPage() {
     setSearchParams(next, { replace: true });
   };
 
-  // True if the active view's stored items differ from the current
-  // selection — drives the "Update view" button enable state.
-  const viewSelectionChanged = useMemo(() => {
-    if (!activeView) return false;
-    const stored = new Set(
-      (activeView.items || []).map(it => `${it.dataset_type}/${it.instance_id}`),
-    );
-    if (stored.size !== selectedKeys.size) return true;
-    for (const k of selectedKeys) if (!stored.has(k)) return true;
-    return false;
-  }, [activeView, selectedKeys]);
-
-  const handleUpdateActiveView = async () => {
+  // Remove a single dataset from the active view. Commits immediately via
+  // updateDatasetView so the user gets one-click membership control without
+  // a separate "save" step. The view chip + table update via setActiveView.
+  const handleRemoveFromView = async (ds) => {
     if (!activeView) return;
-    if (selectionItemsForView.length === 0) {
-      toast.error('A view must have at least one item');
+    const k = keyOf(ds);
+    const nextItems = (activeView.items || []).filter(
+      it => `${it.dataset_type}/${it.instance_id}` !== k,
+    );
+    if (nextItems.length === activeView.items.length) return;
+    if (nextItems.length === 0) {
+      toast.error('A view must have at least one item — delete the view from the Views page instead');
       return;
     }
     try {
-      const updated = await updateDatasetView(activeView.view_id, {
-        items: selectionItemsForView,
-      });
+      const updated = await updateDatasetView(activeView.view_id, { items: nextItems });
       setActiveView(updated);
-      toast.success(`Updated view "${updated.name}" — ${updated.items.length} items`);
+      // Drop the removed key from selection too so badges stay in sync.
+      setSelectedKeys(prev => {
+        const next = new Set(prev);
+        next.delete(k);
+        return next;
+      });
+      toast.success(`Removed from "${updated.name}"`);
     } catch (err) {
-      toast.error(parseApiError(err, 'Failed to update view'));
+      toast.error(parseApiError(err, 'Failed to remove from view'));
     }
+  };
+
+  // Merge in newly-picked items from the AddItemsToViewModal. The modal
+  // returns the FULL chosen set (existing-plus-new) so we can just push it.
+  const handleItemsAddedToView = (updated) => {
+    setActiveView(updated);
+    // Sync selection with the new membership so multi-row actions still work.
+    const nextKeys = new Set();
+    for (const it of updated.items || []) {
+      nextKeys.add(`${it.dataset_type}/${it.instance_id}`);
+    }
+    setSelectedKeys(nextKeys);
   };
 
   // Build the items payload from the FULL selection set so that selections
@@ -430,19 +442,14 @@ export default function DatasetsPage() {
           </Button>
           {activeView && (
             <Button
-              onClick={handleUpdateActiveView}
+              onClick={() => setAddItemsOpen(true)}
               variant="outline"
               size="sm"
-              disabled={!viewSelectionChanged || selectionItemsForView.length === 0}
-              data-testid="datasets-update-view-btn"
-              title={
-                !viewSelectionChanged
-                  ? 'Modify the selection to enable update'
-                  : `Save the ${selectionItemsForView.length} current item${selectionItemsForView.length === 1 ? '' : 's'} into "${activeView.name}"`
-              }
+              data-testid="datasets-add-to-view-btn"
+              title={`Add more datasets to "${activeView.name}"`}
             >
-              <Save className="w-3.5 h-3.5 mr-1.5" />
-              Update view{viewSelectionChanged ? ` (${selectionItemsForView.length})` : ''}
+              <Plus className="w-3.5 h-3.5 mr-1.5" />
+              Add items to view
             </Button>
           )}
           <TooltipProvider>
@@ -671,6 +678,24 @@ export default function DatasetsPage() {
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                          {activeView && (
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 text-blue-600 hover:text-blue-700 dark:text-blue-400"
+                                    onClick={() => handleRemoveFromView(ds)}
+                                    data-testid={`remove-from-view-${ds.instance_id || ds.id}`}
+                                  >
+                                    <BookMarked className="w-3.5 h-3.5" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Remove from view</TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          )}
                           <TooltipProvider>
                             <Tooltip>
                               <TooltipTrigger asChild>
@@ -797,6 +822,14 @@ export default function DatasetsPage() {
           // round-trip immediately.
           setActiveView(view);
         }}
+      />
+
+      {/* Add-items-to-view modal */}
+      <AddItemsToViewModal
+        open={addItemsOpen}
+        view={activeView}
+        onClose={() => setAddItemsOpen(false)}
+        onAdded={handleItemsAddedToView}
       />
 
       {/* Delete Confirmation */}
