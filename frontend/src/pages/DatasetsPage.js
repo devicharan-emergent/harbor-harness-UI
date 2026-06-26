@@ -714,6 +714,20 @@ export default function DatasetsPage() {
                           return (
                             <>
                               <div className="font-mono text-xs font-medium truncate" title={label}>{label}</div>
+                              {/* testing_agent_bench: surface the prod_job_id
+                                  inline so users can read it without opening
+                                  the preview. Legacy rows fall back to
+                                  instance_id (which used to double as the
+                                  prod job id pre-split). */}
+                              {ds.dataset_type === 'testing_agent_bench' && (
+                                <div
+                                  className="text-[10px] font-mono mt-0.5 truncate text-blue-700 dark:text-blue-300"
+                                  title={`prod_job_id: ${ds.attributes?.prod_job_id || ds.instance_id || '—'}`}
+                                  data-testid={`row-prod-job-id-${ds.instance_id || ds.id}`}
+                                >
+                                  prod: {ds.attributes?.prod_job_id || ds.instance_id || '—'}
+                                </div>
+                              )}
                               <div className="text-[10px] text-muted-foreground/60 font-mono mt-0.5 truncate" title={ds.id}>{ds.id}</div>
                             </>
                           );

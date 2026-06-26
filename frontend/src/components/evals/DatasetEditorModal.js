@@ -567,6 +567,12 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
   const [datasetType, setDatasetType] = useState('scratch_bench_phased');
   const [instanceId, setInstanceId] = useState('');
   const [description, setDescription] = useState('');
+  // testing_agent_bench: the *display* instance_id is the slugified friendly
+  // name (set via setInstanceId above) — the actual production job id to fork
+  // lives in its own field and is stored under `attributes.prod_job_id`. The
+  // eval-submit code prefers `attributes.prod_job_id` and only falls back to
+  // `instance_id` for legacy rows that pre-date this split.
+  const [prodJobId, setProdJobId] = useState('');
 
   // Phased editor state (scratch_bench_phased only)
   const [phases, setPhases] = useState([makeEmptyPhase()]);
@@ -599,6 +605,11 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
       setProblemStatement(dataset.problem_statement || '');
       setNaturalLanguageTests(dataset.natural_language_tests || '');
       setDescription(dataset.description || '');
+      // Legacy rows used `instance_id` as the prod job id; new rows store
+      // it separately under `attributes.prod_job_id`. Fall back to
+      // `instance_id` so editing a legacy row pre-fills the new field.
+      const attrs = dataset.attributes || {};
+      setProdJobId(attrs.prod_job_id || (t === 'testing_agent_bench' ? (dataset.instance_id || '') : ''));
 
       if (t === 'scratch_bench_phased') {
         const parsed = mergeParsedPhases(
@@ -631,6 +642,7 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
     } else {
       setDatasetType('scratch_bench_phased');
       setInstanceId('');
+      setProdJobId('');
       setPhases([makeEmptyPhase()]);
       setProblemStatement('');
       setNaturalLanguageTests('');
@@ -704,6 +716,10 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
       }
       if (!goldenOutput.trim()) {
         toast.error('Golden Output is required');
+        return false;
+      }
+      if (!isEditing && !prodJobId.trim()) {
+        toast.error('Production Job ID is required');
         return false;
       }
     } else {
@@ -791,6 +807,14 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
         tags: isEditing ? (dataset.tags || []) : [],
         attributes: isEditing ? (dataset.attributes || {}) : {},
       };
+      // testing_agent_bench: stamp the prod_job_id from the dedicated input
+      // into attributes so the eval-submit code picks it up (it reads
+      // `attributes.prod_job_id` first and only falls back to `instance_id`
+      // for legacy rows). Other attributes the row already had stay intact
+      // on edit because we cloned them above.
+      if (isTestingAgentBench && prodJobId.trim()) {
+        payload.attributes = { ...payload.attributes, prod_job_id: prodJobId.trim() };
+      }
       // Scratch/bug/test-report wizard rows still need the legacy
       // problem_set_ids tag. testing_agent_bench is created without it.
       if (!isTestingAgentBench) {
@@ -870,31 +894,48 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
                   </div>
                   <div>
                     <Label className="text-xs font-medium">
-                      {isTestingAgentBench ? 'Production Job ID' : 'Instance ID'} {!isEditing && '*'}
+                      {isTestingAgentBench ? 'Instance Name' : 'Instance ID'} {!isEditing && '*'}
                     </Label>
                     <Input
                       value={instanceId}
-                      onChange={(e) =>
-                        setInstanceId(
-                          isTestingAgentBench
-                            ? e.target.value
-                            : slugifyInstanceId(e.target.value)
-                        )
-                      }
-                      placeholder={isTestingAgentBench ? 'e.g. job-abc123' : 'e.g. my-problem-name'}
+                      onChange={(e) => setInstanceId(slugifyInstanceId(e.target.value))}
+                      placeholder={isTestingAgentBench ? 'e.g. my-prod-fork-test' : 'e.g. my-problem-name'}
                       className="mt-1 font-mono text-sm"
                       disabled={isEditing}
                       data-testid="dataset-instance-id-input"
                     />
                     {isTestingAgentBench && (
                       <p className="text-[10px] text-muted-foreground mt-1">
-                        The prod job to fork. The testing agent will replay its run
-                        against the HITL input and judge the result against the golden
-                        output.
+                        Friendly name for this fork — slugified. Used as the row&apos;s
+                        identity + the displayed dataset name. The actual production
+                        job id to fork goes in the next field.
                       </p>
                     )}
                   </div>
                 </div>
+
+                {/* Separate Production Job ID input — testing_agent_bench only.
+                    Stored under `attributes.prod_job_id`; the eval-submit reads
+                    this first and only falls back to `instance_id` for legacy
+                    rows that pre-date this split. NOT slugified — raw job ids
+                    routinely contain uppercase / dots / underscores. */}
+                {isTestingAgentBench && (
+                  <div>
+                    <Label className="text-xs font-medium">Production Job ID *</Label>
+                    <Input
+                      value={prodJobId}
+                      onChange={(e) => setProdJobId(e.target.value)}
+                      placeholder="e.g. abc.xyz_123-prod"
+                      className="mt-1 font-mono text-sm"
+                      data-testid="dataset-prod-job-id-input"
+                    />
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      The prod job to fork. The testing agent will replay its run
+                      against the HITL input and judge the result against the golden
+                      output.
+                    </p>
+                  </div>
+                )}
 
                 <div>
                   <Label className="text-xs font-medium">Description</Label>
