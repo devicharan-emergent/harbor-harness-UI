@@ -501,27 +501,6 @@ export default function DatasetsPage() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  onClick={handleExportAll}
-                  variant="outline"
-                  size="icon"
-                  className="h-9 w-9"
-                  disabled={exporting}
-                  data-testid="export-all-btn"
-                >
-                  {exporting ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <FileDown className="w-4 h-4" />
-                  )}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{typeFilter === 'all' ? 'Export all types as ZIP' : 'Export all rows as CSV'}</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
                   onClick={() => setImportOpen(true)}
                   variant="outline"
                   size="icon"
@@ -611,30 +590,52 @@ export default function DatasetsPage() {
       {/* Content: Table */}
       <Card>
         <CardContent className="pt-4">
-          {/* Small toolbar above the table — just the refresh action and a
-              row count, so the header above stays focused on primary
-              actions instead of secondary controls. */}
+          {/* Small toolbar above the table — row count on the left, plus
+              secondary icon actions (Export All + Refresh) on the right. */}
           <div className="flex items-center justify-between mb-3">
             <p className="text-xs text-muted-foreground">
               {loading ? 'Loading…' : `${filteredDatasets.length} dataset${filteredDatasets.length !== 1 ? 's' : ''}`}
             </p>
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    onClick={fetchDatasets}
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7"
-                    disabled={loading}
-                    data-testid="datasets-refresh-btn"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Refresh</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+            <div className="flex items-center gap-1">
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      onClick={handleExportAll}
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      disabled={exporting}
+                      data-testid="export-all-btn-table"
+                    >
+                      {exporting ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <FileDown className="w-3.5 h-3.5" />
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{typeFilter === 'all' ? 'Export all types as ZIP' : 'Export all rows as CSV'}</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      onClick={fetchDatasets}
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      disabled={loading}
+                      data-testid="datasets-refresh-btn"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Refresh</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
           </div>
           {loading ? (
             <div className="flex items-center justify-center py-16">

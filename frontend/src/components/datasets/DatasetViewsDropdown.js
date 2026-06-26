@@ -9,7 +9,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
-import { Loader2, Bookmark, RefreshCw } from 'lucide-react';
+import { Loader2, Bookmark, RefreshCw, Check } from 'lucide-react';
 import { listDatasetViews } from '@/services/evalApi';
 
 /**
@@ -20,15 +20,26 @@ import { listDatasetViews } from '@/services/evalApi';
  *   - label: button text (default "Views")
  *   - emptyHint: text shown when list is empty
  *   - testId: data-testid for the trigger button
- *   - onPick: (view) => void
+ *   - onPick: (view) => void  — fired for any click (toggle handled by caller)
+ *   - closeOnSelect: close the menu after a pick (default true). Pass `false`
+ *     for a multi-select host so the user can tick several views in a row
+ *     without re-opening.
+ *   - pickedIds: array of view_ids currently loaded by the host. Items in this
+ *     list render a checkmark and clicking them invokes `onUnpick` instead
+ *     of `onPick` so the dropdown doubles as the deselect affordance.
+ *   - onUnpick: (view) => void  — called when an already-picked view is clicked.
  */
 export function DatasetViewsDropdown({
   label = 'Views',
   emptyHint = 'No saved views yet — select rows + "Save as view" to create one.',
   testId = 'datasets-views-dropdown',
   onPick,
+  onUnpick,
+  pickedIds,
+  closeOnSelect = true,
   disabled = false,
   size = 'sm',
+  trigger,
 }) {
   const [views, setViews] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -50,18 +61,22 @@ export function DatasetViewsDropdown({
     fetchViews();
   }, [fetchViews]);
 
+  const pickedSet = new Set(pickedIds || []);
+
   return (
     <DropdownMenu onOpenChange={(open) => { if (open) fetchViews(); }}>
       <DropdownMenuTrigger asChild>
-        <Button
-          variant="outline"
-          size={size}
-          disabled={disabled}
-          data-testid={testId}
-        >
-          <Bookmark className="w-3.5 h-3.5 mr-1.5" />
-          {label}{views.length > 0 ? ` (${views.length})` : ''}
-        </Button>
+        {trigger ? trigger : (
+          <Button
+            variant="outline"
+            size={size}
+            disabled={disabled}
+            data-testid={testId}
+          >
+            <Bookmark className="w-3.5 h-3.5 mr-1.5" />
+            {label}{views.length > 0 ? ` (${views.length})` : ''}
+          </Button>
+        )}
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="end"
@@ -91,29 +106,39 @@ export function DatasetViewsDropdown({
             {emptyHint}
           </div>
         ) : (
-          views.map(v => (
-            <DropdownMenuItem
-              key={v.view_id}
-              onClick={() => onPick?.(v)}
-              className="flex flex-col items-start gap-0.5 cursor-pointer"
-              data-testid={`view-pick-${v.view_id}`}
-            >
-              <div className="flex items-center gap-2 w-full">
-                <span className="font-medium text-xs truncate flex-1">{v.name}</span>
-                <Badge variant="secondary" className="text-[9px] font-mono">
-                  {v.items?.length || 0}
-                </Badge>
-              </div>
-              {v.description && (
-                <span className="text-[10px] text-muted-foreground truncate w-full">
-                  {v.description}
+          views.map(v => {
+            const isPicked = pickedSet.has(v.view_id);
+            return (
+              <DropdownMenuItem
+                key={v.view_id}
+                // onSelect's `e.preventDefault()` is the Radix-blessed way to
+                // keep the menu open after a click; we use it whenever the
+                // host wants multi-select behavior.
+                onSelect={(e) => {
+                  if (!closeOnSelect) e.preventDefault();
+                  if (isPicked) onUnpick?.(v); else onPick?.(v);
+                }}
+                className="flex flex-col items-start gap-0.5 cursor-pointer"
+                data-testid={`view-pick-${v.view_id}`}
+              >
+                <div className="flex items-center gap-2 w-full">
+                  <Check className={`w-3.5 h-3.5 flex-shrink-0 ${isPicked ? 'text-emerald-500' : 'opacity-0'}`} />
+                  <span className="font-medium text-xs truncate flex-1">{v.name}</span>
+                  <Badge variant="secondary" className="text-[9px] font-mono">
+                    {v.items?.length || 0}
+                  </Badge>
+                </div>
+                {v.description && (
+                  <span className="text-[10px] text-muted-foreground truncate w-full pl-5">
+                    {v.description}
+                  </span>
+                )}
+                <span className="text-[9px] text-muted-foreground/70 font-mono truncate w-full pl-5">
+                  by {v.created_by_email || 'unknown'}
                 </span>
-              )}
-              <span className="text-[9px] text-muted-foreground/70 font-mono truncate w-full">
-                by {v.created_by_email || 'unknown'}
-              </span>
-            </DropdownMenuItem>
-          ))
+              </DropdownMenuItem>
+            );
+          })
         )}
       </DropdownMenuContent>
     </DropdownMenu>

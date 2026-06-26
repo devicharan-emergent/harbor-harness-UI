@@ -561,6 +561,38 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
     }
   }, [datasets]);
 
+  // Remove a single view from the chip strip AND deselect any problems
+  // that were unique to that view (i.e. not present in any other
+  // currently-loaded view). Problems the user added manually or that
+  // also belong to another loaded view stay selected.
+  const removeView = useCallback((viewId) => {
+    setActiveViews(prev => {
+      const removed = prev.find(v => v.view_id === viewId);
+      const remaining = prev.filter(v => v.view_id !== viewId);
+      if (removed) {
+        const removedKeys = new Set(
+          (removed.items || []).map(it => `${it.dataset_type}/${it.instance_id}`),
+        );
+        const stillCoveredKeys = new Set();
+        for (const v of remaining) {
+          for (const it of v.items || []) {
+            stillCoveredKeys.add(`${it.dataset_type}/${it.instance_id}`);
+          }
+        }
+        // Keys exclusive to the removed view — drop these from selection.
+        const dropKeys = new Set(
+          [...removedKeys].filter(k => !stillCoveredKeys.has(k)),
+        );
+        if (dropKeys.size > 0) {
+          setSelectedProblems(cur => cur.filter(
+            p => !dropKeys.has(`${p.dataset_type}/${p.instance_id}`),
+          ));
+        }
+      }
+      return remaining;
+    });
+  }, []);
+
   // Pick handler for the dropdown — wraps the API call + applyView.
   const handlePickView = async (view) => {
     // The dropdown gave us the lightweight list shape; re-fetch full doc
@@ -923,6 +955,9 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                   label={loadingView ? 'Loading…' : 'Load view'}
                   testId="eval-load-view-btn"
                   onPick={handlePickView}
+                  onUnpick={(v) => removeView(v.view_id)}
+                  pickedIds={activeViews.map(v => v.view_id)}
+                  closeOnSelect={false}
                   disabled={loadingView}
                   emptyHint="No saved views yet. Save one from the Datasets page."
                 />
@@ -947,17 +982,31 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                         · {v.items?.length || 0}
                       </span>
                       <button
-                        onClick={() => setActiveViews(prev => prev.filter(x => x.view_id !== v.view_id))}
+                        onClick={() => removeView(v.view_id)}
                         className="text-blue-700/70 dark:text-blue-300/70 hover:text-foreground -mr-1"
                         data-testid={`eval-active-view-clear-btn-${v.view_id}`}
-                        title="Remove this view from the chip strip (items stay selected; deselect manually if you want)"
+                        title="Remove this view (items unique to it are deselected; items also in other loaded views stay)"
                       >
                         <X className="w-3 h-3" />
                       </button>
                     </div>
                   ))}
                   <button
-                    onClick={() => setActiveViews([])}
+                    onClick={() => {
+                      // Clear all: drop every view + every problem that
+                      // came from those views. Manually-added problems
+                      // (i.e. not in any view) stay.
+                      const allViewKeys = new Set();
+                      for (const v of activeViews) {
+                        for (const it of v.items || []) {
+                          allViewKeys.add(`${it.dataset_type}/${it.instance_id}`);
+                        }
+                      }
+                      setActiveViews([]);
+                      setSelectedProblems(cur => cur.filter(
+                        p => !allViewKeys.has(`${p.dataset_type}/${p.instance_id}`),
+                      ));
+                    }}
                     className="text-[10px] underline underline-offset-2 text-muted-foreground hover:text-foreground"
                     data-testid="eval-active-views-clear-all"
                   >
