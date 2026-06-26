@@ -3,13 +3,15 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Separator } from '@/components/ui/separator';
-import { Loader2, ArrowLeft, ExternalLink, RefreshCw, Layers, Clock, Cpu, ActivitySquare, CheckCircle, XCircle, Ban, Copy, Timer } from 'lucide-react';
+import { Loader2, ArrowLeft, ExternalLink, RefreshCw, Layers, Clock, Cpu, ActivitySquare, CheckCircle, XCircle, Ban, Copy, Timer, Play } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
-import { getEvalRunGroup, listGroupJobs, getEvalAggregate, listEvalJobs } from '@/services/evalApi';
+import { getEvalRunGroup, listGroupJobs, getEvalAggregate, listEvalJobs, replayEvalJobs } from '@/services/evalApi';
 import { getJobAgentName, getJobModelName, getJobTemplateName } from '@/lib/jobShape';
 import { parseApiError } from '@/lib/errorUtils';
+import { useCreatedBy } from '@/contexts/AuthContext';
 
 const STATUS_CONFIG = {
   queued: { color: 'bg-amber-500', icon: Clock, label: 'Queued' },
@@ -292,11 +294,14 @@ function JobRow({ job, selectable, selected, onToggleSelect }) {
 export default function GroupDetailPage() {
   const { groupRunId } = useParams();
   const navigate = useNavigate();
+  const triggeredBy = useCreatedBy();
   const [meta, setMeta] = useState(null);
   const [jobs, setJobs] = useState([]);
   const [aggregate, setAggregate] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [replaying, setReplaying] = useState(false);
 
   const fetchAll = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true); else setLoading(true);
@@ -350,6 +355,72 @@ export default function GroupDetailPage() {
   }, [groupRunId]);
 
   useEffect(() => { fetchAll(false); }, [fetchAll]);
+
+  // ── Live polling while any job is in transient "replaying" status ───
+  // We poll every 5s until none remain in `replaying`. This keeps the
+  // status pill + cyan ring in sync without a hard refresh.
+  const anyReplaying = useMemo(
+    () => jobs.some(j => j.status === 'replaying'),
+    [jobs],
+  );
+  useEffect(() => {
+    if (!anyReplaying) return;
+    const interval = setInterval(() => fetchAll(true), 5000);
+    return () => clearInterval(interval);
+  }, [anyReplaying, fetchAll]);
+
+  // ── Replay-eligibility helper (mirrors JobRow's gate) ────────────────
+  const isJobReplayEligible = useCallback((j) => (
+    j.status === 'completed' &&
+    (j.dataset_type === 'scratch_bench_phased' ||
+      (j.problem || '').startsWith('scratch_bench_phased/'))
+  ), []);
+
+  const eligibleJobs = useMemo(
+    () => jobs.filter(isJobReplayEligible),
+    [jobs, isJobReplayEligible],
+  );
+
+  const toggleSelect = useCallback((jobId, checked) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (checked) next.add(jobId); else next.delete(jobId);
+      return next;
+    });
+  }, []);
+
+  const toggleSelectAllEligible = useCallback(() => {
+    setSelectedIds(prev => {
+      const allEligibleIds = eligibleJobs.map(j => j.id);
+      const allSelected = allEligibleIds.length > 0 &&
+        allEligibleIds.every(id => prev.has(id));
+      if (allSelected) return new Set();
+      return new Set(allEligibleIds);
+    });
+  }, [eligibleJobs]);
+
+  const handleReplaySelected = useCallback(async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setReplaying(true);
+    try {
+      const resp = await replayEvalJobs(ids, triggeredBy);
+      const results = resp?.results || [];
+      const ok = results.filter(r => r.status === 'replaying').length;
+      const errs = results.filter(r => r.status === 'error');
+      if (ok > 0) toast.success(`Replaying ${ok} job${ok === 1 ? '' : 's'}`);
+      if (errs.length > 0) {
+        toast.error(`${errs.length} replay${errs.length === 1 ? '' : 's'} failed: ${errs[0].error || errs[0].message || 'unknown error'}`);
+      }
+      setSelectedIds(new Set());
+      // Refresh once immediately — polling will pick up subsequent updates.
+      fetchAll(true);
+    } catch (err) {
+      toast.error(parseApiError(err, 'Failed to start replay'));
+    } finally {
+      setReplaying(false);
+    }
+  }, [selectedIds, triggeredBy, fetchAll]);
 
   const sortedJobs = useMemo(
     () => [...jobs].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)),
@@ -472,9 +543,46 @@ export default function GroupDetailPage() {
       {/* Jobs list */}
       <Card data-testid="group-jobs-list-card">
         <CardHeader>
-          <CardTitle className="text-sm flex items-center justify-between">
-            <span>Jobs</span>
-            <span className="text-[10px] font-mono text-muted-foreground font-normal">click a row to open</span>
+          <CardTitle className="text-sm flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-3 flex-wrap">
+              <span>Jobs</span>
+              {eligibleJobs.length > 0 && (
+                <button
+                  type="button"
+                  onClick={toggleSelectAllEligible}
+                  className="text-[10px] font-mono text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
+                  data-testid="group-select-all-eligible"
+                >
+                  {eligibleJobs.every(j => selectedIds.has(j.id)) && selectedIds.size > 0
+                    ? `Clear (${selectedIds.size})`
+                    : `Select all eligible (${eligibleJobs.length})`}
+                </button>
+              )}
+              {selectedIds.size > 0 && (
+                <Badge variant="secondary" className="text-[10px] font-mono" data-testid="group-selection-count">
+                  {selectedIds.size} selected
+                </Badge>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="default"
+                disabled={selectedIds.size === 0 || replaying}
+                onClick={handleReplaySelected}
+                data-testid="group-replay-browser-tests-btn"
+                className="h-7 text-xs"
+                title={selectedIds.size === 0
+                  ? 'Select one or more completed scratch_bench_phased jobs to replay'
+                  : `Re-run browser verifier on ${selectedIds.size} job${selectedIds.size === 1 ? '' : 's'}`}
+              >
+                {replaying
+                  ? <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
+                  : <Play className="w-3 h-3 mr-1.5" />}
+                Replay browser tests{selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}
+              </Button>
+              <span className="text-[10px] font-mono text-muted-foreground font-normal">click a row to open</span>
+            </div>
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -482,7 +590,15 @@ export default function GroupDetailPage() {
             <div className="text-center py-8 text-xs text-muted-foreground">No jobs in this group.</div>
           ) : (
             <div className="space-y-1.5" data-testid="group-jobs-list">
-              {sortedJobs.map(job => <JobRow key={job.id} job={job} />)}
+              {sortedJobs.map(job => (
+                <JobRow
+                  key={job.id}
+                  job={job}
+                  selectable
+                  selected={selectedIds.has(job.id)}
+                  onToggleSelect={toggleSelect}
+                />
+              ))}
             </div>
           )}
         </CardContent>

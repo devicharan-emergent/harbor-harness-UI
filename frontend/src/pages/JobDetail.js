@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getEvalJob, cancelEvalJob, getDatasetForProblem, updateBreakpoint } from '@/services/evalApi';
+import { getEvalJob, cancelEvalJob, getDatasetForProblem, updateBreakpoint, replayEvalJobs } from '@/services/evalApi';
 import { getJobAgentName, getJobModelName } from '@/lib/jobShape';
 import { getPhaseLabel, getJobStatusLabel } from '@/lib/phaseLabels';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,15 +11,17 @@ import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { toast } from 'sonner';
-import { ArrowLeft, Copy, XCircle, Loader2, CheckCircle, Clock, AlertTriangle, Cpu, ActivitySquare, Ban, FileText, ChevronDown, ChevronUp, ChevronRight, ExternalLink, Info } from 'lucide-react';
+import { ArrowLeft, Copy, XCircle, Loader2, CheckCircle, Clock, AlertTriangle, Cpu, ActivitySquare, Ban, FileText, ChevronDown, ChevronUp, ChevronRight, ExternalLink, Info, Play } from 'lucide-react';
 import { formatDistanceToNow, formatDuration, intervalToDuration } from 'date-fns';
 import { formatDateTime } from '@/lib/utils';
 import { LintRuleBreakdown } from '@/components/evals/LintRuleBreakdown';
+import { useCreatedBy } from '@/contexts/AuthContext';
 
 const STATUS_ICONS = {
   queued: Clock,
   generating: Cpu,
   running: ActivitySquare,
+  replaying: Loader2,
   completed: CheckCircle,
   failed: XCircle,
   cancelled: Ban,
@@ -45,9 +47,11 @@ function fmtSecs(secs) {
 export default function JobDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const triggeredBy = useCreatedBy();
   const [job, setJob] = useState(null);
   const [loading, setLoading] = useState(true);
   const [cancelling, setCancelling] = useState(false);
+  const [replaying, setReplaying] = useState(false);
   const [nextPollIn, setNextPollIn] = useState(10);
   const [dataset, setDataset] = useState(null);
   const [datasetLoading, setDatasetLoading] = useState(false);
@@ -59,7 +63,7 @@ export default function JobDetail() {
   // durations sum to the wall-clock total.
   const [showAllPhases, setShowAllPhases] = useState(false);
 
-  const isActive = job && ['queued', 'generating', 'running'].includes(job.status);
+  const isActive = job && ['queued', 'generating', 'running', 'replaying'].includes(job.status);
 
   useEffect(() => {
     fetchJob();
@@ -82,10 +86,17 @@ export default function JobDetail() {
   useEffect(() => {
     if (!isActive) return;
 
+    // Replaying status polls faster (5s) since the harness flips back to
+    // "completed" once browser_testing finishes — it's typically a short
+    // window. Build phases poll every 10s as before.
+    const pollMs = job?.status === 'replaying' ? 5000 : 10000;
+    const pollSecs = Math.floor(pollMs / 1000);
+    setNextPollIn(pollSecs);
+
     const pollInterval = setInterval(() => {
       fetchJob();
-      setNextPollIn(10);
-    }, 10000);
+      setNextPollIn(pollSecs);
+    }, pollMs);
 
     const countdownInterval = setInterval(() => {
       setNextPollIn(prev => Math.max(0, prev - 1));
@@ -95,7 +106,7 @@ export default function JobDetail() {
       clearInterval(pollInterval);
       clearInterval(countdownInterval);
     };
-  }, [isActive, id]);
+  }, [isActive, id, job?.status]);
 
   const fetchJob = async () => {
     try {
@@ -127,6 +138,32 @@ export default function JobDetail() {
     }
   };
 
+  // ── Replay: re-run browser verifier on this job's live preview ──────
+  // Only allowed for completed scratch_bench_phased jobs. Each replay
+  // appends a new `kind: "replay"` entry to phase_results — the original
+  // build phases and top-level scores are never overwritten.
+  const handleReplay = async () => {
+    if (!confirm('Re-run browser tests on the live preview?\n\nThis appends a new "Replay" phase to this job. The original phases and scores are preserved.')) return;
+    setReplaying(true);
+    try {
+      const resp = await replayEvalJobs([id], triggeredBy);
+      const results = resp?.results || [];
+      const r = results[0] || {};
+      if (r.status === 'replaying') {
+        toast.success('Replay started — polling for results');
+      } else if (r.status === 'error') {
+        toast.error(`Replay failed: ${r.error || r.message || 'unknown error'}`);
+      } else {
+        toast.success('Replay requested');
+      }
+      fetchJob();
+    } catch (error) {
+      toast.error(`Failed to start replay: ${error.message}`);
+    } finally {
+      setReplaying(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -153,7 +190,19 @@ export default function JobDetail() {
   const lintiqScore = job.lintiq_score;
   const combinedReward = job.combined_reward;
   const hasScores = browserReward !== undefined || lintiqScore !== undefined || combinedReward !== undefined;
-  const phaseResults = job.phase_results || [];
+  const allPhaseResults = job.phase_results || [];
+  // Build phases = original verifier output during the eval. Replay
+  // phases = re-runs of just the browser verifier on the existing live
+  // preview. We render them in two separate sections so users can tell
+  // at a glance which signal is fresh vs original.
+  const phaseResults = allPhaseResults.filter(p => p.kind !== 'replay');
+  const replayPhases = allPhaseResults.filter(p => p.kind === 'replay');
+
+  // Replay eligibility (mirrors backend): completed + scratch_bench_phased.
+  // Note the harness also accepts the dataset_type embedded in the
+  // problem name, so check both shapes.
+  const datasetType = job.dataset_type || (job.problem || '').split('/')[0];
+  const isReplayEligible = job.status === 'completed' && datasetType === 'scratch_bench_phased';
 
   return (
     <div className="space-y-6" data-testid="job-detail-page">
@@ -224,6 +273,22 @@ export default function JobDetail() {
             <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
             Copy link
           </Button>
+          {isReplayEligible && (
+            <Button
+              variant="default"
+              size="sm"
+              className="h-8"
+              onClick={handleReplay}
+              disabled={replaying}
+              data-testid="jobdetail-replay-btn"
+              title="Re-run the browser verifier on this job's live preview"
+            >
+              {replaying
+                ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                : <Play className="w-3.5 h-3.5 mr-1.5" />}
+              Replay browser tests
+            </Button>
+          )}
           {isActive && (
             <>
             <Button
@@ -1026,6 +1091,136 @@ export default function JobDetail() {
                       })()}
 
                       {phaseIdx < phaseResults.length - 1 && <Separator />}
+                    </div>
+                  );
+                })}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Replays — re-runs of the browser verifier on the live
+              preview. These are appended AFTER the build is complete and
+              do NOT alter the original build phases or top-level scores.
+              Rendered in a distinct cyan-tinted card so they're visually
+              separate from the eval metrics above. */}
+          {replayPhases.length > 0 && (
+            <Card data-testid="replay-phases-card" className="border-cyan-500/30 bg-cyan-500/[0.02]">
+              <CardHeader>
+                <CardTitle className="text-sm flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <Play className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
+                    <span>Replays</span>
+                    <Badge variant="outline" className="text-[10px] font-mono border-cyan-500/30 text-cyan-700 dark:text-cyan-300">
+                      {replayPhases.length} run{replayPhases.length === 1 ? '' : 's'}
+                    </Badge>
+                  </div>
+                  <span className="text-[10px] font-mono text-muted-foreground font-normal">
+                    Does not override original scores
+                  </span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                {replayPhases.map((phase, rIdx) => {
+                  const totalPass = (phase.browser_results || []).reduce((s, r) => s + (r.pass_cases || 0), 0);
+                  const totalFail = (phase.browser_results || []).reduce((s, r) => s + (r.fail_cases || 0), 0);
+                  const totalCases = (phase.browser_results || []).reduce((s, r) => s + (r.total_cases || 0), 0);
+                  const passRate = totalCases > 0 ? (totalPass / totalCases) * 100 : 0;
+                  const replayLabel = phase.replay_index != null
+                    ? `Replay ${phase.replay_index}`
+                    : `Replay ${rIdx + 1}`;
+                  return (
+                    <div key={rIdx} className="space-y-3" data-testid={`replay-phase-${rIdx}`}>
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <h4 className="text-xs font-semibold flex items-center gap-2">
+                          {replayLabel}
+                          {phase.browser_reward !== undefined && (
+                            <Badge
+                              variant={phase.browser_reward >= 0.8 ? 'default' : phase.browser_reward >= 0.5 ? 'secondary' : 'destructive'}
+                              className="text-[9px] font-mono"
+                              data-testid={`replay-phase-${rIdx}-reward`}
+                            >
+                              Browser {(phase.browser_reward * 100).toFixed(0)}%
+                            </Badge>
+                          )}
+                          {phase.triggered_by && (
+                            <span className="text-[10px] text-muted-foreground font-mono">
+                              by {phase.triggered_by}
+                            </span>
+                          )}
+                          {phase.created_at && (
+                            <span className="text-[10px] text-muted-foreground font-mono">
+                              · {formatDistanceToNow(new Date(phase.created_at), { addSuffix: true })}
+                            </span>
+                          )}
+                        </h4>
+                        <span className="text-[10px] text-muted-foreground font-mono">
+                          {totalPass}/{totalCases} passed
+                        </span>
+                      </div>
+                      <Progress value={passRate} className="h-1.5" />
+
+                      {phase.error && (
+                        <div className="flex items-start gap-2 px-3 py-2 rounded-lg border border-red-500/30 bg-red-500/5 text-xs" data-testid={`replay-phase-${rIdx}-error`}>
+                          <AlertTriangle className="w-3.5 h-3.5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+                          <pre className="font-mono text-red-700 dark:text-red-300 whitespace-pre-wrap break-words flex-1">
+                            {typeof phase.error === 'string' ? phase.error : JSON.stringify(phase.error, null, 2)}
+                          </pre>
+                        </div>
+                      )}
+
+                      {(phase.browser_results || []).map((test, testIdx) => {
+                        const isPassing = test.status === 'pass';
+                        return (
+                          <div
+                            key={testIdx}
+                            className={`flex items-start gap-2 px-3 py-2 rounded-lg border text-xs ${
+                              isPassing
+                                ? 'border-emerald-500/20 bg-emerald-500/5'
+                                : 'border-red-500/20 bg-red-500/5'
+                            }`}
+                            data-testid={`replay-test-${rIdx}-${testIdx}`}
+                          >
+                            <div className="flex-shrink-0 mt-0.5">
+                              {isPassing ? (
+                                <CheckCircle className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                              ) : (
+                                <XCircle className="w-3.5 h-3.5 text-red-600 dark:text-red-400" />
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-medium truncate" title={test.test_name}>
+                                  {test.test_name
+                                    ? (test.test_name.length > 80 ? test.test_name.substring(0, 80) + '…' : test.test_name)
+                                    : `Test ${testIdx + 1}`}
+                                </span>
+                                <Badge
+                                  variant="outline"
+                                  className={`text-[9px] font-mono flex-shrink-0 ${
+                                    isPassing ? 'text-emerald-600 border-emerald-500/30' : 'text-red-600 border-red-500/30'
+                                  }`}
+                                >
+                                  {test.pass_cases}/{test.total_cases}
+                                </Badge>
+                              </div>
+                              {test.replay_url && (
+                                <a
+                                  href={test.replay_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 text-[10px] text-blue-500 hover:text-blue-400 font-mono underline mt-1"
+                                  data-testid={`replay-watch-${rIdx}-${testIdx}`}
+                                >
+                                  Watch replay
+                                  <ExternalLink className="w-2.5 h-2.5" />
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+
+                      {rIdx < replayPhases.length - 1 && <Separator />}
                     </div>
                   );
                 })}

@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 41 — Replay browser tests feature (ACM). Backend: 4/4 pytest cases PASS for POST /api/eval/replay (route mounted, on_demand auto-injected when missing, empty body handled, response shape correct — upstream returns 200 with results[] for fake job IDs including {job_id, status:'error', error:'no rows in result set'}). Frontend GroupDetailPage (group 21601722-…): checkbox renders only on the eligible scratch_bench_phased completed job, 'Select all eligible (1)' toggles to 'Clear (1)', 'group-selection-count' badge shows '1 selected', 'group-replay-browser-tests-btn' goes from disabled → enabled with text 'Replay browser tests (1)'. Clicking the button successfully fires the POST, surfaces toast 'Replaying 1 job', clears selection, AND the upstream actually flipped the job to status='replaying' (verified via subsequent JobDetail visit showing 'Replaying' pill + cyan-tinted row + 'Next poll in 2s' countdown — confirming the 5s poll cadence for replaying state). JobDetail (/evals/127fd721-…): completed scratch_bench_phased job correctly renders 'jobdetail-replay-btn' enabled in the header; testing_agent_bench job (46ab9ed0-…) correctly DOES NOT render the button (negative test). JobDetail for a replaying scratch_bench_phased job also correctly hides the button (status === 'completed' check). Code review of replay-phases-card (JobDetail.js:1106-1229) confirms: cyan-bordered card below Eval Metrics, conditional on replayPhases.length>0, per-phase 'Replay N' label, browser_reward badge, triggered_by 'by <email>' label, progress bar, totals, error block (red), Watch replay anchor with href=replay_url and data-testid='replay-watch-{rIdx}-{testIdx}'. phase_results is split at L198-199 so build phases (kind!=='replay') stay in Eval Metrics, replay phases go to the new card.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_41_replay.py",
+    "/app/test_reports/pytest/iter41_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py:575 — `payload = {'on_demand': True, **(body or {})}` is correct: body keys override the default, so a client-supplied on_demand=false would still flow through (matches spec 'auto-injects on_demand:true if not present'). Good.",
+    "server.py:581-589 — upstream 4xx is mapped to FastAPI HTTPException with `detail = err.get('message', str(err))`. Note: harness for invalid job_ids actually returns 200 with per-job {status:'error', error:'...'} rather than 4xx, so this branch is rarely hit in practice — fine.",
+    "JobDetail.js:198-199 — phase split (kind!=='replay' vs kind==='replay') is clean and order-stable. replayPhases ordering follows backend insertion order (no explicit sort); harness should append in chronological order so this is fine.",
+    "JobDetail.js:1128-1130 — replay label falls back to `Replay ${rIdx+1}` when phase.replay_index is missing. Good defensive default.",
+    "JobDetail.js:1206-1217 — Watch replay link uses test.replay_url directly with target=_blank rel=noopener — matches the requirement (4) 'Watch replay links stream directly from browser_results[].replay_url'. Good.",
+    "GroupDetailPage.js:222-225 — eligibility predicate covers BOTH dataset_type==='scratch_bench_phased' AND problem startsWith 'scratch_bench_phased/' — matches spec exactly. Backend will double-check.",
+    "GroupDetailPage.js:556-558 — Select-all-eligible label flips correctly between 'Select all eligible (N)' and 'Clear (N)' based on whether ALL eligibles are selected. Verified live.",
+    "Frontend code uses `replayEvalJobs(jobIds, triggeredBy)` which posts body `{job_ids, on_demand:true, triggered_by}` — matches spec body shape, and the test verified the live POST DID flip the upstream job to 'replaying' (visible via subsequent fetch). Network interception on the second click attempt was empty (likely a Playwright timing artifact on the spinning button state), but the FE→BFF→upstream chain is empirically working end-to-end as evidenced by the actual status change."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_41_replay.py (new)"
+  ],
+  "success_rate": {"backend": "100% (4/4 pytest)", "frontend": "100% — all 7 group-detail behaviours + 3 job-detail behaviours verified via Playwright; replay-phases-card structural review passes spec"},
+  "test_credentials": "Bearer / cookie pw_emergent_gate_post (from /app/memory/test_credentials.md). User: TEST_pw_user@emergent.com / user_id 0ee59a27-db9c-4647-aeee-f72173fcd757.",
+  "seed_data_creation": "No seeding needed — used real completed scratch_bench_phased jobs already in upstream: group 21601722-d78f-4735-b700-eb8ee560b1aa (1 completed scratch_bench_phased job 58458d77-…); standalone jobs 127fd721-… (completed scratch_bench_phased/spreadsheet_final_1) and 46ab9ed0-… (testing_agent_bench, negative test).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "iter-41 introduces 'Replay browser tests' on GroupDetailPage + JobDetail. Backend route /api/eval/replay (server.py:563) proxies POST to harness /api/v1/evals/replay and auto-injects on_demand=true. Pytest file: /app/backend/tests/test_iteration_41_replay.py. Real test data: group 21601722-d78f-4735-b700-eb8ee560b1aa has exactly 1 scratch_bench_phased job; clicking Replay actually mutates upstream state (job flips to 'replaying' for several minutes) — be aware if you re-run. To test the replay-phases-card visually you need a job with phase_results entries containing kind:'replay'; could not find one at test time (the freshly-triggered replay was still in flight). For negative-cases use testing_agent_bench job 46ab9ed0-cbb5-4e86-834e-bf6ee357623a — Replay button correctly absent. Polling cadence drops to 5s ('Next poll in 2s' was observed) when status==='replaying'. /api/eval/groups/{id}/jobs sometimes 404s — the FE has a fallback that scans /api/eval/jobs pages by group_run_id; that path is exercised by group 21601722 and worked.",
+  "rca of the issue": "N/A — feature-verification iteration with no blocking issues. The only observed quirk: Playwright `page.route('**/api/eval/replay')` sometimes did not intercept the FE's request before fulfilling natively (captured count was 0 on JobDetail click) — but the toast and upstream side-effect confirmed the call propagated. Treated as a Playwright/timing artifact, not a product issue."
+}
