@@ -12,7 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Loader2, Clock, Cpu, CheckCircle, XCircle, Ban, ActivitySquare, RefreshCw, Plus, ChevronDown, ChevronRight, Layers, ExternalLink, Timer, Pencil, MessageSquare } from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
+import { formatDateTime } from '@/lib/utils';
 import { Progress } from '@/components/ui/progress';
 import { toast } from 'sonner';
 import { parseApiError } from '@/lib/errorUtils';
@@ -688,7 +688,7 @@ export default function EvalRuns() {
 
                         {/* Created time */}
                         <span className="text-[10px] text-muted-foreground flex-shrink-0">
-                          {formatDistanceToNow(new Date(group.latestCreated), { addSuffix: true })}
+                          {formatDateTime(group.latestCreated)}
                         </span>
                       </div>
                     </CardContent>
@@ -752,7 +752,7 @@ export default function EvalRuns() {
 
                           {/* Time */}
                           <span className="text-[10px] text-muted-foreground flex-shrink-0 w-24 text-right">
-                            {formatDistanceToNow(new Date(job.created_at), { addSuffix: true })}
+                            {formatDateTime(job.created_at)}
                           </span>
 
                           <a

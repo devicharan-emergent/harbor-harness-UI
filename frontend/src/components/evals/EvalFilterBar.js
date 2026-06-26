@@ -15,7 +15,8 @@ import { Search, SlidersHorizontal, X, Calendar } from 'lucide-react';
 // client-side as a defence in depth on the predicate.
 
 export const EMPTY_FILTERS = {
-  batch: '', agent: '', prompt: '', dateFrom: '', dateTo: '', mode: 'and',
+  batch: '', agent: '', prompt: '', jobId: '',
+  dateFrom: '', dateTo: '', mode: 'and',
   mineOnly: false,
 };
 
@@ -36,6 +37,7 @@ export function buildJobFilter(filters, currentUserCreatedBy = null, groupNameBy
   const batch = (filters.batch || '').trim().toLowerCase();
   const agent = (filters.agent || '').trim().toLowerCase();
   const prompt = (filters.prompt || '').trim().toLowerCase();
+  const jobId = (filters.jobId || '').trim().toLowerCase();
   const from = filters.dateFrom ? new Date(filters.dateFrom + 'T00:00:00').getTime() : null;
   const to = filters.dateTo ? new Date(filters.dateTo + 'T23:59:59').getTime() : null;
   const mode = filters.mode === 'or' ? 'or' : 'and';
@@ -66,6 +68,9 @@ export function buildJobFilter(filters, currentUserCreatedBy = null, groupNameBy
     if (prompt) {
       const p = (job.problem || '').toLowerCase();
       checks.push(p.includes(prompt));
+    }
+    if (jobId) {
+      checks.push((job.id || '').toLowerCase().includes(jobId));
     }
     if (from != null || to != null) {
       const t = job.created_at ? new Date(job.created_at).getTime() : NaN;
@@ -104,6 +109,7 @@ export function EvalFilterBar({ value, onChange }) {
     let n = 0;
     if (value.agent?.trim()) n += 1;
     if (value.prompt?.trim()) n += 1;
+    if (value.jobId?.trim()) n += 1;
     if (value.dateFrom || value.dateTo) n += 1;
     return n;
   }, [value]);
@@ -198,6 +204,13 @@ export function EvalFilterBar({ value, onChange }) {
             className="h-8 text-xs w-[220px]"
             data-testid="filter-prompt-input"
           />
+          <Input
+            value={value.jobId}
+            onChange={(e) => update({ jobId: e.target.value })}
+            placeholder="Job ID (partial)"
+            className="h-8 text-xs w-[220px]"
+            data-testid="filter-jobid-input"
+          />
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Calendar className="w-3.5 h-3.5" />
             <Input
@@ -245,6 +258,9 @@ export function EvalFilterBar({ value, onChange }) {
           )}
           {value.prompt?.trim() && (
             <Chip label="Problem" value={value.prompt} onClear={() => update({ prompt: '' })} testid="chip-prompt" />
+          )}
+          {value.jobId?.trim() && (
+            <Chip label="Job ID" value={value.jobId} onClear={() => update({ jobId: '' })} testid="chip-jobid" />
           )}
           {(value.dateFrom || value.dateTo) && (
             <Chip

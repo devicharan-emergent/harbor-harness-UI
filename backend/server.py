@@ -604,35 +604,36 @@ from fastapi.responses import Response, JSONResponse
 
 # Columns that map to TOP-LEVEL dataset fields. Everything else on a row
 # (non-empty) goes into the per-row `attributes` object the bulk endpoint
-# expects.
+# expects. The editor wizard no longer collects `tags` / `agent_name` /
+# `model_name`, so the CSV contract drops them too — unknown columns on
+# uploaded files are tolerated (silently ignored) for back-compat with
+# CSVs exported before this change.
 _CSV_COMMON_COLS = {
-    "id", "name", "instance_id", "description", "tags",
-    "problem_statement", "natural_language_tests", "base_image", "agent_name",
-}
-
-# The harness is inconsistent about where `agent_name` lives per type — these
-# types want it inside `attributes`, the others want it as a top-level field.
-# Both lookups are tried on export so the round-trip is loss-less either way.
-_AGENT_NAME_IN_ATTRIBUTES = {
-    "scratch_bench_phased",
-    "bug_bench",
-    "testing_agent_bench",
+    "id", "name", "instance_id", "description",
+    "problem_statement", "natural_language_tests", "base_image",
 }
 
 # Ordered list of common columns for export header (id+instance_id first
 # so a quick eyeball of the CSV is identifying).
 _CSV_COMMON_COLS_ORDER = [
-    "id", "instance_id", "name", "description", "tags",
-    "problem_statement", "natural_language_tests", "base_image", "agent_name",
+    "id", "instance_id", "name", "description",
+    "problem_statement", "natural_language_tests", "base_image",
 ]
+
+# Legacy columns from the pre-trim CSV contract. Old exports (and any
+# CSVs the user hand-authored against the previous template) still carry
+# these — silently drop them on import so the upload still succeeds.
+_CSV_IGNORED_COLS = {"tags", "agent_name", "model_name"}
 
 # Attribute columns per dataset_type. MUST exactly match harness attribute
 # field names so the round-trip (export → re-upload) is loss-less and
-# bulk-create skips the existing rows.
+# bulk-create skips the existing rows. `model_name` was removed alongside
+# the wizard's Tags & Attributes step — re-importing an old CSV that still
+# has it will silently drop the column.
 _CSV_ATTR_COLS = {
     "scratch_bench_phased": [
         "subagents", "preview_url", "image", "auto_compact_strategy",
-        "model_name", "system_prompt", "thinking_level", "hints", "nudge",
+        "system_prompt", "thinking_level", "hints", "nudge",
     ],
     "bug_bench": [
         "repo", "eph_job_id", "base_commit", "base_commit_squashed",
@@ -643,10 +644,10 @@ _CSV_ATTR_COLS = {
         "Bug_description", "Bug_fix_status",
         "request_id", "base_commit", "pull_number", "issue_number",
     ],
-    "testing_agent_bench": ["prod_job_id", "model_name"],
+    "testing_agent_bench": ["prod_job_id"],
     "wingman_bench": [
         "wingman_id", "user_id", "expected_integrations",
-        "max_iterations", "agent_id", "model_name",
+        "max_iterations", "agent_id",
     ],
 }
 
@@ -659,7 +660,6 @@ _CSV_TEMPLATES = {
             "instance_id": "example_single_phase",
             "name": "",  # empty → backend auto-names "<type>/<instance_id>"
             "description": "Single-phase example with 2 test cases.",
-            "tags": "example,starter",
             "problem_statement": (
                 "<phases>"
                 "<phase>Build a simple public notes app where anyone can post a "
@@ -675,14 +675,12 @@ _CSV_TEMPLATES = {
                 "</test_cases></phase>"
                 "</phases>"
             ),
-            "model_name": "claude-sonnet-4-5",
         },
         # Two-phase example — different counts of test cases per phase.
         {
             "instance_id": "example_two_phases",
             "name": "",
             "description": "Two phases — phase 1 has 2 tests, phase 2 has 3 tests.",
-            "tags": "example,phased",
             "problem_statement": (
                 "<phases>"
                 "<phase>Phase 1: list + create notes (single user, no auth).</phase>"
@@ -704,7 +702,6 @@ _CSV_TEMPLATES = {
                 "</test_cases></phase>"
                 "</phases>"
             ),
-            "model_name": "claude-sonnet-4-5",
         },
         # Three-phase example with hints + nudge, demonstrating the full set of
         # optional fields a scratch_bench_phased row can carry.
@@ -712,7 +709,6 @@ _CSV_TEMPLATES = {
             "instance_id": "example_three_phases_full",
             "name": "",
             "description": "Three phases; 1 / 2 / 2 test_cases respectively. Shows hints & nudge.",
-            "tags": "example,advanced",
             "problem_statement": (
                 "<phases>"
                 "<phase>Phase 1: set up a single-room chat. No auth, no DMs.</phase>"
@@ -742,7 +738,6 @@ _CSV_TEMPLATES = {
             ),
             "hints": "Use WebSockets for typing indicators; debounce 300ms.",
             "nudge": "Don't worry about offline replay — focus on the live cases.",
-            "model_name": "claude-sonnet-4-5",
             "thinking_level": "medium",
         },
     ],
@@ -751,7 +746,6 @@ _CSV_TEMPLATES = {
             "instance_id": "example_save_bug",
             "name": "",
             "description": "Single-page bug repro example.",
-            "tags": "example,form",
             "problem_statement": (
                 "Saving a record on /settings shows a success toast but the "
                 "value is not actually persisted — reloading the page drops it."
@@ -768,7 +762,6 @@ _CSV_TEMPLATES = {
             ),
             "repo": "org/example-repo",
             "eph_job_id": "eph-abc123",
-            "agent_name": "bug_fixer_v1",
         },
     ],
     "test_report_bench": [
@@ -776,7 +769,6 @@ _CSV_TEMPLATES = {
             "instance_id": "example_test_report",
             "name": "",
             "description": "Triage a failing test_report_bench run.",
-            "tags": "example,triage",
             "problem_statement": (
                 "Triage the failing run for the example app and propose a "
                 "minimal fix. The login button on /signin does nothing."
@@ -793,7 +785,6 @@ _CSV_TEMPLATES = {
             "testing_hitl": "The login button does nothing after entering credentials.",
             "Bug_description": "Login submit handler is wired to a no-op.",
             "Bug_fix_status": "pending",
-            "agent_name": "test_report_bench_v1",
         },
     ],
     "testing_agent_bench": [
@@ -801,7 +792,6 @@ _CSV_TEMPLATES = {
             "instance_id": "example_fork_job",
             "name": "",
             "description": "HITL → golden output example. Both fields are plain text.",
-            "tags": "example",
             "problem_statement": (
                 "Please continue with the task and report what you find. "
                 "Login button is unresponsive; save toast appears but no "
@@ -813,9 +803,7 @@ _CSV_TEMPLATES = {
                 "persisted across reload.\n"
                 "3. Both issues blocked the user from completing the QA flow."
             ),
-            "agent_name": "testing-agent-v3-gpt-5-2-codex",
             "prod_job_id": "example_fork_job",
-            "model_name": "claude-sonnet-4-5",
         },
     ],
     "wingman_bench": [
@@ -823,7 +811,6 @@ _CSV_TEMPLATES = {
             "instance_id": "example_wingman_task",
             "name": "",
             "description": "Wingman example — plain text + comma-separated integrations.",
-            "tags": "example",
             "problem_statement": (
                 "Connect Slack + GitHub and post a daily message to "
                 "#team-eng summarising any PRs that opened in the last 24h."
@@ -838,8 +825,6 @@ _CSV_TEMPLATES = {
             "user_id": "u-001",
             "expected_integrations": "slack,github",
             "max_iterations": "7",
-            "model_name": "claude-sonnet-4-5",
-            "agent_name": "wingman_agent_v1",
         },
     ],
 }
@@ -895,7 +880,7 @@ def _csv_row_to_item(row: dict, dataset_type: str) -> dict:
     non-empty column outside the common set lands in `attributes`."""
     attributes = {
         col: val for col, val in row.items()
-        if col and col not in _CSV_COMMON_COLS and val != ""
+        if col and col not in _CSV_COMMON_COLS and col not in _CSV_IGNORED_COLS and val != ""
     }
     # Only wingman_bench needs non-string attribute coercion (harness
     # attributes for the other types are all strings).
@@ -928,19 +913,9 @@ def _csv_row_to_item(row: dict, dataset_type: str) -> dict:
         "natural_language_tests": nlt,
         "attributes": attributes,
     }
-    # Route `agent_name` per the per-type schema (some types want it on
-    # `attributes`, others at top-level — see _AGENT_NAME_IN_ATTRIBUTES).
-    agent_name_val = (row.get("agent_name") or "").strip()
-    if agent_name_val:
-        if dataset_type in _AGENT_NAME_IN_ATTRIBUTES:
-            attributes["agent_name"] = agent_name_val
-        else:
-            item["agent_name"] = agent_name_val
     for opt in ("name", "description", "base_image"):
         if (row.get(opt) or "").strip():
             item[opt] = row[opt]
-    if (row.get("tags") or "").strip():
-        item["tags"] = [t.strip() for t in row["tags"].split(",") if t.strip()]
     return item
 
 
@@ -1040,9 +1015,12 @@ async def import_datasets_csv(
 def _serialize_datasets_to_csv(rows: list, dataset_type: str) -> str:
     """Flatten harness Dataset JSON to CSV text — reverses the import flatten.
 
-    - lists (e.g. `tags`, `expected_integrations`) → comma-joined strings
+    - lists (e.g. `expected_integrations`) → comma-joined strings
     - ints/bools → `str(...)`; `None` → ""
-    - `agent_name` top-level wins over the attribute of the same name
+    - `tags` / `agent_name` / `model_name` were removed from the wizard +
+      CSV contract; they're intentionally omitted from the export header.
+      Existing rows that still carry them in attributes are simply not
+      surfaced in the CSV (extrasaction="ignore" silently drops extras).
     """
     header = _CSV_COMMON_COLS_ORDER + _CSV_ATTR_COLS[dataset_type]
     buf = io.StringIO()
@@ -1055,12 +1033,9 @@ def _serialize_datasets_to_csv(rows: list, dataset_type: str) -> str:
             "instance_id": d.get("instance_id", "") or "",
             "name": d.get("name", "") or "",
             "description": d.get("description", "") or "",
-            "tags": ",".join(d.get("tags") or []),
             "problem_statement": d.get("problem_statement", "") or "",
             "natural_language_tests": d.get("natural_language_tests", "") or "",
             "base_image": d.get("base_image", "") or "",
-            # Top-level agent_name wins over attribute fallback.
-            "agent_name": d.get("agent_name") or attrs.get("agent_name", "") or "",
         }
         for col in _CSV_ATTR_COLS[dataset_type]:
             v = attrs.get(col, "")
@@ -1193,9 +1168,9 @@ async def dataset_template_csv(dataset_type: str):
             detail=f"unknown dataset_type '{dataset_type}'",
         )
     header = [
-        "instance_id", "name", "description", "tags",
+        "instance_id", "name", "description",
         "problem_statement", "natural_language_tests",
-        "base_image", "agent_name",
+        "base_image",
     ] + _CSV_ATTR_COLS[dataset_type]
     buf = io.StringIO()
     w = csv.DictWriter(buf, fieldnames=header, extrasaction="ignore")
@@ -2007,7 +1982,6 @@ async def proxy_create_dataset(body: dict):
                         "natural_language_tests": body.get("natural_language_tests", ""),
                         "attributes": body.get("attributes", {}),
                         "description": body.get("description", ""),
-                        "tags": body.get("tags", []),
                     }
                     update_resp = await hclient.put(
                         f"{EVAL_API_BASE}/api/v1/datasets/{ds_id}", json=update_body
@@ -2261,7 +2235,6 @@ SEED_AGENTS = [
         "version": 1,
         "description": "Elite full-stack developer agent for rapid application development using the FARM stack.",
         "agent_type": "EmergentAssistant",
-        "tags": ["coding", "full-stack", "production"],
         "model": {
             "provider": "anthropic",
             "model_id": "claude-sonnet-4-5",
@@ -2291,7 +2264,6 @@ SEED_AGENTS = [
         "hooks": {
             "communication_layer_override": {
                 "prompt_name": "comm_layer_v2",
-                "model_name": "claude-sonnet-4-5",
                 "provider": "anthropic",
                 "end_turn_enabled": True,
                 "builtin_tools": ["ask_human", "finish"],
@@ -2304,7 +2276,6 @@ SEED_AGENTS = [
         "version": 1,
         "description": "Deep research agent with extended thinking for complex analysis tasks.",
         "agent_type": "SkilledAssistant",
-        "tags": ["research", "analysis", "deep-thinking"],
         "model": {
             "provider": "anthropic",
             "model_id": "claude-opus-4-6",
@@ -2337,7 +2308,6 @@ SEED_AGENTS = [
         "version": 1,
         "description": "Automated code reviewer using GPT Codex for pull request analysis.",
         "agent_type": "SkilledAssistant",
-        "tags": ["code-review", "automation", "ci-cd"],
         "model": {
             "provider": "openai",
             "model_id": "gpt-5.2-codex",
@@ -2367,7 +2337,6 @@ SEED_AGENTS = [
         "version": 1,
         "description": "Orchestrates data pipeline creation and monitoring using Gemini Pro.",
         "agent_type": "EmergentAssistant",
-        "tags": ["data", "pipeline", "etl", "monitoring"],
         "model": {
             "provider": "gemini",
             "model_id": "gemini-3-pro-preview",
@@ -2395,7 +2364,6 @@ SEED_AGENTS = [
         "hooks": {
             "communication_layer_override": {
                 "prompt_name": "pipeline_comm_v1",
-                "model_name": "gemini-3-pro-preview",
                 "provider": "gemini",
                 "end_turn_enabled": False,
                 "builtin_tools": ["finish"],
@@ -2408,7 +2376,6 @@ SEED_AGENTS = [
         "version": 1,
         "description": "Conversational agent for handling customer inquiries with empathy.",
         "agent_type": "None",
-        "tags": ["support", "conversational", "customer-facing"],
         "model": {
             "provider": "openai",
             "model_id": "gpt-5.3-codex",
@@ -2437,7 +2404,6 @@ SEED_AGENTS = [
         "version": 1,
         "description": "Multi-modal vision agent powered by Gemini Supernova for image analysis.",
         "agent_type": "SkilledAssistant",
-        "tags": ["vision", "multi-modal", "image-analysis"],
         "model": {
             "provider": "gemini",
             "model_id": "supernova",

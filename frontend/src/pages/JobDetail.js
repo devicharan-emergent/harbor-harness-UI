@@ -13,6 +13,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { toast } from 'sonner';
 import { ArrowLeft, Copy, XCircle, Loader2, CheckCircle, Clock, AlertTriangle, Cpu, ActivitySquare, Ban, FileText, ChevronDown, ChevronUp, ChevronRight, ExternalLink, Info } from 'lucide-react';
 import { formatDistanceToNow, formatDuration, intervalToDuration } from 'date-fns';
+import { formatDateTime } from '@/lib/utils';
 import { LintRuleBreakdown } from '@/components/evals/LintRuleBreakdown';
 
 const STATUS_ICONS = {
@@ -1381,7 +1382,7 @@ export default function JobDetail() {
                 )}
                 <div>
                   <dt className="text-muted-foreground">Created</dt>
-                  <dd className="mt-0.5">{formatDistanceToNow(new Date(job.created_at), { addSuffix: true })}</dd>
+                  <dd className="mt-0.5">{formatDateTime(job.created_at)}</dd>
                 </div>
                 {job.finished_at && (
                   <>
@@ -1466,7 +1467,7 @@ export default function JobDetail() {
                         <>
                           <div>
                             <dt className="text-muted-foreground">Started</dt>
-                            <dd className="mt-0.5">{formatDistanceToNow(new Date(job.started_at), { addSuffix: true })}</dd>
+                            <dd className="mt-0.5">{formatDateTime(job.started_at)}</dd>
                           </div>
                           <Separator />
                         </>
@@ -1474,7 +1475,7 @@ export default function JobDetail() {
                       {job.updated_at && (
                         <div>
                           <dt className="text-muted-foreground">Updated</dt>
-                          <dd className="mt-0.5">{formatDistanceToNow(new Date(job.updated_at), { addSuffix: true })}</dd>
+                          <dd className="mt-0.5">{formatDateTime(job.updated_at)}</dd>
                         </div>
                       )}
                     </div>

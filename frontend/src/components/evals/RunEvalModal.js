@@ -687,6 +687,13 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
       toast.error('Group name is required');
       return;
     }
+    // Non-testing-agent flow stamps `agent_name` at the run-level on every
+    // job (the testing-agent flow stores it per-dataset, so it's enforced
+    // there instead).
+    if (!isTestingAgentMode && !agentNameOverride.trim()) {
+      toast.error('Agent name is required');
+      return;
+    }
     const runsCount = Math.max(1, Math.min(NUM_RUNS_MAX, Math.trunc(Number(numRuns) || 1)));
     setSubmitting(true);
     setRunProgress(runsCount > 1 ? { current: 0, total: runsCount } : null);
@@ -1199,7 +1206,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
               {/* Agent name — always visible (moved above and out of collapse) */}
               {!isTestingAgentMode && (
                 <div>
-                  <Label className="text-sm font-semibold">Agent name</Label>
+                  <Label className="text-sm font-semibold">Agent name *</Label>
                   <Input
                     value={agentNameOverride}
                     onChange={e => setAgentNameOverride(e.target.value)}

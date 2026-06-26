@@ -18,9 +18,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 import { createDataset, updateDataset } from '@/services/evalApi';
-import { ModelNamePicker } from './ModelNamePicker';
 import { parseApiError } from '@/lib/errorUtils';
 import { toast } from 'sonner';
 import {
@@ -201,18 +199,26 @@ function snippet(text, n = 80) {
   return t.length > n ? `${t.slice(0, n - 1)}…` : t;
 }
 
+// Slugify a free-typed string into a safe instance_id:
+//   "My Problem_Name!!"  →  "my-problem-name"
+// Spaces + underscores → "-", non-[a-z0-9-] dropped, collapse multi-"-",
+// trim leading/trailing "-". testing_agent_bench's Production Job ID is
+// NOT slugified (job IDs may have uppercase + non-slug chars).
+const slugifyInstanceId = (s) =>
+  (s || '').toLowerCase().trim()
+    .replace(/[\s_]+/g, '-').replace(/[^a-z0-9-]/g, '')
+    .replace(/-+/g, '-').replace(/^-|-$/g, '');
+
 // ── Step indicator ──────────────────────────────────────────────────────
 const STEPS = [
   { n: 1, label: 'Metadata' },
   { n: 2, label: 'Phases & Tests' },
-  { n: 3, label: 'Tags & Attributes' },
 ];
 
 // testing_agent_bench renames step 2 — task + golden, not phases.
 const TESTING_AGENT_STEPS = [
   { n: 1, label: 'Metadata' },
   { n: 2, label: 'Task & Golden' },
-  { n: 3, label: 'Tags & Attributes' },
 ];
 
 function StepIndicator({ step, setStep, steps = STEPS }) {
@@ -561,8 +567,6 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
   const [datasetType, setDatasetType] = useState('scratch_bench_phased');
   const [instanceId, setInstanceId] = useState('');
   const [description, setDescription] = useState('');
-  const [tagsInput, setTagsInput] = useState('');
-  const [tags, setTags] = useState([]);
 
   // Phased editor state (scratch_bench_phased only)
   const [phases, setPhases] = useState([makeEmptyPhase()]);
@@ -572,25 +576,13 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
   const [naturalLanguageTests, setNaturalLanguageTests] = useState('');
   const [rawMode, setRawMode] = useState(false); // forces raw textareas even for scratch_bench_phased
 
-  // Attribute fields (type-specific)
-  const [subagents, setSubagents] = useState('');
-  const [previewUrl, setPreviewUrl] = useState('');
-  const [image, setImage] = useState('');
-  const [agentName, setAgentName] = useState('');
-  const [modelName, setModelName] = useState('');
-  const [repo, setRepo] = useState('');
-  const [ephJobId, setEphJobId] = useState('');
-  const [testingHitl, setTestingHitl] = useState('');
-  const [bugDescription, setBugDescription] = useState('');
-  const [bugFixStatus, setBugFixStatus] = useState('');
-
   // testing_agent_bench-specific
   const [hitlInput, setHitlInput] = useState('');
   const [goldenOutput, setGoldenOutput] = useState('');
 
   const [saving, setSaving] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [step, setStep] = useState(1); // 1: metadata, 2: phases, 3: tags + attributes
+  const [step, setStep] = useState(1); // 1: metadata, 2: phases / task & golden
 
   const isPhasedType = datasetType === 'scratch_bench_phased';
   const isTestingAgentBench = datasetType === 'testing_agent_bench';
@@ -607,8 +599,6 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
       setProblemStatement(dataset.problem_statement || '');
       setNaturalLanguageTests(dataset.natural_language_tests || '');
       setDescription(dataset.description || '');
-      setTags(dataset.tags || []);
-      setTagsInput('');
 
       if (t === 'scratch_bench_phased') {
         const parsed = mergeParsedPhases(
@@ -628,18 +618,6 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
         setRawMode(false);
       }
 
-      const attrs = dataset.attributes || {};
-      setSubagents(attrs.subagents || '');
-      setPreviewUrl(attrs.preview_url || '');
-      setImage(attrs.image || '');
-      setAgentName(attrs.agent_name || '');
-      setModelName(attrs.model_name || '');
-      setRepo(attrs.repo || '');
-      setEphJobId(attrs.eph_job_id || '');
-      setTestingHitl(attrs.testing_hitl || '');
-      setBugDescription(attrs.Bug_description || '');
-      setBugFixStatus(attrs.Bug_fix_status || '');
-
       // testing_agent_bench: HITL/golden live in the same columns the
       // scratch wizard renders as raw XML; surface them in the dedicated
       // textareas when editing.
@@ -657,19 +635,7 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
       setProblemStatement('');
       setNaturalLanguageTests('');
       setDescription('');
-      setTags([]);
-      setTagsInput('');
       setRawMode(false);
-      setSubagents('');
-      setPreviewUrl('');
-      setImage('');
-      setAgentName('');
-      setModelName('');
-      setRepo('');
-      setEphJobId('');
-      setTestingHitl('');
-      setBugDescription('');
-      setBugFixStatus('');
       setHitlInput('');
       setGoldenOutput('');
     }
@@ -705,52 +671,6 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
     [usePhasedEditor, phases]
   );
 
-  const addTag = () => {
-    const tag = tagsInput.trim();
-    if (tag && !tags.includes(tag)) {
-      setTags([...tags, tag]);
-      setTagsInput('');
-    }
-  };
-
-  const removeTag = (t) => setTags(tags.filter((x) => x !== t));
-
-  const handleTagKeyDown = (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      addTag();
-    }
-  };
-
-  const buildAttributes = () => {
-    const attrs = {};
-    if (datasetType === 'scratch_bench_phased') {
-      if (subagents) attrs.subagents = subagents;
-      if (previewUrl) attrs.preview_url = previewUrl;
-      if (agentName) attrs.agent_name = agentName;
-    } else if (datasetType === 'bug_bench') {
-      if (repo) attrs.repo = repo;
-      if (ephJobId) attrs.eph_job_id = ephJobId;
-      if (image) attrs.image = image;
-      if (agentName) attrs.agent_name = agentName;
-      if (modelName) attrs.model_name = modelName;
-    } else if (datasetType === 'test_report_bench') {
-      if (repo) attrs.repo = repo;
-      if (ephJobId) attrs.eph_job_id = ephJobId;
-      if (testingHitl) attrs.testing_hitl = testingHitl;
-      if (bugDescription) attrs.Bug_description = bugDescription;
-      if (bugFixStatus) attrs.Bug_fix_status = bugFixStatus;
-    } else if (datasetType === 'testing_agent_bench') {
-      // agent_name required; model_name omitted if blank; prod_job_id
-      // mirrors instance_id so the harness can recover the prod job even
-      // if the row's instance_id is later renamed.
-      if (agentName.trim()) attrs.agent_name = agentName.trim();
-      if (modelName.trim()) attrs.model_name = modelName.trim();
-      if (instanceId.trim()) attrs.prod_job_id = instanceId.trim();
-    }
-    return attrs;
-  };
-
   const validateBeforePreview = () => {
     if (!datasetType) {
       toast.error('Dataset type is required');
@@ -784,10 +704,6 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
       }
       if (!goldenOutput.trim()) {
         toast.error('Golden Output is required');
-        return false;
-      }
-      if (!agentName.trim()) {
-        toast.error('Agent Name is required');
         return false;
       }
     } else {
@@ -836,32 +752,6 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
         return;
       }
       setStep(2);
-    } else if (step === 2) {
-      if (!canAdvanceFromStep2()) {
-        if (usePhasedEditor) {
-          for (let i = 0; i < phases.length; i++) {
-            const p = phases[i];
-            if (!p.problemText || !p.problemText.trim()) {
-              toast.error(`Phase ${i + 1}: problem statement is required`);
-              return;
-            }
-            const filled = (p.tests || []).filter((t) => t.text && t.text.trim());
-            if (filled.length === 0) {
-              toast.error(`Phase ${i + 1}: add at least one test case`);
-              return;
-            }
-          }
-        } else if (isTestingAgentBench) {
-          if (!hitlInput.trim()) toast.error('HITL Input is required');
-          else toast.error('Golden Output is required');
-        } else if (!problemStatement.trim()) {
-          toast.error('Problem Statement is required');
-        } else {
-          toast.error('Natural Language Tests is required');
-        }
-        return;
-      }
-      setStep(3);
     }
   };
 
@@ -894,8 +784,12 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
         problem_statement: problem,
         natural_language_tests: tests,
         description: description,
-        tags: tags,
-        attributes: buildAttributes(),
+        // Wizard step 3 (Tags & Attributes) was removed — on edit preserve
+        // whatever the dataset already stores, on create send empty so the
+        // harness records no extras. Bulk-import (CSV) is the remaining
+        // path for stamping attributes at scale.
+        tags: isEditing ? (dataset.tags || []) : [],
+        attributes: isEditing ? (dataset.attributes || {}) : {},
       };
       // Scratch/bug/test-report wizard rows still need the legacy
       // problem_set_ids tag. testing_agent_bench is created without it.
@@ -980,7 +874,13 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
                     </Label>
                     <Input
                       value={instanceId}
-                      onChange={(e) => setInstanceId(e.target.value)}
+                      onChange={(e) =>
+                        setInstanceId(
+                          isTestingAgentBench
+                            ? e.target.value
+                            : slugifyInstanceId(e.target.value)
+                        )
+                      }
                       placeholder={isTestingAgentBench ? 'e.g. job-abc123' : 'e.g. my-problem-name'}
                       className="mt-1 font-mono text-sm"
                       disabled={isEditing}
@@ -1105,251 +1005,6 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
               </div>
               )}
 
-              {/* ── STEP 3 — Tags + Attributes ───────────────────────── */}
-              {step === 3 && (
-              <div className="space-y-5">
-
-              {/* Tags */}
-              <div>
-                <Label className="text-xs font-medium">Tags</Label>
-                <div className="flex items-center gap-2 mt-1">
-                  <Input
-                    value={tagsInput}
-                    onChange={(e) => setTagsInput(e.target.value)}
-                    onKeyDown={handleTagKeyDown}
-                    placeholder="Add a tag and press Enter"
-                    className="text-sm flex-1"
-                    data-testid="dataset-tag-input"
-                  />
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={addTag}
-                    type="button"
-                    data-testid="add-tag-btn"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                  </Button>
-                </div>
-                {tags.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    {tags.map((t) => (
-                      <Badge
-                        key={t}
-                        variant="secondary"
-                        className="text-xs flex items-center gap-1"
-                      >
-                        {t}
-                        <button
-                          onClick={() => removeTag(t)}
-                          className="hover:text-destructive"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      </Badge>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <Separator />
-
-              {/* Type-specific Attributes */}
-              <div>
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">
-                  Attributes (
-                  {DATASET_TYPE_OPTIONS.find((d) => d.value === datasetType)?.label}
-                  )
-                </p>
-
-                {datasetType === 'scratch_bench_phased' && (
-                  <div className="space-y-3">
-                    <div>
-                      <Label className="text-xs">Subagents</Label>
-                      <Input
-                        value={subagents}
-                        onChange={(e) => setSubagents(e.target.value)}
-                        placeholder="Subagents"
-                        className="mt-1 text-sm font-mono"
-                        data-testid="attr-subagents"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-xs">Preview URL</Label>
-                      <Input
-                        value={previewUrl}
-                        onChange={(e) => setPreviewUrl(e.target.value)}
-                        placeholder="https://..."
-                        className="mt-1 text-sm font-mono"
-                        data-testid="attr-preview-url"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-xs">Agent Name</Label>
-                      <Input
-                        value={agentName}
-                        onChange={(e) => setAgentName(e.target.value)}
-                        placeholder="Agent name"
-                        className="mt-1 text-sm font-mono"
-                        data-testid="attr-agent-name"
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {datasetType === 'bug_bench' && (
-                  <div className="space-y-3">
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <Label className="text-xs">Repo *</Label>
-                        <Input
-                          value={repo}
-                          onChange={(e) => setRepo(e.target.value)}
-                          placeholder="owner/repo"
-                          className="mt-1 text-sm font-mono"
-                          data-testid="attr-repo"
-                        />
-                      </div>
-                      <div>
-                        <Label className="text-xs">Eph Job ID *</Label>
-                        <Input
-                          value={ephJobId}
-                          onChange={(e) => setEphJobId(e.target.value)}
-                          placeholder="Job ID"
-                          className="mt-1 text-sm font-mono"
-                          data-testid="attr-eph-job-id"
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <Label className="text-xs">Image</Label>
-                      <Input
-                        value={image}
-                        onChange={(e) => setImage(e.target.value)}
-                        placeholder="Docker image"
-                        className="mt-1 text-sm font-mono"
-                        data-testid="attr-image"
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <Label className="text-xs">Agent Name</Label>
-                        <Input
-                          value={agentName}
-                          onChange={(e) => setAgentName(e.target.value)}
-                          placeholder="Agent name"
-                          className="mt-1 text-sm font-mono"
-                          data-testid="attr-agent-name"
-                        />
-                      </div>
-                      <div>
-                        <Label className="text-xs">Model Name</Label>
-                        <Input
-                          value={modelName}
-                          onChange={(e) => setModelName(e.target.value)}
-                          placeholder="Model name"
-                          className="mt-1 text-sm font-mono"
-                          data-testid="attr-model-name"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {datasetType === 'test_report_bench' && (
-                  <div className="space-y-3">
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <Label className="text-xs">Repo *</Label>
-                        <Input
-                          value={repo}
-                          onChange={(e) => setRepo(e.target.value)}
-                          placeholder="owner/repo"
-                          className="mt-1 text-sm font-mono"
-                          data-testid="attr-repo"
-                        />
-                      </div>
-                      <div>
-                        <Label className="text-xs">Eph Job ID *</Label>
-                        <Input
-                          value={ephJobId}
-                          onChange={(e) => setEphJobId(e.target.value)}
-                          placeholder="Job ID"
-                          className="mt-1 text-sm font-mono"
-                          data-testid="attr-eph-job-id"
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <Label className="text-xs">Testing HITL</Label>
-                      <Input
-                        value={testingHitl}
-                        onChange={(e) => setTestingHitl(e.target.value)}
-                        placeholder="Testing HITL value"
-                        className="mt-1 text-sm font-mono"
-                        data-testid="attr-testing-hitl"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-xs">Bug Description</Label>
-                      <Textarea
-                        value={bugDescription}
-                        onChange={(e) => setBugDescription(e.target.value)}
-                        placeholder="Describe the bug..."
-                        className="mt-1 text-xs font-mono min-h-[60px]"
-                        data-testid="attr-bug-description"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-xs">Bug Fix Status</Label>
-                      <Input
-                        value={bugFixStatus}
-                        onChange={(e) => setBugFixStatus(e.target.value)}
-                        placeholder="e.g. fixed, pending"
-                        className="mt-1 text-sm font-mono"
-                        data-testid="attr-bug-fix-status"
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {datasetType === 'testing_agent_bench' && (
-                  <div className="space-y-3">
-                    <div>
-                      <Label className="text-xs">Agent Name *</Label>
-                      <Input
-                        value={agentName}
-                        onChange={(e) => setAgentName(e.target.value)}
-                        placeholder="e.g. testing-agent-v3-gpt-5-2-codex"
-                        className="mt-1 text-sm font-mono"
-                        data-testid="attr-agent-name"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-xs">Model Name</Label>
-                      <div className="mt-1">
-                        <ModelNamePicker
-                          value={modelName}
-                          onChange={setModelName}
-                          testId="attr-model-name"
-                        />
-                      </div>
-                      <p className="text-[10px] text-muted-foreground mt-1">
-                        Optional. Stored on the dataset as{' '}
-                        <code className="font-mono">attributes.model_name</code>.
-                        Pick a preset, leave default (blank) for the agent&apos;s default,
-                        or choose Custom… to enter a free-text model id.
-                      </p>
-                    </div>
-                    <p className="text-[10px] text-muted-foreground">
-                      Required: <span className="font-mono">agent_name</span>.
-                      The harness scopes the eval to this testing agent name.
-                    </p>
-                  </div>
-                )}
-              </div>
-              </div>
-              )}
             </div>
           </div>
 
@@ -1376,7 +1031,7 @@ export function DatasetEditorModal({ open, onClose, onSaved, dataset }) {
                   Back
                 </Button>
               )}
-              {step < 3 ? (
+              {step < 2 ? (
                 <Button
                   onClick={handleNext}
                   disabled={saving}
