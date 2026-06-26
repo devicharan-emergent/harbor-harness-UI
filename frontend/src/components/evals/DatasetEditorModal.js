@@ -201,11 +201,15 @@ function snippet(text, n = 80) {
 
 // Slugify a free-typed string into a safe instance_id:
 //   "My Problem_Name!!"  →  "my-problem-name"
-// Spaces + underscores → "-", non-[a-z0-9-] dropped, collapse multi-"-",
-// trim leading/trailing "-". testing_agent_bench's Production Job ID is
-// NOT slugified (job IDs may have uppercase + non-slug chars).
+// Ordering matters — we replace whitespace+underscores BEFORE dropping
+// non-slug chars, and we use the final ^-/-$ regex (not .trim()) to peel
+// off edge dashes so live keystroke typing of "My Test" produces
+// "my-test" rather than "mytest" (.trim() ate trailing spaces before
+// the replace had a chance to convert them).
+// testing_agent_bench's Production Job ID is NOT slugified (job IDs may
+// have uppercase + non-slug chars).
 const slugifyInstanceId = (s) =>
-  (s || '').toLowerCase().trim()
+  (s || '').toLowerCase()
     .replace(/[\s_]+/g, '-').replace(/[^a-z0-9-]/g, '')
     .replace(/-+/g, '-').replace(/^-|-$/g, '');
 
