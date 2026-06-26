@@ -20,7 +20,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Loader2, Search, Plus, Pencil, Trash2, RefreshCw, Database, X, ChevronLeft, ChevronRight, Upload, Download, BookMarked, Save, FileDown } from 'lucide-react';
+import { Loader2, Search, Plus, Pencil, Trash2, RefreshCw, Database, X, ChevronLeft, ChevronRight, Upload, Download, BookMarked, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { DatasetEditorModal } from '@/components/evals/DatasetEditorModal';
 import { DatasetPreviewModal } from '@/components/evals/DatasetPreviewModal';
@@ -34,7 +34,6 @@ const DATASET_TYPES = [
   { value: 'all', label: 'All Types' },
   { value: 'scratch_bench_phased', label: 'Scratch Bench (Phased)' },
   { value: 'bug_bench', label: 'Bug Bench' },
-  { value: 'test_report_bench', label: 'Test Report Bench' },
   { value: 'testing_agent_bench', label: 'Testing Agent Bench' },
   { value: 'wingman_bench', label: 'Wingman Bench' },
 ];
@@ -62,6 +61,11 @@ export default function DatasetsPage() {
   // Delete confirmation
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  // Bulk delete state — driven by `selectedRows`. `bulkDeleteOpen` opens
+  // a confirmation AlertDialog; deletion fires deleteDataset in parallel
+  // for every selected row and surfaces a single summary toast.
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   // Detail preview (modal)
   const [previewDataset, setPreviewDataset] = useState(null);
@@ -146,6 +150,31 @@ export default function DatasetsPage() {
     } finally {
       setDeleting(false);
     }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedRows.length === 0) return;
+    setBulkDeleting(true);
+    // Fire deletes in parallel. We collect successes/failures so the
+    // user gets a single accurate toast even if a subset 404s (e.g. a
+    // row that was already removed by someone else).
+    const results = await Promise.allSettled(
+      selectedRows.map((ds) => deleteDataset(ds.id)),
+    );
+    const failed = results.filter((r) => r.status === 'rejected');
+    const succeeded = results.length - failed.length;
+    setBulkDeleting(false);
+    setBulkDeleteOpen(false);
+    if (failed.length === 0) {
+      toast.success(`Deleted ${succeeded} dataset${succeeded === 1 ? '' : 's'}`);
+    } else if (succeeded === 0) {
+      toast.error(`Failed to delete any of the ${failed.length} selected rows`);
+    } else {
+      toast.warning(`Deleted ${succeeded}, failed ${failed.length}`);
+    }
+    // Clear selection + refresh table either way.
+    setSelectedKeys(new Set());
+    fetchDatasets();
   };
 
   const handlePreview = async (ds) => {
@@ -382,13 +411,8 @@ export default function DatasetsPage() {
     runExport(selectedType, iids, `${iids.length} selected`);
   };
 
-  const handleExportAll = () => {
-    runExport(
-      typeFilter,
-      [],
-      typeFilter === 'all' ? 'All types (zip)' : `Every active ${typeFilter} row`,
-    );
-  };
+  // `handleExportAll` was retired alongside the Download All toolbar
+  // button. Bulk-export is now driven exclusively via tick-then-Export.
 
   const handleExportRow = (ds) => {
     if (!ds.instance_id) {
@@ -465,38 +489,9 @@ export default function DatasetsPage() {
               </Tooltip>
             </TooltipProvider>
           )}
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  onClick={(selectedRows.length === 0 || selectedType === 'mixed') ? undefined : handleExportSelected}
-                  variant="outline"
-                  size="icon"
-                  className={`h-9 w-9 relative ${
-                    (selectedRows.length === 0 || selectedType === 'mixed' || exporting)
-                      ? 'opacity-50 cursor-not-allowed'
-                      : ''
-                  }`}
-                  aria-disabled={selectedRows.length === 0 || selectedType === 'mixed' || exporting}
-                  data-testid="export-selected-btn"
-                >
-                  <Download className="w-4 h-4" />
-                  {selectedRows.length > 0 && (
-                    <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[9px] font-mono rounded-full h-4 min-w-[16px] px-1 flex items-center justify-center">
-                      {selectedRows.length}
-                    </span>
-                  )}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {selectedRows.length === 0
-                  ? 'Tick rows to export as CSV'
-                  : selectedType === 'mixed'
-                    ? 'Selection spans multiple types — pick a single type to export'
-                    : `Export ${selectedRows.length} selected ${selectedType} row(s) as CSV`}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          {/* Export Selected moved into the per-table secondary toolbar
+              (only shows when rows are ticked). Header now focuses on
+              "create / save / upload" actions to reduce visual noise. */}
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -590,34 +585,70 @@ export default function DatasetsPage() {
       {/* Content: Table */}
       <Card>
         <CardContent className="pt-4">
-          {/* Small toolbar above the table — row count on the left, plus
-              secondary icon actions (Export All + Refresh) on the right. */}
+          {/* Small toolbar above the table — row count + selection-aware
+              bulk actions (Export Selected + Delete Selected, both enabled
+              once one or more rows are ticked) + Refresh. The standalone
+              Export All button was retired per UX request — users can
+              still grab everything by ticking "select all" then Export. */}
           <div className="flex items-center justify-between mb-3">
             <p className="text-xs text-muted-foreground">
               {loading ? 'Loading…' : `${filteredDatasets.length} dataset${filteredDatasets.length !== 1 ? 's' : ''}`}
             </p>
             <div className="flex items-center gap-1">
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      onClick={handleExportAll}
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
-                      disabled={exporting}
-                      data-testid="export-all-btn-table"
-                    >
-                      {exporting ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      ) : (
-                        <FileDown className="w-3.5 h-3.5" />
-                      )}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{typeFilter === 'all' ? 'Export all types as ZIP' : 'Export all rows as CSV'}</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+              {selectedRows.length > 0 && (
+                <>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          onClick={(selectedType === 'mixed' || exporting) ? undefined : handleExportSelected}
+                          variant="ghost"
+                          size="icon"
+                          className={`h-7 w-7 relative ${
+                            (selectedType === 'mixed' || exporting) ? 'opacity-50 cursor-not-allowed' : ''
+                          }`}
+                          aria-disabled={selectedType === 'mixed' || exporting}
+                          data-testid="export-selected-btn-toolbar"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[9px] font-mono rounded-full h-3.5 min-w-[14px] px-1 flex items-center justify-center">
+                            {selectedRows.length}
+                          </span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {selectedType === 'mixed'
+                          ? 'Selection spans multiple types — pick a single type to export'
+                          : `Export ${selectedRows.length} selected ${selectedType} row(s) as CSV`}
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          onClick={() => setBulkDeleteOpen(true)}
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 relative text-destructive hover:text-destructive"
+                          disabled={bulkDeleting}
+                          data-testid="bulk-delete-btn"
+                        >
+                          {bulkDeleting ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="w-3.5 h-3.5" />
+                          )}
+                          <span className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground text-[9px] font-mono rounded-full h-3.5 min-w-[14px] px-1 flex items-center justify-center">
+                            {selectedRows.length}
+                          </span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Delete {selectedRows.length} selected row(s)</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </>
+              )}
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -924,6 +955,30 @@ export default function DatasetsPage() {
             >
               {deleting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Trash2 className="w-4 h-4 mr-2" />}
               Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      {/* Bulk Delete Confirmation */}
+      <AlertDialog open={bulkDeleteOpen} onOpenChange={(open) => !open && setBulkDeleteOpen(false)}>
+        <AlertDialogContent data-testid="bulk-delete-dataset-dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {selectedRows.length} dataset{selectedRows.length === 1 ? '' : 's'}</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will soft-delete every ticked row and mark them as inactive. Forks already saved
+              into views or evals are unaffected; only the dataset rows themselves are removed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkDeleting} data-testid="cancel-bulk-delete-btn">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleBulkDelete}
+              disabled={bulkDeleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              data-testid="confirm-bulk-delete-btn"
+            >
+              {bulkDeleting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Trash2 className="w-4 h-4 mr-2" />}
+              Delete {selectedRows.length}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

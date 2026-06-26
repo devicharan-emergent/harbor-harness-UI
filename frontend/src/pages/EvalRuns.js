@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { getEvalStats, listEvalJobs, listGroupJobs, getEvalAggregate, cancelEvalJob, listEvalRunGroups, patchEvalRunGroup } from '@/services/evalApi';
-import { getJobAgentName, getJobModelName } from '@/lib/jobShape';
+import { getJobAgentName, getJobModelName, isTestingAgentJob, getTestingAgentInstanceName, getTestingAgentProdJobId } from '@/lib/jobShape';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -711,9 +711,29 @@ export default function EvalRuns() {
                           className="flex items-center gap-3 px-4 py-2.5 rounded-lg border border-border/50 bg-card/50 hover:bg-accent/40 cursor-pointer transition-colors text-xs"
                           data-testid={`eval-job-row-${job.id}`}
                         >
-                          {/* Problem */}
+                          {/* Problem (or testing-agent instance name) */}
                           <div className="flex-1 min-w-0">
-                            <div className="font-mono font-medium truncate">{job.problem}</div>
+                            {(() => {
+                              const isTA = isTestingAgentJob(job);
+                              const label = isTA ? getTestingAgentInstanceName(job) : job.problem;
+                              const prod = isTA ? getTestingAgentProdJobId(job) : '';
+                              return (
+                                <>
+                                  <div className="font-mono font-medium truncate" data-testid={`job-label-${job.id}`}>
+                                    {label || '(unnamed)'}
+                                  </div>
+                                  {isTA && (
+                                    <div
+                                      className="text-[10px] font-mono text-blue-700 dark:text-blue-300 truncate"
+                                      title={prod ? `prod_job_id: ${prod}` : 'No prod_job_id stamped on this job'}
+                                      data-testid={`job-prod-${job.id}`}
+                                    >
+                                      prod: {prod || '—'}
+                                    </div>
+                                  )}
+                                </>
+                              );
+                            })()}
                             <div className="flex items-center gap-1.5 mt-0.5">
                               {(() => {
                                 const an = getJobAgentName(job);

@@ -38,7 +38,6 @@ import {
 const DATASET_TYPE_OPTIONS = [
   { value: 'scratch_bench_phased', label: 'Scratch Bench (Phased)' },
   { value: 'bug_bench', label: 'Bug Bench' },
-  { value: 'test_report_bench', label: 'Test Report Bench' },
   { value: 'testing_agent_bench', label: 'Testing Agent Bench' },
 ];
 
