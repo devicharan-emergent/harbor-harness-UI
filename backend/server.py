@@ -1958,7 +1958,20 @@ async def proxy_dataset_by_name(name: str):
 
 @api_router.post("/eval/datasets")
 async def proxy_create_dataset(body: dict):
-    """Proxy: Create a new dataset"""
+    """Proxy: Create a new dataset.
+
+    For `testing_agent_bench` the upstream harness still requires an
+    `attributes.agent_name` even though, conceptually, that field is a
+    run-time concern (which agent to run against the dataset, supplied
+    per-eval-submission). The wizard intentionally does NOT ask the user
+    for this — we inject a self-documenting placeholder here so the
+    harness check passes. Real `agent_name` is set at eval-submit time.
+    """
+    if body.get("dataset_type") == "testing_agent_bench":
+        attrs = dict(body.get("attributes") or {})
+        if not (attrs.get("agent_name") or "").strip():
+            attrs["agent_name"] = "agent_set_at_runtime"
+            body = {**body, "attributes": attrs}
     try:
         async with httpx.AsyncClient(timeout=30.0) as hclient:
             response = await hclient.post(f"{EVAL_API_BASE}/api/v1/datasets", json=body)
@@ -1996,7 +2009,16 @@ async def proxy_create_dataset(body: dict):
 
 @api_router.put("/eval/datasets/{dataset_id}")
 async def proxy_update_dataset(dataset_id: str, body: dict):
-    """Proxy: Update an existing dataset (creates new version)"""
+    """Proxy: Update an existing dataset (creates new version).
+
+    Mirrors the create-side placeholder for testing_agent_bench so an
+    edit that omits agent_name doesn't trip the same upstream check.
+    """
+    if body.get("dataset_type") == "testing_agent_bench":
+        attrs = dict(body.get("attributes") or {})
+        if not (attrs.get("agent_name") or "").strip():
+            attrs["agent_name"] = "agent_set_at_runtime"
+            body = {**body, "attributes": attrs}
     try:
         async with httpx.AsyncClient(timeout=30.0) as hclient:
             response = await hclient.put(f"{EVAL_API_BASE}/api/v1/datasets/{dataset_id}", json=body)
