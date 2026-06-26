@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,15 +12,16 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { listDatasets, listDatasetsByType, getDatasetForProblem, submitEvalJobs, submitEvalJobsWithEs, submitTestingAgentEval, checkAgentExists, getVerifierConfig, getDatasetView } from '@/services/evalApi';
-import { useAuth } from '@/contexts/AuthContext';
+import { listAgents } from '@/services/cortexApi';
+import { useCreatedBy } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { Loader2, Rocket, FileText, Search, ChevronRight, Check, AlertCircle, X, ChevronDown } from 'lucide-react';
 import { parseApiError } from '@/lib/errorUtils';
 import { useEnv } from '@/components/layout/EnvSwitcher';
 import { EphPicker } from '@/components/cortex/EphPicker';
 import { ModelNamePicker } from './ModelNamePicker';
+import { Combobox } from '@/components/ui/combobox';
 import { JudgeConfigDialog } from './JudgeConfigDialog';
 import { DatasetViewsDropdown } from '@/components/datasets/DatasetViewsDropdown';
 
@@ -31,6 +32,14 @@ const DATASET_TYPES = [
   { value: 'test_report_bench', label: 'Test Report Bench' },
   { value: 'testing_agent_bench', label: 'Testing Agent Bench' },
 ];
+
+// Resource sizing — formerly user-tweakable per-run. The UI was removed
+// (overwhelming + nobody changed the defaults), so we lock the previous
+// defaults in as constants and still ship them in the payload so harness
+// behaviour stays identical.
+const DEFAULT_CPUS = 2;
+const DEFAULT_MEMORY_MB = 4096;
+const DEFAULT_STORAGE_GB = 10;
 
 // ── Helpers ───────────────────────────────────────────────────────────
 const decode = (s) =>
@@ -213,8 +222,8 @@ function ProblemPreview({ ds }) {
         >
           <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
           <span>
-            <strong>Image not available.</strong> This bug_bench problem's base image
-            isn't in the registry yet (<code className="font-mono">attributes.image_available = false</code>).
+            <strong>Image not available.</strong> This bug_bench problem&apos;s base image
+            isn&apos;t in the registry yet (<code className="font-mono">attributes.image_available = false</code>).
             A build is required before it can run end-to-end.
           </span>
         </div>
@@ -257,34 +266,24 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
   const [groupName, setGroupName] = useState('');
   const [groupComment, setGroupComment] = useState('');
 
-  // Resources
-  const [cpus, setCpus] = useState(2);
-  const [memoryMb, setMemoryMb] = useState(4096);
-  const [storageGb, setStorageGb] = useState(10);
+  // Headed/build toggles still surfaced — they meaningfully change run
+  // behaviour. (Resources UI was retired; defaults locked in above.)
   const [headed, setHeaded] = useState(true);
   const [forceBuild, setForceBuild] = useState(false);
-  // user_id is seeded from the authenticated session but the user can
-  // override it from the Configure step (collapsed under "User ID").
-  const { user } = useAuth();
-  const [userId, setUserId] = useState(user?.user_id || '');
-  // Keep userId synced with the auth user when the modal mounts and the
-  // session resolves.
-  useEffect(() => {
-    if (!userId && user?.user_id) setUserId(user.user_id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.user_id]);
 
-  // Experiment config
-  const [showExpConfig, setShowExpConfig] = useState(false);
-  const [expImage, setExpImage] = useState('');
+  // Authenticated user — the harness uses email-as-identity ever since
+  // it migrated off the UUID user_id. We auto-stamp this into the eval
+  // payload's `user_id` field; there is no per-run override UI.
+  const loggedInUserId = useCreatedBy();
+
+  // Experiment config — only Model + group Comment kept. Image / Cortex
+  // URL / collapsible were retired in this change (set was overwhelming
+  // and never tweaked in practice).
   const [expModelName, setExpModelName] = useState('');
-  const [expCortexUrl, setExpCortexUrl] = useState('');
 
   // Eph-driven submission. When an eph is selected the backend derives
   // emergent_agents_url + per-eval cortex_url server-side and re-runs
-  // readiness preflight. Free-text cortex_url stays behind ?advanced=1 only.
-  const [searchParams] = useSearchParams();
-  const advancedMode = useMemo(() => searchParams.get('advanced') === '1', [searchParams]);
+  // readiness preflight.
 
   // testing_agent_bench fork-eval mode. When every selected problem is
   // testing_agent_bench, we hide infra fields (CPUs/Memory/Storage, Target
@@ -312,6 +311,33 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
   const [submitEph, setSubmitEph] = useState('');
   // null = not yet probed; otherwise the readiness object from the API.
   const [submitEphReadiness, setSubmitEphReadiness] = useState(null);
+
+  // Agent registry synced from the upstream Cortex "All agents" list for
+  // the selected eph. Drives the Agent Name combobox so users see the
+  // exact ids that would resolve at submit-time. When no eph is selected
+  // (or fetch fails), the combobox stays open as free-text.
+  const [agentOptions, setAgentOptions] = useState([]);
+  useEffect(() => {
+    if (!submitEph) {
+      setAgentOptions([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await listAgents(submitEph);
+        if (cancelled) return;
+        const ids = (data?.agents || [])
+          .map((a) => a?.agent_id)
+          .filter((id) => typeof id === 'string' && id);
+        // Defensive dedupe (harness occasionally surfaces alias+canonical).
+        setAgentOptions(Array.from(new Set(ids)));
+      } catch {
+        if (!cancelled) setAgentOptions([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [submitEph]);
 
   // Template
   const [templateName, setTemplateName] = useState('');
@@ -365,10 +391,9 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
   const [breakpointEnabled, setBreakpointEnabled] = useState(false);
   const [breakpointMins, setBreakpointMins] = useState(10);
 
-  // Sync cortex URL from environment switcher
-  useEffect(() => {
-    if (envCortexUrl) setExpCortexUrl(envCortexUrl);
-  }, [envCortexUrl]);
+  // The Experiment Config UI was retired (incl. the cortex_url override
+  // we previously sync'd from the env switcher). Eph-driven cortex_url
+  // resolution still applies in `submitEvalJobsWithEs`.
 
   const [submitting, setSubmitting] = useState(false);
 
@@ -807,7 +832,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
           const batchAgent = derivedAgentName || (items[0]?.agent_name || '').trim();
           if (batchAgent) batchBody.agent_name = batchAgent;
           if (trimmedComment) batchBody.comment = trimmedComment;
-          if (userId.trim()) batchBody.user_id = userId.trim();
+          if (loggedInUserId) batchBody.user_id = loggedInUserId;
           // Only stamp the saved judge config when the user has actually
           // customized it — otherwise omit so the harness applies its
           // built-in default.
@@ -830,19 +855,18 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
         const evals = selectedProblems.map(problem => {
           const evalItem = {
             problem: problem.name,
-            cpus,
-            memory: memoryMb,
-            storage: storageGb,
+            cpus: DEFAULT_CPUS,
+            memory: DEFAULT_MEMORY_MB,
+            storage: DEFAULT_STORAGE_GB,
             headed,
             force_build: forceBuild,
           };
           if (trimmedTemplate) evalItem.template_name = trimmedTemplate;
           const experiments = {};
-          if (showExpConfig) {
-            if (expImage) experiments.image = expImage;
-            if (expModelName) experiments.model_name = expModelName;
-            if (advancedMode && !submitEph && expCortexUrl) experiments.cortex_url = expCortexUrl;
-          }
+          // Model name (when set) flows via experiments.model_name. Image
+          // and free-text cortex_url overrides were retired with the
+          // Experiment Config collapsible.
+          if (expModelName) experiments.model_name = expModelName;
           if (submitEph) {
             experiments.cortex_url = `https://cortex-${submitEph}-tit7tznrtq-uc.a.run.app`;
           }
@@ -859,7 +883,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
 
         // No group_run_id — harness mints a UUID server-side. Send the
         // typed name + optional comment instead.
-        const payload = { user_id: userId, group_name: runGroupName, evals };
+        const payload = { user_id: loggedInUserId, group_name: runGroupName, evals };
         if (trimmedComment) payload.comment = trimmedComment;
         if (derivedAgentName) payload.agent_name = derivedAgentName;
         if (submitEph) {
@@ -1042,7 +1066,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                   <span>
                     Mixed dataset types selected.{' '}
                     <strong>testing_agent_bench</strong> uses a different harness
-                    endpoint and can't be batched with scratch/bug/test-report
+                    endpoint and can&apos;t be batched with scratch/bug/test-report
                     problems. Deselect one type to continue.
                   </span>
                 </div>
@@ -1203,17 +1227,28 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 />
               </div>
 
-              {/* Agent name — always visible (moved above and out of collapse) */}
+              {/* Agent name — always visible (moved above and out of collapse).
+                  Searchable combobox synced with the agents "All list" for
+                  the selected eph; commits free text via the inline
+                  "Use ‘…’" row for agents not yet registered. */}
               {!isTestingAgentMode && (
                 <div>
                   <Label className="text-sm font-semibold">Agent name *</Label>
-                  <Input
-                    value={agentNameOverride}
-                    onChange={e => setAgentNameOverride(e.target.value)}
-                    placeholder="e.g. full_stack_app_builder_cloud_v8_sonnet_4_5"
-                    className="font-mono text-sm mt-1.5"
-                    data-testid="eval-agent-name-override"
-                  />
+                  <div className="mt-1.5">
+                    <Combobox
+                      value={agentNameOverride}
+                      onChange={setAgentNameOverride}
+                      options={agentOptions}
+                      placeholder="Search agents…"
+                      searchPlaceholder={submitEph
+                        ? 'Search agents on this eph…'
+                        : 'Pick an eph first, or type a custom agent id…'}
+                      emptyText={submitEph
+                        ? 'No agents found — type to add a custom id'
+                        : 'No eph selected — type a custom agent id'}
+                      testId="eval-agent-name-override"
+                    />
+                  </div>
                 </div>
               )}
 
@@ -1242,42 +1277,6 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 />
                 <span className="text-[10px] text-muted-foreground">max {NUM_RUNS_MAX}</span>
               </div>
-
-              {/* User ID — collapsed; defaults to logged-in user, override
-                  when stamping jobs on behalf of another account */}
-              <Collapsible>
-                <CollapsibleTrigger
-                  className="w-full flex items-center justify-between text-xs text-muted-foreground hover:text-foreground border-b border-border/40 pb-1.5 [&[data-state=open]>svg]:rotate-180"
-                  data-testid="toggle-user-id"
-                >
-                  <span className="font-semibold">
-                    User ID
-                    <span className="ml-1 font-mono font-normal text-foreground/80 text-[10px]">
-                      · {userId ? `${userId.substring(0, 8)}…` : '(unset)'}
-                    </span>
-                  </span>
-                  <ChevronDown className="w-3.5 h-3.5 transition-transform" />
-                </CollapsibleTrigger>
-                <CollapsibleContent className="pt-2 space-y-1.5">
-                  <Input
-                    value={userId}
-                    onChange={e => setUserId(e.target.value)}
-                    placeholder="user_id uuid"
-                    className="font-mono text-xs"
-                    data-testid="eval-user-id"
-                  />
-                  {user?.user_id && userId !== user.user_id && (
-                    <button
-                      type="button"
-                      className="text-[10px] text-muted-foreground hover:text-foreground underline underline-offset-2"
-                      onClick={() => setUserId(user.user_id)}
-                      data-testid="eval-user-id-reset"
-                    >
-                      Reset to logged-in user
-                    </button>
-                  )}
-                </CollapsibleContent>
-              </Collapsible>
 
               {/* Agent name override — testing_agent_mode only */}
               {isTestingAgentMode && (
@@ -1354,99 +1353,64 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 <>
               <Separator />
 
-              <Collapsible>
-                <CollapsibleTrigger
-                  className="w-full flex items-center justify-between text-xs text-muted-foreground hover:text-foreground border-b border-border/40 pb-1.5 [&[data-state=open]>svg]:rotate-180"
-                  data-testid="toggle-resources"
-                >
-                  <span className="font-semibold">Resources <span className="font-mono font-normal text-foreground/80 ml-1">· {cpus} cpu · {memoryMb} MB · {storageGb} GB</span></span>
-                  <ChevronDown className="w-3.5 h-3.5 transition-transform" />
-                </CollapsibleTrigger>
-                <CollapsibleContent className="pt-3">
-                  <div className="space-y-3">
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <Label className="text-xs">CPUs</Label>
-                    <Input type="number" value={cpus} onChange={e => setCpus(Number(e.target.value))} min={1} max={8} data-testid="eval-cpus" />
-                  </div>
-                  <div>
-                    <Label className="text-xs">Memory (MB)</Label>
-                    <Input type="number" value={memoryMb} onChange={e => setMemoryMb(Number(e.target.value))} step={1024} data-testid="eval-memory" />
-                  </div>
-                  <div>
-                    <Label className="text-xs">Storage (GB)</Label>
-                    <Input type="number" value={storageGb} onChange={e => setStorageGb(Number(e.target.value))} min={5} max={50} data-testid="eval-storage" />
-                  </div>
-                </div>
-                <div className="flex items-center gap-6">
-                  <div className="flex items-center gap-2">
-                    <Switch checked={headed} onCheckedChange={setHeaded} id="headed" />
-                    <Label htmlFor="headed" className="text-xs cursor-pointer">Headed browser</Label>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Switch checked={forceBuild} onCheckedChange={setForceBuild} id="forceBuild" />
-                    <Label htmlFor="forceBuild" className="text-xs cursor-pointer">Force rebuild</Label>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3 mt-2">
-                  <div className="flex items-center gap-2">
-                    <Switch checked={breakpointEnabled} onCheckedChange={setBreakpointEnabled} id="breakpoint" data-testid="breakpoint-toggle" />
-                    <Label htmlFor="breakpoint" className="text-xs cursor-pointer">Phase breakpoint</Label>
-                  </div>
-                  {breakpointEnabled && (
-                    <div className="flex items-center gap-1.5">
-                      <Input
-                        type="number"
-                        value={breakpointMins}
-                        onChange={e => setBreakpointMins(Math.max(1, Number(e.target.value)))}
-                        min={1}
-                        className="w-16 h-7 text-xs font-mono"
-                        data-testid="breakpoint-duration"
-                      />
-                      <span className="text-[10px] text-muted-foreground">min per phase</span>
-                    </div>
-                  )}
-                </div>
-                  </div>
-                </CollapsibleContent>
-              </Collapsible>
-              <Separator />
+              {/* Model name (non-testing-agent flow). Searchable preset
+                  combobox; free text commits via the "Use ‘…’" row. */}
               <div>
-                <button onClick={() => setShowExpConfig(!showExpConfig)} className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1" data-testid="toggle-exp-config">
-                  <ChevronRight className={`w-3 h-3 transition-transform ${showExpConfig ? 'rotate-90' : ''}`} />
-                  Experiment Config (optional)
-                </button>
-                {showExpConfig && (
-                  <div className="mt-3 space-y-3 pl-4 border-l-2 border-border">
-                    <div>
-                      <Label className="text-xs">Comment <span className="text-muted-foreground font-normal">(optional)</span></Label>
-                      <Textarea
-                        value={groupComment}
-                        onChange={e => setGroupComment(e.target.value)}
-                        rows={2}
-                        placeholder="What is this batch testing?"
-                        className="text-xs resize-none mt-1"
-                        data-testid="eval-group-comment"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-xs">Image</Label>
-                      <Input value={expImage} onChange={e => setExpImage(e.target.value)} className="font-mono text-xs" placeholder="e.g. us-central1-docker.pkg.dev/..." />
-                    </div>
-                    <div>
-                      <Label className="text-xs">Model Name</Label>
-                      <Input value={expModelName} onChange={e => setExpModelName(e.target.value)} className="font-mono text-xs" placeholder="e.g. claude-sonnet-4.5" />
-                    </div>
-                    {advancedMode && (
-                      <div>
-                        <Label className="text-xs">Cortex URL (advanced)</Label>
-                        <Input value={expCortexUrl} onChange={e => setExpCortexUrl(e.target.value)} className="font-mono text-xs" placeholder="https://cortex-cli..." />
-                        <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1">
-                          Free-text URL mode is enabled by <span className="font-mono">?advanced=1</span>.
-                          Prefer the eph picker — URLs that look fine here can be silently dead.
-                        </p>
-                      </div>
-                    )}
+                <Label className="text-sm font-semibold">Model</Label>
+                <p className="text-[10px] text-muted-foreground mt-0.5 mb-1.5">
+                  Leave blank to use the agent&apos;s default model.
+                </p>
+                <ModelNamePicker
+                  value={expModelName}
+                  onChange={setExpModelName}
+                  testId="eval-exp-model-name"
+                />
+              </div>
+
+              {/* Group comment — small free-text describing what this run
+                  batch is testing. Stored on the eval-run-group, not in
+                  experiments.config. */}
+              <div>
+                <Label className="text-sm font-semibold">Comment <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                <Textarea
+                  value={groupComment}
+                  onChange={e => setGroupComment(e.target.value)}
+                  rows={2}
+                  placeholder="What is this batch testing?"
+                  className="text-xs resize-none mt-1.5"
+                  data-testid="eval-group-comment"
+                />
+              </div>
+
+              {/* Run-behaviour toggles — formerly nested under Resources.
+                  Resources sizing UI was retired; defaults are locked in
+                  at module top (DEFAULT_CPUS / MEMORY / STORAGE). */}
+              <div className="flex items-center gap-6">
+                <div className="flex items-center gap-2">
+                  <Switch checked={headed} onCheckedChange={setHeaded} id="headed" />
+                  <Label htmlFor="headed" className="text-xs cursor-pointer">Headed browser</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch checked={forceBuild} onCheckedChange={setForceBuild} id="forceBuild" />
+                  <Label htmlFor="forceBuild" className="text-xs cursor-pointer">Force rebuild</Label>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <Switch checked={breakpointEnabled} onCheckedChange={setBreakpointEnabled} id="breakpoint" data-testid="breakpoint-toggle" />
+                  <Label htmlFor="breakpoint" className="text-xs cursor-pointer">Phase breakpoint</Label>
+                </div>
+                {breakpointEnabled && (
+                  <div className="flex items-center gap-1.5">
+                    <Input
+                      type="number"
+                      value={breakpointMins}
+                      onChange={e => setBreakpointMins(Math.max(1, Number(e.target.value)))}
+                      min={1}
+                      className="w-16 h-7 text-xs font-mono"
+                      data-testid="breakpoint-duration"
+                    />
+                    <span className="text-[10px] text-muted-foreground">min per phase</span>
                   </div>
                 )}
               </div>
@@ -1468,7 +1432,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                     <strong>
                       {selectedProblems.filter(isBugBenchMissingImage).length} selected bug_bench problem(s)
                     </strong>{' '}
-                    don't have a base image in the registry yet
+                    don&apos;t have a base image in the registry yet
                     (<code className="font-mono">image_available = false</code>).
                     Those jobs will fail until a build is pushed.
                   </span>
@@ -1511,7 +1475,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
 
                   <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-xs">
                     <div><span className="text-muted-foreground">Group:</span> <span className="font-mono">{groupName}</span></div>
-                    <div><span className="text-muted-foreground">User:</span> <span className="font-mono">{userId}</span></div>
+                    <div><span className="text-muted-foreground">User:</span> <span className="font-mono">{loggedInUserId || '(unknown)'}</span></div>
                     {numRuns > 1 && (
                       <div>
                         <span className="text-muted-foreground">Runs:</span>{' '}
@@ -1526,11 +1490,12 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                       </div>
                     ) : (
                       <>
-                        <div><span className="text-muted-foreground">CPUs:</span> <span className="font-mono">{cpus}</span></div>
-                        <div><span className="text-muted-foreground">Memory:</span> <span className="font-mono">{memoryMb} MB</span></div>
-                        <div><span className="text-muted-foreground">Storage:</span> <span className="font-mono">{storageGb} GB</span></div>
+                        <div><span className="text-muted-foreground">Resources:</span> <span className="font-mono">{DEFAULT_CPUS} cpu · {DEFAULT_MEMORY_MB} MB · {DEFAULT_STORAGE_GB} GB</span></div>
                         <div><span className="text-muted-foreground">Headed:</span> <span className="font-mono">{headed ? 'Yes' : 'No'}</span></div>
                         <div><span className="text-muted-foreground">Force Build:</span> <span className="font-mono">{forceBuild ? 'Yes' : 'No'}</span></div>
+                        {expModelName && (
+                          <div><span className="text-muted-foreground">Model:</span> <span className="font-mono">{expModelName}</span></div>
+                        )}
                       </>
                     )}
                   </div>
