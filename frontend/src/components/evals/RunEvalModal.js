@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { listDatasets, listDatasetsByType, getDatasetForProblem, submitEvalJobs, submitEvalJobsWithEs, submitTestingAgentEval, checkAgentExists, getVerifierConfig, getDatasetView } from '@/services/evalApi';
-import { useAuth } from '@/contexts/AuthContext';
+import { useCreatedBy } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { Loader2, Rocket, FileText, Search, ChevronRight, Check, AlertCircle, X, ChevronDown } from 'lucide-react';
 import { parseApiError } from '@/lib/errorUtils';
@@ -263,16 +263,13 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
   const [storageGb, setStorageGb] = useState(10);
   const [headed, setHeaded] = useState(true);
   const [forceBuild, setForceBuild] = useState(false);
-  // user_id is seeded from the authenticated session but the user can
-  // override it from the Configure step (collapsed under "User ID").
-  const { user } = useAuth();
-  const [userId, setUserId] = useState(user?.user_id || '');
-  // Keep userId synced with the auth user when the modal mounts and the
-  // session resolves.
+  // Default the eval owner to the signed-in user (overridable). A placeholder
+  // default caused credit-balance 404s downstream.
+  const loggedInUserId = useCreatedBy();
+  const [userId, setUserId] = useState('');
   useEffect(() => {
-    if (!userId && user?.user_id) setUserId(user.user_id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.user_id]);
+    if (loggedInUserId) setUserId(prev => prev || loggedInUserId);
+  }, [loggedInUserId]);
 
   // Experiment config
   const [showExpConfig, setShowExpConfig] = useState(false);
@@ -1255,15 +1252,15 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                   <Input
                     value={userId}
                     onChange={e => setUserId(e.target.value)}
-                    placeholder="user_id uuid"
+                    placeholder="user email or id"
                     className="font-mono text-xs"
                     data-testid="eval-user-id"
                   />
-                  {user?.user_id && userId !== user.user_id && (
+                  {loggedInUserId && userId !== loggedInUserId && (
                     <button
                       type="button"
                       className="text-[10px] text-muted-foreground hover:text-foreground underline underline-offset-2"
-                      onClick={() => setUserId(user.user_id)}
+                      onClick={() => setUserId(loggedInUserId)}
                       data-testid="eval-user-id-reset"
                     >
                       Reset to logged-in user
