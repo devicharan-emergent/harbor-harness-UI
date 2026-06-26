@@ -751,10 +751,14 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
       toast.error('Group name is required');
       return;
     }
-    // Non-testing-agent flow stamps `agent_name` at the run-level on every
-    // job (the testing-agent flow stores it per-dataset, so it's enforced
-    // there instead).
-    if (!isTestingAgentMode && !agentNameOverride.trim()) {
+    // Both flows now require an explicit `agent_name` at submit time —
+    // the scratch flow stamps it batch-level; the testing-agent flow
+    // sends it as the per-eval `agent_name` (replaces the dataset's
+    // placeholder sentinel). The dataset's stored `attributes.agent_name`
+    // is a stub ("agent_set_at_runtime") to satisfy the upstream
+    // harness's dataset-creation check — the user-meaningful value lives
+    // only on the eval submission.
+    if (!agentNameOverride.trim()) {
       toast.error('Agent name is required');
       return;
     }
@@ -1319,19 +1323,31 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 <span className="text-[10px] text-muted-foreground">max {NUM_RUNS_MAX}</span>
               </div>
 
-              {/* Agent name override — testing_agent_mode only */}
+              {/* Agent name — required for testing_agent_mode too.
+                  Searchable combobox synced with the agents "All list" (prod
+                  catalog when no eph is picked, eph-scoped when one is). */}
               {isTestingAgentMode && (
                 <div>
-                  <Label className="text-sm font-semibold">Agent Name (override)</Label>
+                  <Label className="text-sm font-semibold">Agent Name *</Label>
                   <p className="text-[10px] text-muted-foreground mt-0.5 mb-1.5">
-                    Overrides <code className="font-mono">attributes.agent_name</code> for this run only.
+                    The agent the testing harness will run. The dataset&apos;s stored
+                    <code className="font-mono"> attributes.agent_name </code>
+                    is a placeholder — this is the real value used at run-time.
                   </p>
-                  <Input
+                  <Combobox
                     value={agentNameOverride}
-                    onChange={e => setAgentNameOverride(e.target.value)}
-                    placeholder="e.g. testing-agent-v3-gpt-5-2-codex"
-                    className="font-mono text-sm"
-                    data-testid="eval-testing-agent-name-override"
+                    onChange={setAgentNameOverride}
+                    options={agentOptions}
+                    placeholder="Search agents…"
+                    searchPlaceholder={
+                      submitEph
+                        ? 'Search agents on this eph…'
+                        : ephAgents.length === 0 && prodAgents.length > 0
+                          ? 'Search prod agents (no eph selected)…'
+                          : 'Search agents…'
+                    }
+                    emptyText="No match — type to commit a custom agent id"
+                    testId="eval-testing-agent-name-override"
                   />
                 </div>
               )}
