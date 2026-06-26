@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getEvalJob, cancelEvalJob, getDatasetForProblem, updateBreakpoint } from '@/services/evalApi';
 import { getJobAgentName, getJobModelName } from '@/lib/jobShape';
+import { getPhaseLabel, getJobStatusLabel } from '@/lib/phaseLabels';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -141,9 +142,9 @@ export default function JobDetail() {
               <ArrowLeft className="w-4 h-4" />
             </Button>
             <h1 className="text-2xl font-bold">Eval Job</h1>
-            <Badge variant="outline" className="font-mono text-xs">
+            <Badge variant="outline" className="font-mono text-xs" data-testid="job-status-badge">
               <StatusIcon className="w-3 h-3 mr-1" />
-              {job.status}
+              {getJobStatusLabel(job.status)}
             </Badge>
           </div>
           <p className="text-xs text-muted-foreground ml-[52px]">
@@ -312,6 +313,12 @@ export default function JobDetail() {
                 <div className="space-y-3">
                   {(() => {
                     let phaseNum = 0;
+                    // Best-effort total phase count: prefer any history step's
+                    // metadata.total_phases, fall back to live progress.
+                    const totalPhases =
+                      job.progress.history.find((s) => s.metadata?.total_phases)?.metadata?.total_phases
+                      ?? job.progress.metadata?.total_phases
+                      ?? null;
                     const items = [];
                     job.progress.history.forEach((step, idx) => {
                       // Insert phase divider before every harbor_running
@@ -320,7 +327,9 @@ export default function JobDetail() {
                         items.push(
                           <div key={`phase-${phaseNum}`} className="flex items-center gap-2 py-1.5">
                             <div className="h-px flex-1 bg-border" />
-                            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2">Phase {phaseNum}</span>
+                            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2">
+                              Phase {phaseNum}{totalPhases ? ` of ${totalPhases}` : ''}
+                            </span>
                             <div className="h-px flex-1 bg-border" />
                           </div>
                         );
@@ -336,7 +345,9 @@ export default function JobDetail() {
                             )}
                           </div>
                           <div className="flex-1 pb-3">
-                            <p className="text-sm font-medium">{step.phase}</p>
+                            <p className="text-sm font-medium" data-testid={`progress-step-${idx}-label`}>
+                              {getPhaseLabel(step, { phaseNum: step.phase === 'harbor_running' ? phaseNum : undefined, totalPhases })}
+                            </p>
                             {step.duration_seconds !== undefined && (
                               <p className="text-xs text-muted-foreground font-mono mt-0.5">
                                 {step.duration_seconds < 60
@@ -374,7 +385,12 @@ export default function JobDetail() {
                         )}
                       </div>
                       <div className="flex-1">
-                        <p className="text-sm font-medium">{job.progress.phase === 'phase_breakpoint' ? 'Breakpoint — Paused for manual testing' : job.progress.phase}</p>
+                        <p className="text-sm font-medium" data-testid="progress-current-label">
+                          {getPhaseLabel(
+                            { phase: job.progress.phase, metadata: job.progress.metadata },
+                            { totalPhases: job.progress.metadata?.total_phases },
+                          )}
+                        </p>
                         {job.progress.message && (
                           <p className="text-xs text-muted-foreground mt-0.5">{job.progress.message}</p>
                         )}
