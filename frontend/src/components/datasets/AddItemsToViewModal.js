@@ -94,6 +94,32 @@ export function AddItemsToViewModal({ open, view, onClose, onAdded }) {
     });
   };
 
+  // Pickable rows = filtered rows that are NOT already in the view. Drives
+  // the "Select all (filtered)" header checkbox state + bulk toggle.
+  const pickableRows = useMemo(
+    () => filteredRows.filter(ds => !existingKeys.has(keyOf(ds))),
+    [filteredRows, existingKeys],
+  );
+  const allPickableSelected =
+    pickableRows.length > 0 && pickableRows.every(ds => picked.has(keyOf(ds)));
+  const somePickableSelected =
+    pickableRows.some(ds => picked.has(keyOf(ds))) && !allPickableSelected;
+
+  const toggleSelectAll = () => {
+    setPicked(prev => {
+      const next = new Set(prev);
+      if (allPickableSelected) {
+        // Deselect everything currently visible+pickable.
+        for (const ds of pickableRows) next.delete(keyOf(ds));
+      } else {
+        // Select everything currently visible+pickable. Selections of
+        // pickable rows OUTSIDE the current search filter are preserved.
+        for (const ds of pickableRows) next.add(keyOf(ds));
+      }
+      return next;
+    });
+  };
+
   const handleConfirm = async () => {
     if (!view) return;
     if (picked.size === 0) {
@@ -169,7 +195,23 @@ export function AddItemsToViewModal({ open, view, onClose, onAdded }) {
               No datasets found
             </div>
           ) : (
-            <ul className="divide-y">
+            <>
+              {/* Select-all header — toggles every pickable (non-already-in-view)
+                  row currently visible in the filtered list. Indeterminate when
+                  some-but-not-all are picked. */}
+              <div className="flex items-center gap-3 px-3 py-2 border-b bg-muted/30 sticky top-0 z-10 backdrop-blur">
+                <Checkbox
+                  checked={allPickableSelected || (somePickableSelected ? 'indeterminate' : false)}
+                  onCheckedChange={toggleSelectAll}
+                  disabled={pickableRows.length === 0}
+                  aria-label="Select all filtered rows"
+                  data-testid="add-items-select-all"
+                />
+                <span className="text-xs font-medium">
+                  Select all {pickableRows.length > 0 ? `(${pickableRows.length})` : ''}
+                </span>
+              </div>
+              <ul className="divide-y">
               {filteredRows.map(ds => {
                 const k = keyOf(ds);
                 const inView = existingKeys.has(k);
@@ -204,7 +246,8 @@ export function AddItemsToViewModal({ open, view, onClose, onAdded }) {
                   </li>
                 );
               })}
-            </ul>
+              </ul>
+            </>
           )}
         </ScrollArea>
 

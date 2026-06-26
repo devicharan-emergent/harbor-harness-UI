@@ -20,7 +20,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Loader2, Search, Plus, Pencil, Trash2, RefreshCw, Database, X, ChevronLeft, ChevronRight, Upload, Download, BookMarked, Save } from 'lucide-react';
+import { Loader2, Search, Plus, Pencil, Trash2, RefreshCw, Database, X, ChevronLeft, ChevronRight, Upload, Download, BookMarked, Save, FileDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { DatasetEditorModal } from '@/components/evals/DatasetEditorModal';
 import { DatasetPreviewModal } from '@/components/evals/DatasetPreviewModal';
@@ -415,98 +415,131 @@ export default function DatasetsPage() {
           <h1 className="text-2xl font-bold">Datasets</h1>
           <p className="text-sm text-muted-foreground mt-1">Manage evaluation problem statements and datasets</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button onClick={fetchDatasets} variant="outline" size="sm" data-testid="datasets-refresh-btn">
-            <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
-            Refresh
-          </Button>
+        <div className="flex items-center gap-1.5">
           <DatasetViewsDropdown
             label="Views"
             testId="datasets-views-dropdown"
             onPick={pickView}
           />
-          <Button
-            onClick={() => setSaveViewOpen(true)}
-            variant="outline"
-            size="sm"
-            disabled={selectionItemsForView.length === 0}
-            data-testid="datasets-save-view-btn"
-            title={
-              selectionItemsForView.length === 0
-                ? 'Select at least one row to save as a view'
-                : `Save the ${selectionItemsForView.length} selected row${selectionItemsForView.length === 1 ? '' : 's'} as a NEW view`
-            }
-          >
-            <Save className="w-3.5 h-3.5 mr-1.5" />
-            Save as new view{selectionItemsForView.length > 0 ? ` (${selectionItemsForView.length})` : ''}
-          </Button>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  onClick={() => setSaveViewOpen(true)}
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9 relative"
+                  disabled={selectionItemsForView.length === 0}
+                  data-testid="datasets-save-view-btn"
+                >
+                  <Save className="w-4 h-4" />
+                  {selectionItemsForView.length > 0 && (
+                    <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[9px] font-mono rounded-full h-4 min-w-[16px] px-1 flex items-center justify-center">
+                      {selectionItemsForView.length}
+                    </span>
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {selectionItemsForView.length === 0
+                  ? 'Select rows to save as a new view'
+                  : `Save ${selectionItemsForView.length} selected row${selectionItemsForView.length === 1 ? '' : 's'} as a new view`}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           {activeView && (
-            <Button
-              onClick={() => setAddItemsOpen(true)}
-              variant="outline"
-              size="sm"
-              data-testid="datasets-add-to-view-btn"
-              title={`Add more datasets to "${activeView.name}"`}
-            >
-              <Plus className="w-3.5 h-3.5 mr-1.5" />
-              Add items to view
-            </Button>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    onClick={() => setAddItemsOpen(true)}
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9"
+                    data-testid="datasets-add-to-view-btn"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Add items to &ldquo;{activeView.name}&rdquo;</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                {/* Render a non-disabled button when the action is unavailable so
-                    hover (mouse) reaches the tooltip trigger — `<button disabled>`
-                    swallows pointer events. Click handler is guarded instead. */}
                 <Button
                   onClick={(selectedRows.length === 0 || selectedType === 'mixed') ? undefined : handleExportSelected}
                   variant="outline"
-                  size="sm"
-                  aria-disabled={selectedRows.length === 0 || selectedType === 'mixed' || exporting}
-                  className={
+                  size="icon"
+                  className={`h-9 w-9 relative ${
                     (selectedRows.length === 0 || selectedType === 'mixed' || exporting)
                       ? 'opacity-50 cursor-not-allowed'
                       : ''
-                  }
+                  }`}
+                  aria-disabled={selectedRows.length === 0 || selectedType === 'mixed' || exporting}
                   data-testid="export-selected-btn"
                 >
-                  <Download className="w-3.5 h-3.5 mr-1.5" />
-                  Export Selected{selectedRows.length > 0 ? ` (${selectedRows.length})` : ''}
+                  <Download className="w-4 h-4" />
+                  {selectedRows.length > 0 && (
+                    <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[9px] font-mono rounded-full h-4 min-w-[16px] px-1 flex items-center justify-center">
+                      {selectedRows.length}
+                    </span>
+                  )}
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
                 {selectedRows.length === 0
-                  ? 'Tick rows in the table to export them as CSV'
+                  ? 'Tick rows to export as CSV'
                   : selectedType === 'mixed'
-                    ? 'Selection spans multiple dataset types — pick rows of a single type to export'
-                    : `Download ${selectedRows.length} ${selectedType} row(s) as CSV`}
+                    ? 'Selection spans multiple types — pick a single type to export'
+                    : `Export ${selectedRows.length} selected ${selectedType} row(s) as CSV`}
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  onClick={handleExportAll}
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9"
+                  disabled={exporting}
+                  data-testid="export-all-btn"
+                >
+                  {exporting ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <FileDown className="w-4 h-4" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{typeFilter === 'all' ? 'Export all types as ZIP' : 'Export all rows as CSV'}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  onClick={() => setImportOpen(true)}
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9"
+                  data-testid="import-datasets-btn"
+                >
+                  <Upload className="w-4 h-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Upload CSV</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           <Button
-            onClick={handleExportAll}
-            variant="outline"
+            onClick={() => { setEditingDataset(null); setEditorOpen(true); }}
             size="sm"
-            disabled={exporting}
-            data-testid="export-all-btn"
+            className="h-9 ml-1"
+            data-testid="new-dataset-btn"
           >
-            {exporting ? (
-              <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-            ) : (
-              <Download className="w-3.5 h-3.5 mr-1.5" />
-            )}
-            {typeFilter === 'all' ? 'Export All (zip)' : 'Export All'}
-          </Button>
-          <Button
-            onClick={() => setImportOpen(true)}
-            variant="outline"
-            size="sm"
-            data-testid="import-datasets-btn"
-          >
-            <Upload className="w-3.5 h-3.5 mr-1.5" />
-            Upload CSV
-          </Button>
-          <Button onClick={() => { setEditingDataset(null); setEditorOpen(true); }} size="sm" data-testid="new-dataset-btn">
             <Plus className="w-3.5 h-3.5 mr-1.5" />
             New Dataset
           </Button>
@@ -578,6 +611,31 @@ export default function DatasetsPage() {
       {/* Content: Table */}
       <Card>
         <CardContent className="pt-4">
+          {/* Small toolbar above the table — just the refresh action and a
+              row count, so the header above stays focused on primary
+              actions instead of secondary controls. */}
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs text-muted-foreground">
+              {loading ? 'Loading…' : `${filteredDatasets.length} dataset${filteredDatasets.length !== 1 ? 's' : ''}`}
+            </p>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    onClick={fetchDatasets}
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    disabled={loading}
+                    data-testid="datasets-refresh-btn"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Refresh</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
           {loading ? (
             <div className="flex items-center justify-center py-16">
               <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
