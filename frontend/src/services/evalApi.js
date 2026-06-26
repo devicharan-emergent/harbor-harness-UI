@@ -75,6 +75,22 @@ export const submitTestingAgentEval = async (payload) => {
 };
 
 /**
+ * Replay the browser verifier on already-completed scratch_bench_phased
+ * jobs. Hits `POST /api/eval/replay`. Returns the harness summary:
+ *   { results: [ { job_id, status: 'replaying' | 'error', ... } ] }
+ * The job's status temporarily flips to "replaying" while running; the
+ * UI should refetch on poll.
+ */
+export const replayEvalJobs = async (jobIds, triggeredBy) => {
+  const response = await evalApiClient.post('/replay', {
+    job_ids: jobIds,
+    on_demand: true,
+    triggered_by: triggeredBy,
+  });
+  return response.data;
+};
+
+/**
  * Verifier-config CRUD (per-bench, singleton-per-bench). Stored in OUR
  * Mongo keyed by bench type ("testing_agent_bench" or "scratch_bench_phased").
  * The prompt MUST contain bench-specific tokens — server 400s otherwise.

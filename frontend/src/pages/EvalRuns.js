@@ -23,6 +23,7 @@ const STATUS_CONFIG = {
   queued: { color: 'bg-amber-500', icon: Clock, label: 'Queued' },
   generating: { color: 'bg-violet-500', icon: Cpu, label: 'Preparing' },
   running: { color: 'bg-blue-500', icon: ActivitySquare, label: 'Running' },
+  replaying: { color: 'bg-cyan-500', icon: Loader2, label: 'Replaying' },
   completed: { color: 'bg-emerald-500', icon: CheckCircle, label: 'Completed' },
   failed: { color: 'bg-red-500', icon: XCircle, label: 'Failed' },
   cancelled: { color: 'bg-slate-400', icon: Ban, label: 'Cancelled' },

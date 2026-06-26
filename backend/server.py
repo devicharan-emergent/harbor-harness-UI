@@ -560,6 +560,40 @@ async def proxy_submit_eval_with_es(body: dict):
     )
 
 
+@api_router.post("/eval/replay")
+async def proxy_replay_evals(body: dict):
+    """Proxy → harness POST /api/v1/evals/replay.
+
+    Re-runs the browser verifier on already-completed scratch_bench_phased
+    jobs using their live preview (last phase's tests), without rebuilding.
+    Each replay is appended as a new phase_results entry with kind="replay".
+
+    Body: `{ "job_ids": [...], "on_demand": true, "triggered_by": "<email>" }`
+    Returns 202 `{ "results": [ { "job_id", "status": "replaying" | "error", ... } ] }`.
+    Pass-through proxy — harness does eligibility checks (completed + scratch).
+    """
+    payload = {"on_demand": True, **(body or {})}
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as hclient:
+            response = await hclient.post(
+                f"{EVAL_API_BASE}/api/v1/evals/replay", json=payload,
+            )
+            if response.status_code >= 400:
+                try:
+                    err = response.json()
+                except Exception:
+                    err = {"message": response.text}
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=err.get("message", str(err)),
+                )
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Eval API error: {str(e)}")
+
+
 @api_router.post("/eval/testing-agent-evals")
 async def proxy_submit_testing_agent_eval(body: dict):
     """Proxy → harness POST /api/v1/testing-agent-evals.

@@ -18,6 +18,7 @@ export const JOB_STATUS_LABELS = {
   queued: 'Queued',
   generating: 'Preparing',
   running: 'Running',
+  replaying: 'Replaying',
   completed: 'Completed',
   failed: 'Failed',
   cancelled: 'Cancelled',

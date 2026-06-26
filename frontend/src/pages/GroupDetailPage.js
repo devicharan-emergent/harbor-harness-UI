@@ -15,6 +15,7 @@ const STATUS_CONFIG = {
   queued: { color: 'bg-amber-500', icon: Clock, label: 'Queued' },
   generating: { color: 'bg-violet-500', icon: Cpu, label: 'Preparing' },
   running: { color: 'bg-blue-500', icon: ActivitySquare, label: 'Running' },
+  replaying: { color: 'bg-cyan-500', icon: Loader2, label: 'Replaying' },
   completed: { color: 'bg-emerald-500', icon: CheckCircle, label: 'Completed' },
   failed: { color: 'bg-red-500', icon: XCircle, label: 'Failed' },
   cancelled: { color: 'bg-slate-400', icon: Ban, label: 'Cancelled' },
@@ -207,60 +208,83 @@ function GroupScoresCard({ jobs, aggregate }) {
 }
 
 // ── Job row — clicking opens that job's eval detail in a new tab ──────
-function JobRow({ job }) {
+function JobRow({ job, selectable, selected, onToggleSelect }) {
   const cfg = STATUS_CONFIG[job.status] || STATUS_CONFIG.queued;
   const StatusIcon = cfg.icon;
   const agentName = getJobAgentName(job);
   const modelName = getJobModelName(job);
+  // Replay-eligible: only completed scratch_bench_phased jobs can be
+  // replayed (browser verifier only re-runs on a built preview). The
+  // harness will also enforce this server-side, but client filtering
+  // keeps the checkbox UI honest.
+  const isReplayEligible =
+    job.status === 'completed' &&
+    (job.dataset_type === 'scratch_bench_phased' ||
+      (job.problem || '').startsWith('scratch_bench_phased/'));
+  const isReplaying = job.status === 'replaying';
   return (
-    <Link
-      to={`/evals/${job.id}`}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="flex items-center gap-3 px-4 py-2.5 rounded-lg border border-border/50 bg-card/50 hover:bg-accent/40 transition-colors text-xs no-underline text-foreground"
+    <div
+      className={`flex items-center gap-3 px-4 py-2.5 rounded-lg border border-border/50 bg-card/50 hover:bg-accent/40 transition-colors text-xs ${isReplaying ? 'ring-1 ring-cyan-500/40' : ''}`}
       data-testid={`group-job-row-${job.id}`}
     >
-      <div className="flex items-center gap-1.5 w-[110px] flex-shrink-0">
-        <div className={`w-1.5 h-1.5 rounded-full ${cfg.color}`} />
-        <StatusIcon className="w-3 h-3 text-muted-foreground" />
-        <span className="text-[10px] capitalize">{cfg.label}</span>
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="font-mono font-medium truncate">{job.problem}</div>
-        <div className="flex items-center gap-1.5 mt-0.5">
-          {agentName && (
-            <Badge variant="outline" className="text-[9px] font-mono px-1 py-0 bg-blue-500/5 border-blue-500/20 text-blue-600 dark:text-blue-400">
-              {agentName}
-            </Badge>
-          )}
-          {modelName && (
-            <Badge variant="outline" className="text-[9px] font-mono px-1 py-0">
-              {modelName}
-            </Badge>
-          )}
-          <span className="text-[9px] text-muted-foreground/50 font-mono">{job.id.substring(0, 8)}</span>
+      {selectable && (
+        <Checkbox
+          checked={selected}
+          disabled={!isReplayEligible}
+          onCheckedChange={(v) => onToggleSelect?.(job.id, !!v)}
+          aria-label={`Select ${job.problem}`}
+          className="flex-shrink-0"
+          data-testid={`group-job-select-${job.id}`}
+        />
+      )}
+      <Link
+        to={`/evals/${job.id}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex items-center gap-3 flex-1 min-w-0 no-underline text-foreground"
+      >
+        <div className="flex items-center gap-1.5 w-[110px] flex-shrink-0">
+          <div className={`w-1.5 h-1.5 rounded-full ${cfg.color}`} />
+          <StatusIcon className={`w-3 h-3 text-muted-foreground ${isReplaying ? 'animate-spin' : ''}`} />
+          <span className="text-[10px] capitalize">{cfg.label}</span>
         </div>
-      </div>
-      {job.lintiq_score != null && (
-        <Badge variant="outline" className="text-[9px] font-mono" data-testid={`group-job-lintiq-${job.id}`}>
-          L {(job.lintiq_score * 100).toFixed(0)}%
-        </Badge>
-      )}
-      {job.browser_reward != null && (
-        <Badge variant="outline" className="text-[9px] font-mono" data-testid={`group-job-browser-${job.id}`}>
-          B {(job.browser_reward * 100).toFixed(0)}%
-        </Badge>
-      )}
-      {job.combined_reward != null && (
-        <Badge variant="outline" className="text-[9px] font-mono font-bold">
-          C {(job.combined_reward * 100).toFixed(0)}%
-        </Badge>
-      )}
-      <span className="text-[10px] text-muted-foreground flex-shrink-0 w-24 text-right">
-        {formatDistanceToNow(new Date(job.created_at), { addSuffix: true })}
-      </span>
-      <ExternalLink className="w-3 h-3 text-muted-foreground/40 flex-shrink-0" />
-    </Link>
+        <div className="flex-1 min-w-0">
+          <div className="font-mono font-medium truncate">{job.problem}</div>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            {agentName && (
+              <Badge variant="outline" className="text-[9px] font-mono px-1 py-0 bg-blue-500/5 border-blue-500/20 text-blue-600 dark:text-blue-400">
+                {agentName}
+              </Badge>
+            )}
+            {modelName && (
+              <Badge variant="outline" className="text-[9px] font-mono px-1 py-0">
+                {modelName}
+              </Badge>
+            )}
+            <span className="text-[9px] text-muted-foreground/50 font-mono">{job.id.substring(0, 8)}</span>
+          </div>
+        </div>
+        {job.lintiq_score != null && (
+          <Badge variant="outline" className="text-[9px] font-mono" data-testid={`group-job-lintiq-${job.id}`}>
+            L {(job.lintiq_score * 100).toFixed(0)}%
+          </Badge>
+        )}
+        {job.browser_reward != null && (
+          <Badge variant="outline" className="text-[9px] font-mono" data-testid={`group-job-browser-${job.id}`}>
+            B {(job.browser_reward * 100).toFixed(0)}%
+          </Badge>
+        )}
+        {job.combined_reward != null && (
+          <Badge variant="outline" className="text-[9px] font-mono font-bold">
+            C {(job.combined_reward * 100).toFixed(0)}%
+          </Badge>
+        )}
+        <span className="text-[10px] text-muted-foreground flex-shrink-0 w-24 text-right">
+          {formatDistanceToNow(new Date(job.created_at), { addSuffix: true })}
+        </span>
+        <ExternalLink className="w-3 h-3 text-muted-foreground/40 flex-shrink-0" />
+      </Link>
+    </div>
   );
 }
 
