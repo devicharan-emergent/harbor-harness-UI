@@ -8,9 +8,10 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { toast } from 'sonner';
-import { ArrowLeft, Copy, XCircle, Loader2, CheckCircle, Clock, AlertTriangle, Cpu, ActivitySquare, Ban, FileText, ChevronDown, ChevronRight, ExternalLink, Info } from 'lucide-react';
+import { ArrowLeft, Copy, XCircle, Loader2, CheckCircle, Clock, AlertTriangle, Cpu, ActivitySquare, Ban, FileText, ChevronDown, ChevronUp, ChevronRight, ExternalLink, Info } from 'lucide-react';
 import { formatDistanceToNow, formatDuration, intervalToDuration } from 'date-fns';
 import { LintRuleBreakdown } from '@/components/evals/LintRuleBreakdown';
 import { OpenInChatButton } from '@/components/evals/OpenInChatButton';
@@ -24,6 +25,23 @@ const STATUS_ICONS = {
   cancelled: Ban,
 };
 
+// Phases representing "real work" the agent is actively doing. Everything
+// else (queue waits, preview-comes-online polling, post-run lint/cleanup)
+// is treated as overhead and folded into a single summary line by default.
+// The user can flip the "Show all phases" toggle to reveal every step so
+// per-phase durations sum to the wall-clock elapsed time.
+const MAJOR_PHASES = new Set(['harbor_running', 'browser_testing']);
+
+// Format a positive duration in seconds as "Xm Ys" / "Xs" — matches the
+// per-step row formatting elsewhere in the timeline.
+function fmtSecs(secs) {
+  if (secs == null || isNaN(secs)) return null;
+  if (secs < 60) return `${secs.toFixed(secs < 10 ? 1 : 0)}s`;
+  const m = Math.floor(secs / 60);
+  const s = Math.round(secs % 60);
+  return `${m}m ${s}s`;
+}
+
 export default function JobDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -35,6 +53,11 @@ export default function JobDetail() {
   const [datasetLoading, setDatasetLoading] = useState(false);
   const [showFullPS, setShowFullPS] = useState(false);
   const [showTests, setShowTests] = useState(false);
+  // Progress timeline density toggle — `false` shows only the "real work"
+  // phases (harbor_running + browser_testing). `true` reveals every phase
+  // including queue + preview wait + lintiq + cleanup so the per-phase
+  // durations sum to the wall-clock total.
+  const [showAllPhases, setShowAllPhases] = useState(false);
 
   const isActive = job && ['queued', 'generating', 'running'].includes(job.status);
 
@@ -321,6 +344,10 @@ export default function JobDetail() {
                       ?? null;
                     const items = [];
                     job.progress.history.forEach((step, idx) => {
+                      const isMajor = MAJOR_PHASES.has(step.phase);
+                      // Hide non-major (overhead) steps when collapsed —
+                      // they're summarised below in the Overhead row.
+                      if (!showAllPhases && !isMajor) return;
                       // Insert phase divider before every harbor_running
                       if (step.phase === 'harbor_running') {
                         phaseNum++;
@@ -340,9 +367,7 @@ export default function JobDetail() {
                             <div className="w-6 h-6 rounded-full bg-emerald-100 dark:bg-emerald-900 flex items-center justify-center">
                               <CheckCircle className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                             </div>
-                            {(idx < job.progress.history.length - 1 || (isActive && job.progress.phase)) && (
-                              <div className="w-px h-8 bg-border mt-1" />
-                            )}
+                            <div className="w-px h-8 bg-border mt-1" />
                           </div>
                           <div className="flex-1 pb-3">
                             <p className="text-sm font-medium" data-testid={`progress-step-${idx}-label`}>
@@ -350,13 +375,10 @@ export default function JobDetail() {
                             </p>
                             {step.duration_seconds !== undefined && (
                               <p className="text-xs text-muted-foreground font-mono mt-0.5">
-                                {step.duration_seconds < 60
-                                  ? `${step.duration_seconds.toFixed(1)}s`
-                                  : `${Math.floor(step.duration_seconds / 60)}m ${Math.round(step.duration_seconds % 60)}s`
-                                }
+                                {fmtSecs(step.duration_seconds)}
                               </p>
                             )}
-                            {step.duration && !step.duration_seconds && (
+                            {step.duration && step.duration_seconds === undefined && (
                               <p className="text-xs text-muted-foreground font-mono mt-0.5">{step.duration}</p>
                             )}
                             {(step.metadata?.preview_url || step.metadata?.url) && (
@@ -436,6 +458,83 @@ export default function JobDetail() {
                       </div>
                     </div>
                   )}
+                  {/* Overhead summary + density toggle. Aggregates every
+                      non-major phase (queued / preview_* / lintiq_* /
+                      cleanup_* / harbor_starting / harbor_completed /
+                      browser_completed / phase_breakpoint) into a single
+                      line. Hovering the value reveals the per-bucket
+                      breakdown so users can see exactly where the
+                      unattributed wall-clock time went. */}
+                  {(() => {
+                    const buckets = {
+                      'Queue': 0,
+                      'Preview wait': 0,
+                      'Code quality (lintiq)': 0,
+                      'Cleanup': 0,
+                      'Build setup': 0,
+                      'Other overhead': 0,
+                    };
+                    const bucketOf = (phase) => {
+                      if (phase === 'queued') return 'Queue';
+                      if (phase === 'preview_waiting' || phase === 'preview_ready') return 'Preview wait';
+                      if (phase === 'lintiq_running' || phase === 'lintiq_completed') return 'Code quality (lintiq)';
+                      if (phase === 'cleanup_starting' || phase === 'cleanup_completed') return 'Cleanup';
+                      if (phase === 'harbor_starting' || phase === 'harbor_completed' || phase === 'browser_completed') return 'Build setup';
+                      return 'Other overhead';
+                    };
+                    let overheadTotal = 0;
+                    for (const s of job.progress.history) {
+                      if (MAJOR_PHASES.has(s.phase)) continue;
+                      const d = Number(s.duration_seconds);
+                      if (!Number.isFinite(d) || d <= 0) continue;
+                      buckets[bucketOf(s.phase)] += d;
+                      overheadTotal += d;
+                    }
+                    if (overheadTotal <= 0) return null;
+                    const breakdownLines = Object.entries(buckets)
+                      .filter(([, secs]) => secs > 0)
+                      .sort((a, b) => b[1] - a[1]);
+                    return (
+                      <div className="pt-1">
+                        <Separator className="mb-2" />
+                        <div className="flex justify-between text-xs items-center">
+                          <span className="text-muted-foreground inline-flex items-center gap-1">
+                            Overhead
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Info className="w-3 h-3 text-muted-foreground/60 hover:text-muted-foreground cursor-help" />
+                                </TooltipTrigger>
+                                <TooltipContent className="max-w-xs">
+                                  <p className="text-[11px] font-semibold mb-1">Where the un-shown time went</p>
+                                  <ul className="text-[10px] font-mono space-y-0.5">
+                                    {breakdownLines.map(([bucket, secs]) => (
+                                      <li key={bucket} className="flex justify-between gap-3">
+                                        <span>{bucket}</span>
+                                        <span>{fmtSecs(secs)}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </span>
+                          <span className="font-mono" data-testid="progress-overhead">
+                            {fmtSecs(overheadTotal)}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowAllPhases(v => !v)}
+                          className="text-[10px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1 mt-1.5"
+                          data-testid="progress-toggle-all-phases"
+                        >
+                          {showAllPhases ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                          {showAllPhases ? 'Hide minor phases' : 'Show all phases'}
+                        </button>
+                      </div>
+                    );
+                  })()}
                   {/* Total Elapsed */}
                   {job.finished_at && job.created_at && (
                     <>
