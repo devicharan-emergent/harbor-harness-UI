@@ -18,7 +18,6 @@ import { toast } from 'sonner';
 import { parseApiError } from '@/lib/errorUtils';
 import { RunEvalModal } from '@/components/evals/RunEvalModal';
 import { EvalFilterBar, EMPTY_FILTERS, buildJobFilter } from '@/components/evals/EvalFilterBar';
-import { OpenInChatButton } from '@/components/evals/OpenInChatButton';
 
 const STATUS_CONFIG = {
   queued: { color: 'bg-amber-500', icon: Clock, label: 'Queued' },
@@ -750,14 +749,6 @@ export default function EvalRuns() {
 
                           {/* Score */}
                           <ScoreBadges job={job} />
-
-                          {/* Open in Chat (harbor agent-service trajectory) */}
-                          <OpenInChatButton
-                            jobId={job.id}
-                            status={job.status}
-                            compact
-                            className="h-7 px-2 flex-shrink-0"
-                          />
 
                           {/* Time */}
                           <span className="text-[10px] text-muted-foreground flex-shrink-0 w-24 text-right">
