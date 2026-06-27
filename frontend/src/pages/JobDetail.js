@@ -1834,21 +1834,44 @@ export default function JobDetail() {
             );
           })()}
 
-          {/* Phase Results — raw JSON, collapsed by default */}
-          {job.phase_results && (
+          {/* Phase Results — raw JSON, one labeled block per entry so it
+              stays obvious how many phases vs replays the harness returned.
+              The build entries can be enormous (each carries the full
+              lint_report with hundreds of file_analyses), so dumping the
+              whole array as a single blob made multi-entry runs look like
+              a single phase. */}
+          {job.phase_results && job.phase_results.length > 0 && (
             <Card>
               <Collapsible>
                 <CollapsibleTrigger className="w-full text-left [&[data-state=open]>div>svg]:rotate-180">
                   <CardHeader className="flex flex-row items-center justify-between space-y-0">
-                    <CardTitle className="text-sm">Phase Results (raw)</CardTitle>
+                    <CardTitle className="text-sm flex items-center gap-2">
+                      Phase Results (raw)
+                      <Badge variant="outline" className="text-[10px] font-mono" data-testid="phase-raw-count">
+                        {job.phase_results.length} entr{job.phase_results.length === 1 ? 'y' : 'ies'}
+                      </Badge>
+                    </CardTitle>
                     <ChevronDown className="w-3.5 h-3.5 text-muted-foreground transition-transform" />
                   </CardHeader>
                 </CollapsibleTrigger>
                 <CollapsibleContent>
-                  <CardContent>
-                    <pre className="text-[10px] font-mono bg-muted/50 p-3 rounded-lg overflow-auto max-h-[200px]">
-                      {JSON.stringify(job.phase_results, null, 2)}
-                    </pre>
+                  <CardContent className="space-y-3">
+                    {job.phase_results.map((entry, idx) => {
+                      const isReplay = entry.kind === 'replay';
+                      const phaseIdx = entry.phase_index != null ? entry.phase_index : idx;
+                      const label = isReplay
+                        ? `Replay ${entry.replay_index != null ? entry.replay_index : idx + 1} (phase ${phaseIdx + 1})`
+                        : `Phase ${phaseIdx + 1}`;
+                      return (
+                        <PhaseRawBlock
+                          key={idx}
+                          label={label}
+                          isReplay={isReplay}
+                          entry={entry}
+                          idx={idx}
+                        />
+                      );
+                    })}
                   </CardContent>
                 </CollapsibleContent>
               </Collapsible>
@@ -1956,6 +1979,54 @@ function JudgeRawBlock({ phaseIndex, request, response }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+
+// ── Single raw phase_results entry block — collapsible per-entry so
+// users can see at a glance how many phases vs replays the harness
+// returned without scrolling through giant lint_report dumps.
+function PhaseRawBlock({ label, isReplay, entry, idx }) {
+  const [open, setOpen] = useState(false);
+  const json = JSON.stringify(entry, null, 2);
+  const sizeKb = (json.length / 1024).toFixed(1);
+  return (
+    <div
+      className={`rounded-lg border ${isReplay ? 'border-cyan-500/30 bg-cyan-500/[0.02]' : 'border-border/50 bg-muted/30'}`}
+      data-testid={`phase-raw-block-${idx}`}
+    >
+      <Collapsible open={open} onOpenChange={setOpen}>
+        <CollapsibleTrigger asChild>
+          <button
+            className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-mono text-left hover:bg-accent/30 transition-colors rounded-lg"
+            data-testid={`phase-raw-toggle-${idx}`}
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <ChevronRight
+                className={`w-3 h-3 text-muted-foreground transition-transform flex-shrink-0 ${open ? 'rotate-90' : ''}`}
+              />
+              <span className="font-semibold">{label}</span>
+              {isReplay && (
+                <Badge variant="outline" className="text-[9px] font-mono border-cyan-500/30 text-cyan-700 dark:text-cyan-300">
+                  replay
+                </Badge>
+              )}
+            </div>
+            <span className="text-[10px] text-muted-foreground flex-shrink-0">{sizeKb} KB</span>
+          </button>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="px-3 pb-3">
+            <pre
+              className="text-[10px] font-mono bg-background border rounded p-2 overflow-auto max-h-[400px] whitespace-pre-wrap leading-relaxed"
+              data-testid={`phase-raw-content-${idx}`}
+            >
+              {json}
+            </pre>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
     </div>
   );
 }
