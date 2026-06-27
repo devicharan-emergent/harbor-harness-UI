@@ -44,23 +44,6 @@ function fmtSecs(secs) {
   return `${m}m ${s}s`;
 }
 
-// Resolve a user-openable replay URL from a browser_results entry.
-// The harness sometimes returns an internal `harness-eval.int.*` API URL
-// for replay phases (e.g. `https://harness-eval.int.apis.emergentagent.com/api/v1/replays/<id>`)
-// which 404s for end users. In that case fall back to the public Kernel
-// dashboard URL keyed by `kernel_session_id`. Returns '' when nothing
-// usable is available.
-function resolveReplayUrl(test) {
-  if (!test) return '';
-  const url = test.replay_url || '';
-  const isInternal = url.includes('harness-eval.int.') || url.includes('/api/v1/replays/');
-  if (url && !isInternal) return url;
-  if (test.kernel_session_id) {
-    return `https://dashboard.onkernel.com/browsers/${test.kernel_session_id}`;
-  }
-  return url; // best effort — may still be the internal URL if nothing else
-}
-
 export default function JobDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -950,21 +933,17 @@ export default function JobDetail() {
                                     </pre>
                                   </div>
                                 )}
-                                {(test.replay_url || test.kernel_session_id) && (() => {
-                                  const watchUrl = resolveReplayUrl(test);
-                                  if (!watchUrl) return null;
-                                  return (
-                                    <a
-                                      href={watchUrl}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="inline-flex items-center gap-1 text-[10px] text-blue-500 hover:text-blue-400 font-mono underline"
-                                      data-testid={`watch-replay-${phaseIdx}-${testIdx}`}
-                                    >
-                                      Watch Replay
-                                    </a>
-                                  );
-                                })()}
+                                {test.replay_url && (
+                                  <a
+                                    href={test.replay_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1 text-[10px] text-blue-500 hover:text-blue-400 font-mono underline"
+                                    data-testid={`watch-replay-${phaseIdx}-${testIdx}`}
+                                  >
+                                    Watch Replay
+                                  </a>
+                                )}
                               </div>
                             </CollapsibleContent>
                           </Collapsible>
@@ -1198,7 +1177,6 @@ export default function JobDetail() {
 
                       {browserResults.map((test, testIdx) => {
                         const isPassing = test.status === 'pass';
-                        const watchUrl = resolveReplayUrl(test);
                         const hasTestCounts = test.total_cases != null || test.pass_cases != null;
                         return (
                           <Collapsible key={testIdx}>
@@ -1258,9 +1236,9 @@ export default function JobDetail() {
                                     </pre>
                                   </div>
                                 )}
-                                {watchUrl && (
+                                {test.replay_url && (
                                   <a
-                                    href={watchUrl}
+                                    href={test.replay_url}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="inline-flex items-center gap-1 text-[10px] text-blue-500 hover:text-blue-400 font-mono underline"
