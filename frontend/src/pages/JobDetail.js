@@ -44,6 +44,23 @@ function fmtSecs(secs) {
   return `${m}m ${s}s`;
 }
 
+// Resolve a user-openable replay URL from a browser_results entry.
+// The harness sometimes returns an internal `harness-eval.int.*` API URL
+// for replay phases (e.g. `https://harness-eval.int.apis.emergentagent.com/api/v1/replays/<id>`)
+// which 404s for end users. In that case fall back to the public Kernel
+// dashboard URL keyed by `kernel_session_id`. Returns '' when nothing
+// usable is available.
+function resolveReplayUrl(test) {
+  if (!test) return '';
+  const url = test.replay_url || '';
+  const isInternal = url.includes('harness-eval.int.') || url.includes('/api/v1/replays/');
+  if (url && !isInternal) return url;
+  if (test.kernel_session_id) {
+    return `https://dashboard.onkernel.com/browsers/${test.kernel_session_id}`;
+  }
+  return url; // best effort — may still be the internal URL if nothing else
+}
+
 export default function JobDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -933,17 +950,21 @@ export default function JobDetail() {
                                     </pre>
                                   </div>
                                 )}
-                                {(test.replay_url || test.kernel_session_id) && (
-                                  <a
-                                    href={test.replay_url || `https://dashboard.onkernel.com/browsers/${test.kernel_session_id}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-1 text-[10px] text-blue-500 hover:text-blue-400 font-mono underline"
-                                    data-testid={`watch-replay-${phaseIdx}-${testIdx}`}
-                                  >
-                                    Watch Replay
-                                  </a>
-                                )}
+                                {(test.replay_url || test.kernel_session_id) && (() => {
+                                  const watchUrl = resolveReplayUrl(test);
+                                  if (!watchUrl) return null;
+                                  return (
+                                    <a
+                                      href={watchUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-1 text-[10px] text-blue-500 hover:text-blue-400 font-mono underline"
+                                      data-testid={`watch-replay-${phaseIdx}-${testIdx}`}
+                                    >
+                                      Watch Replay
+                                    </a>
+                                  );
+                                })()}
                               </div>
                             </CollapsibleContent>
                           </Collapsible>
@@ -1121,17 +1142,22 @@ export default function JobDetail() {
               </CardHeader>
               <CardContent className="space-y-5">
                 {replayPhases.map((phase, rIdx) => {
-                  const totalPass = (phase.browser_results || []).reduce((s, r) => s + (r.pass_cases || 0), 0);
-                  const totalFail = (phase.browser_results || []).reduce((s, r) => s + (r.fail_cases || 0), 0);
-                  const totalCases = (phase.browser_results || []).reduce((s, r) => s + (r.total_cases || 0), 0);
+                  const browserResults = phase.browser_results || [];
+                  // Some replay entries don't carry pass_cases/total_cases
+                  // (timeouts, harness errors) — flag the case so the header
+                  // shows a meaningful summary instead of "0/0 passed".
+                  const hasCounts = browserResults.some(r => r.total_cases != null || r.pass_cases != null);
+                  const totalPass = browserResults.reduce((s, r) => s + (r.pass_cases || 0), 0);
+                  const totalCases = browserResults.reduce((s, r) => s + (r.total_cases || 0), 0);
                   const passRate = totalCases > 0 ? (totalPass / totalCases) * 100 : 0;
+                  const failedCount = browserResults.filter(r => r.status === 'fail').length;
                   const replayLabel = phase.replay_index != null
                     ? `Replay ${phase.replay_index}`
                     : `Replay ${rIdx + 1}`;
                   return (
                     <div key={rIdx} className="space-y-3" data-testid={`replay-phase-${rIdx}`}>
                       <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <h4 className="text-xs font-semibold flex items-center gap-2">
+                        <h4 className="text-xs font-semibold flex items-center gap-2 flex-wrap">
                           {replayLabel}
                           {phase.browser_reward !== undefined && (
                             <Badge
@@ -1147,14 +1173,16 @@ export default function JobDetail() {
                               by {phase.triggered_by}
                             </span>
                           )}
-                          {phase.created_at && (
+                          {(phase.triggered_at || phase.created_at) && (
                             <span className="text-[10px] text-muted-foreground font-mono">
-                              · {formatDistanceToNow(new Date(phase.created_at), { addSuffix: true })}
+                              · {formatDistanceToNow(new Date(phase.triggered_at || phase.created_at), { addSuffix: true })}
                             </span>
                           )}
                         </h4>
                         <span className="text-[10px] text-muted-foreground font-mono">
-                          {totalPass}/{totalCases} passed
+                          {hasCounts
+                            ? `${totalPass}/${totalCases} passed`
+                            : (failedCount > 0 ? `${failedCount} failed` : 'no counts reported')}
                         </span>
                       </div>
                       <Progress value={passRate} className="h-1.5" />
@@ -1168,55 +1196,83 @@ export default function JobDetail() {
                         </div>
                       )}
 
-                      {(phase.browser_results || []).map((test, testIdx) => {
+                      {browserResults.map((test, testIdx) => {
                         const isPassing = test.status === 'pass';
+                        const watchUrl = resolveReplayUrl(test);
+                        const hasTestCounts = test.total_cases != null || test.pass_cases != null;
                         return (
-                          <div
-                            key={testIdx}
-                            className={`flex items-start gap-2 px-3 py-2 rounded-lg border text-xs ${
-                              isPassing
-                                ? 'border-emerald-500/20 bg-emerald-500/5'
-                                : 'border-red-500/20 bg-red-500/5'
-                            }`}
-                            data-testid={`replay-test-${rIdx}-${testIdx}`}
-                          >
-                            <div className="flex-shrink-0 mt-0.5">
-                              {isPassing ? (
-                                <CheckCircle className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                              ) : (
-                                <XCircle className="w-3.5 h-3.5 text-red-600 dark:text-red-400" />
-                              )}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="font-medium truncate" title={test.test_name}>
-                                  {test.test_name
-                                    ? (test.test_name.length > 80 ? test.test_name.substring(0, 80) + '…' : test.test_name)
-                                    : `Test ${testIdx + 1}`}
-                                </span>
-                                <Badge
-                                  variant="outline"
-                                  className={`text-[9px] font-mono flex-shrink-0 ${
-                                    isPassing ? 'text-emerald-600 border-emerald-500/30' : 'text-red-600 border-red-500/30'
-                                  }`}
-                                >
-                                  {test.pass_cases}/{test.total_cases}
-                                </Badge>
+                          <Collapsible key={testIdx}>
+                            <CollapsibleTrigger asChild>
+                              <button
+                                className={`w-full flex items-start gap-2 px-3 py-2 rounded-lg border text-left text-xs transition-colors hover:bg-accent/50 ${
+                                  isPassing
+                                    ? 'border-emerald-500/20 bg-emerald-500/5'
+                                    : 'border-red-500/20 bg-red-500/5'
+                                }`}
+                                data-testid={`replay-test-${rIdx}-${testIdx}`}
+                              >
+                                <div className="flex-shrink-0 mt-0.5">
+                                  {isPassing ? (
+                                    <CheckCircle className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                                  ) : (
+                                    <XCircle className="w-3.5 h-3.5 text-red-600 dark:text-red-400" />
+                                  )}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="font-medium truncate" title={test.test_name}>
+                                      {test.test_name
+                                        ? (test.test_name.length > 80 ? test.test_name.substring(0, 80) + '…' : test.test_name)
+                                        : `Test ${testIdx + 1}`}
+                                    </span>
+                                    <Badge
+                                      variant="outline"
+                                      className={`text-[9px] font-mono flex-shrink-0 ${
+                                        isPassing ? 'text-emerald-600 border-emerald-500/30' : 'text-red-600 border-red-500/30'
+                                      }`}
+                                    >
+                                      {hasTestCounts
+                                        ? `${test.pass_cases ?? 0}/${test.total_cases ?? 0}`
+                                        : (test.error_category || test.status || '—')}
+                                    </Badge>
+                                  </div>
+                                </div>
+                                <ChevronDown className="w-3 h-3 text-muted-foreground flex-shrink-0 mt-0.5" />
+                              </button>
+                            </CollapsibleTrigger>
+                            <CollapsibleContent>
+                              <div className="ml-5 mt-1 space-y-2 px-3 py-2 rounded-lg bg-muted/40 text-xs">
+                                {test.test_name && (
+                                  <div>
+                                    <p className="text-[10px] text-muted-foreground uppercase font-semibold tracking-wider">Test Steps</p>
+                                    <pre className="font-mono text-foreground/70 whitespace-pre-wrap break-words mt-1 leading-relaxed">
+                                      {test.test_name}
+                                    </pre>
+                                  </div>
+                                )}
+                                {test.details && (
+                                  <div>
+                                    <p className="text-[10px] text-muted-foreground uppercase font-semibold tracking-wider">Details</p>
+                                    <pre className="font-mono text-foreground/70 whitespace-pre-wrap break-words mt-1 leading-relaxed" data-testid={`replay-test-details-${rIdx}-${testIdx}`}>
+                                      {test.details}
+                                    </pre>
+                                  </div>
+                                )}
+                                {watchUrl && (
+                                  <a
+                                    href={watchUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1 text-[10px] text-blue-500 hover:text-blue-400 font-mono underline"
+                                    data-testid={`replay-watch-${rIdx}-${testIdx}`}
+                                  >
+                                    Watch replay
+                                    <ExternalLink className="w-2.5 h-2.5" />
+                                  </a>
+                                )}
                               </div>
-                              {test.replay_url && (
-                                <a
-                                  href={test.replay_url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1 text-[10px] text-blue-500 hover:text-blue-400 font-mono underline mt-1"
-                                  data-testid={`replay-watch-${rIdx}-${testIdx}`}
-                                >
-                                  Watch replay
-                                  <ExternalLink className="w-2.5 h-2.5" />
-                                </a>
-                              )}
-                            </div>
-                          </div>
+                            </CollapsibleContent>
+                          </Collapsible>
                         );
                       })}
 

@@ -716,20 +716,30 @@ export default function EvalRuns() {
                           <div className="flex-1 min-w-0">
                             {(() => {
                               const isTA = isTestingAgentJob(job);
-                              const label = isTA ? getTestingAgentInstanceName(job) : job.problem;
+                              // Use the full `job.problem` for both types so testing-agent rows
+                              // share the same `<type>/<instance>` shape as scratch_bench_phased.
+                              // For datasets created with the wizard split this is
+                              // `testing_agent_bench/<slug>`; for legacy rows where the slug
+                              // *is* the prod UUID the prefix is still meaningful.
+                              const label = job.problem;
                               const prod = isTA ? getTestingAgentProdJobId(job) : '';
+                              // Hide the redundant `prod:` sub-label when the slug after the
+                              // prefix is already the same UUID (legacy rows where instance_id
+                              // was the prod_job_id) — saves a line of duplicated info.
+                              const slug = isTA ? getTestingAgentInstanceName(job) : '';
+                              const showProdLine = isTA && prod && prod !== slug;
                               return (
                                 <>
                                   <div className="font-mono font-medium truncate" data-testid={`job-label-${job.id}`}>
                                     {label || '(unnamed)'}
                                   </div>
-                                  {isTA && (
+                                  {showProdLine && (
                                     <div
                                       className="text-[10px] font-mono text-blue-700 dark:text-blue-300 truncate"
-                                      title={prod ? `prod_job_id: ${prod}` : 'No prod_job_id stamped on this job'}
+                                      title={`prod_job_id: ${prod}`}
                                       data-testid={`job-prod-${job.id}`}
                                     >
-                                      prod: {prod || '—'}
+                                      prod: {prod}
                                     </div>
                                   )}
                                 </>
