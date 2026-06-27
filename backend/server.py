@@ -1873,7 +1873,14 @@ async def delete_dataset_view(view_id: str, request: Request):
 
 @api_router.get("/eval/stats")
 async def proxy_eval_stats():
-    """Proxy: Get eval queue stats - transforms array to object format"""
+    """Proxy: Get eval queue stats - transforms array to object format.
+
+    The upstream `/api/v1/stats` endpoint doesn't (yet) include the
+    transient `replaying` status in its aggregate. To keep the dashboard
+    counters honest we always include a `replaying` key — populated from
+    upstream if it ships the value, otherwise back-filled by a quick
+    `/api/v1/jobs?status=replaying` count call.
+    """
     try:
         async with httpx.AsyncClient(timeout=30.0) as hclient:
             response = await hclient.get(f"{EVAL_API_BASE}/api/v1/stats")
@@ -1884,9 +1891,10 @@ async def proxy_eval_stats():
                 "queued": 0,
                 "generating": 0,
                 "running": 0,
+                "replaying": 0,
                 "completed": 0,
                 "failed": 0,
-                "cancelled": 0
+                "cancelled": 0,
             }
 
             if "stats" in data:
@@ -1895,6 +1903,28 @@ async def proxy_eval_stats():
                     count = item.get("count", 0)
                     if status in stats_obj:
                         stats_obj[status] = count
+
+            # Back-fill `replaying` if upstream didn't ship it in the
+            # aggregate. We page through up to 200 replaying jobs (way
+            # more than realistic concurrency) and count what we get.
+            if stats_obj["replaying"] == 0:
+                try:
+                    jobs_resp = await hclient.get(
+                        f"{EVAL_API_BASE}/api/v1/jobs",
+                        params={"status": "replaying", "limit": 200},
+                    )
+                    if jobs_resp.status_code == 200:
+                        jobs_data = jobs_resp.json() or {}
+                        # Accept either total/count fields or fall back to
+                        # the length of the returned jobs list.
+                        if isinstance(jobs_data.get("total"), int):
+                            stats_obj["replaying"] = jobs_data["total"]
+                        elif isinstance(jobs_data.get("count"), int):
+                            stats_obj["replaying"] = jobs_data["count"]
+                        elif isinstance(jobs_data.get("jobs"), list):
+                            stats_obj["replaying"] = len(jobs_data["jobs"])
+                except Exception:
+                    pass  # best-effort — keep 0 if the fallback fails
 
             return stats_obj
     except httpx.HTTPError as e:
