@@ -237,6 +237,64 @@ function ProblemPreview({ ds }) {
   );
 }
 
+// Surfaces the active verifier (browser or judge) that will be sent with
+// the run. A "custom" config (is_default === false) shows its model + an
+// expandable prompt; otherwise we note the harness default is used.
+function VerifierReview({ label, config, testId }) {
+  const [showPrompt, setShowPrompt] = useState(false);
+  const custom = config && config.is_default === false;
+  const model = config?.model;
+  const prompt = config?.prompt;
+  if (!config) return null;
+  return (
+    <div className="rounded-md border bg-muted/20 px-3 py-2 text-xs space-y-1.5" data-testid={testId}>
+      <div className="flex items-center gap-2">
+        <span className="font-semibold">{label}</span>
+        {custom ? (
+          <Badge variant="outline" className="text-[9px] bg-amber-500/10 text-amber-600 border-amber-500/20">custom — sent with run</Badge>
+        ) : (
+          <Badge variant="outline" className="text-[9px] text-muted-foreground">harness default</Badge>
+        )}
+      </div>
+      <div className="flex items-center gap-1.5">
+        <span className="text-muted-foreground">Model:</span>
+        <Badge variant="secondary" className="font-mono text-[10px]" data-testid={`${testId}-model`}>
+          {model || '—'}
+        </Badge>
+      </div>
+      <div className="flex items-start gap-1.5">
+        <span className="text-muted-foreground">Prompt:</span>
+        {prompt ? (
+          <div className="min-w-0 flex-1">
+            <button
+              type="button"
+              onClick={() => setShowPrompt(v => !v)}
+              className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-1"
+              data-testid={`${testId}-prompt-toggle`}
+            >
+              view · {prompt.length.toLocaleString()} chars
+              <ChevronDown className={`w-3 h-3 transition-transform ${showPrompt ? 'rotate-180' : ''}`} />
+            </button>
+            {showPrompt && (
+              <pre className="mt-1 max-h-48 overflow-y-auto whitespace-pre-wrap break-words rounded bg-background border p-2 font-mono text-[10px] text-foreground/80" data-testid={`${testId}-prompt-text`}>
+                {prompt}
+              </pre>
+            )}
+          </div>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        )}
+      </div>
+      {!custom && (
+        <p className="text-[10px] text-muted-foreground">
+          This is the default config — the harness applies its built-in {label.toLowerCase()}; these values are not sent explicitly.
+        </p>
+      )}
+    </div>
+  );
+}
+
+
 // ── Main Modal ────────────────────────────────────────────────────────
 // `initialEph` + `initialAgentName` are used by deep-link entry points
 // (e.g. Cortex Agents → "Open in eval"). When set, the modal opens with
@@ -1584,6 +1642,15 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                   </div>
                 )}
               </div>
+
+              {/* Active verifier (browser / judge) that will be sent. */}
+              {isTestingAgentMode ? (
+                <VerifierReview label="Judge verifier" config={judgeConfig} testId="review-judge-verifier" />
+              ) : (
+                selectedProblems.some(p => p.dataset_type === 'scratch_bench_phased') && (
+                  <VerifierReview label="Browser verifier" config={scratchVerifier} testId="review-browser-verifier" />
+                )
+              )}
 
               <Card>
                 <CardContent className="pt-4 space-y-3">
