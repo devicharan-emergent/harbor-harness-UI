@@ -19,7 +19,7 @@
   ],
   "updated_files": [],
   "success_rate": { "backend": "N/A (frontend-only this iter)", "frontend": "100% (all 11 spec items verified)" },
-  "test_credentials": "localStorage acm_session_token='pw_emergent_gate_post' on https://ui-preview-debug.internal.preview.emergentagent.com (user_id 0ee59a27-db9c-4647-aeee-f72173fcd757).",
+  "test_credentials": "localStorage acm_session_token='pw_emergent_gate_post' on https://replay-browser-tests.internal.preview.emergentagent.com (user_id 0ee59a27-db9c-4647-aeee-f72173fcd757).",
   "seed_data_creation": "Created 2 transient eval runs as side-effects of batched-submit tests: TEST_iter24_dlg (2-job testing_agent_bench) and TEST_iter24_scratch (1-job scratch_bench). Judge config left in DEFAULT state at end of run (final POST /api/eval/judge-config/reset confirmed is_default:true).",
   "retest_needed": false,
   "should_main_agent_self_test": false,

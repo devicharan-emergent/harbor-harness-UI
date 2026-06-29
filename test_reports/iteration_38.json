@@ -1,5 +1,5 @@
 {
-  "summary": "REGRESSION CONFIRMATION — RunEvalModal testing_agent_bench submissions now ALWAYS stamp a top-level `agent_name` on the POST to /api/eval/testing-agent-evals. Verified end-to-end in the PREVIEW environment (https://ui-preview-debug.internal.preview.emergentagent.com) via Playwright request-interception. All three scenarios pass: (1) no override — derives from dataset's attributes.agent_name; (2) explicit override — top-level + items[].agent_name both equal the override; (3) new group row on /evals renders the agent_name as a blue badge.",
+  "summary": "REGRESSION CONFIRMATION — RunEvalModal testing_agent_bench submissions now ALWAYS stamp a top-level `agent_name` on the POST to /api/eval/testing-agent-evals. Verified end-to-end in the PREVIEW environment (https://replay-browser-tests.internal.preview.emergentagent.com) via Playwright request-interception. All three scenarios pass: (1) no override — derives from dataset's attributes.agent_name; (2) explicit override — top-level + items[].agent_name both equal the override; (3) new group row on /evals renders the agent_name as a blue badge.",
   "backend_issues": { "critical": [], "minor": [] },
   "frontend_issues": {
     "ui_bugs": [],

@@ -22,7 +22,7 @@ import requests
 
 BASE_URL = (
     os.environ.get("REACT_APP_BACKEND_URL")
-    or "https://ui-preview-debug.internal.preview.emergentagent.com"
+    or "https://replay-browser-tests.internal.preview.emergentagent.com"
 ).rstrip("/")
 TOKEN = "pw_emergent_gate_post"
 PLACEHOLDER = "agent_set_at_runtime"

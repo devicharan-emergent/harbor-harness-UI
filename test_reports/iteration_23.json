@@ -14,7 +14,7 @@
   ],
   "updated_files": ["/app/backend/tests/test_judge_config.py"],
   "success_rate": { "backend": "100% (6/6)", "frontend": "100% (all 14 spec items verified)" },
-  "test_credentials": "localStorage acm_session_token='pw_emergent_gate_post' on https://ui-preview-debug.internal.preview.emergentagent.com (user_id 0ee59a27-db9c-4647-aeee-f72173fcd757, TEST_pw_user@emergent.com).",
+  "test_credentials": "localStorage acm_session_token='pw_emergent_gate_post' on https://replay-browser-tests.internal.preview.emergentagent.com (user_id 0ee59a27-db9c-4647-aeee-f72173fcd757, TEST_pw_user@emergent.com).",
   "seed_data_creation": "None — used the 2 existing testing_agent_bench fixtures returned by the upstream API; created 3 transient eval runs (TEST_iter23_judge / TEST_iter23_def2 / TEST_iter23_scratch) as a side-effect of batch-submit tests. Judge config left in DEFAULT state at end of run.",
   "retest_needed": false,
   "should_main_agent_self_test": false,

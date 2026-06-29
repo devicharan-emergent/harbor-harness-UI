@@ -34,7 +34,7 @@
     "backend": "100% (8/8 pytest)",
     "frontend": "92% — all /evals group/edit/comment assertions PASS (11/11). JobDetail extras render FAILS due to ReferenceError (1/1 critical failure)."
   },
-  "test_credentials": "localStorage.acm_session_token=pw_emergent_gate_post; user_id=0ee59a27-db9c-4647-aeee-f72173fcd757; email=TEST_pw_user@emergent.com",
+  "test_credentials": "localStorage.acm_session_token=pw_emergent_gate_post; user_id=replay-browser-tests; email=TEST_pw_user@emergent.com",
   "seed_data_creation": "None — used existing harness group `tst-glm-2026-06-25T12-17-49-820Z-1qbj` (which already had group_name='tst-glm' and a non-empty comment) for visual + PATCH tests. Restored original comment via direct API after the optimistic-update test.",
   "retest_needed": true,
   "main_agent_can_self_test": true,

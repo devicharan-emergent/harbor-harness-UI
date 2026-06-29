@@ -35,7 +35,7 @@
     "backend": "0% (harness items[] endpoint failing)",
     "frontend": "100% (request body shape verified correct)"
   },
-  "test_credentials": "localStorage acm_session_token = 'pw_emergent_gate_post' on https://ui-preview-debug.internal.preview.emergentagent.com (user_id 0ee59a27-db9c-4647-aeee-f72173fcd757, email TEST_pw_user@emergent.com)",
+  "test_credentials": "localStorage acm_session_token = 'pw_emergent_gate_post' on https://replay-browser-tests.internal.preview.emergentagent.com (user_id 0ee59a27-db9c-4647-aeee-f72173fcd757, email TEST_pw_user@emergent.com)",
   "seed_data_creation": "None. Used existing testing_agent_bench fixtures: testing_agent_bench/b16eab51-6ef8-45d3-895a-9331f65437a1 and testing_agent_bench/e6151bcf-108f-4022-8c17-0500fc979239 (both have attributes.agent_name=full_stack_app_builder_cloud_v8_sonnet_4_5, model_name=claude-sonnet-4-5).",
   "retest_needed": true,
   "should_main_agent_self_test": false,

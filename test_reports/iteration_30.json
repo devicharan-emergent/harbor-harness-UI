@@ -40,7 +40,7 @@
   ],
   "updated_files": [],
   "success_rate": {"backend": "100% (smoke covered by main-agent curl already)", "frontend": "60% — Mine-only + interceptor BUG-fix verified; comments create/delete blocked by missing auth"},
-  "test_credentials": "localStorage acm_session_token=pw_emergent_gate_post  (user_id=0ee59a27-db9c-4647-aeee-f72173fcd757, email TEST_pw_user@emergent.com)",
+  "test_credentials": "localStorage acm_session_token=pw_emergent_gate_post  (user_id=replay-browser-tests, email TEST_pw_user@emergent.com)",
   "seed_data_creation": "None. Used existing seeded session + existing prod groups (e.g. TEST_iter21_grp_2_7b5441f4-prod).",
   "retest_needed": true,
   "main_agent_can_self_test": true,

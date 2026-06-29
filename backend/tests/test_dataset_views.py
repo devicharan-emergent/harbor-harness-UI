@@ -15,7 +15,7 @@ import pytest
 import requests
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/") or \
-           "https://ui-preview-debug.internal.preview.emergentagent.com"
+           "https://replay-browser-tests.internal.preview.emergentagent.com"
 VIEWS_URL = f"{BASE_URL}/api/eval/dataset-views"
 TOKEN = os.environ.get("ACM_TEST_TOKEN", "pw_emergent_gate_post")
 

@@ -14,7 +14,7 @@
     "/app/test_reports/pytest/pytest_iter28.xml"
   ],
   "action_items": [
-    "Minor doc-only nit: the review request copy uses the literal URL 'https://ui-preview-debug.preview.emergentagent.com' as a required token, but the actual implementation correctly uses the {preview_url} substitution placeholder (validated in backend and frontend). Update the request wording to '{preview_url}' to avoid future confusion."
+    "Minor doc-only nit: the review request copy uses the literal URL 'https://replay-browser-tests.preview.emergentagent.com' as a required token, but the actual implementation correctly uses the {preview_url} substitution placeholder (validated in backend and frontend). Update the request wording to '{preview_url}' to avoid future confusion."
   ],
   "critical_code_review_comments": [
     "BENCH_VERIFIER_DEFAULTS + _validate_verifier_prompt + _read_verifier_doc cleanly generalize the singleton config — legacy alias endpoints are thin shims, no code duplication.",

@@ -19,7 +19,7 @@
   ],
   "updated_files": [],
   "success_rate": { "backend": "N/A (frontend-only this iter)", "frontend": "100% (15/15 spec items verified)" },
-  "test_credentials": "localStorage acm_session_token='pw_emergent_gate_post' on https://ui-preview-debug.internal.preview.emergentagent.com (user 0ee59a27-db9c-4647-aeee-f72173fcd757 / TEST_pw_user@emergent.com).",
+  "test_credentials": "localStorage acm_session_token='pw_emergent_gate_post' on https://replay-browser-tests.internal.preview.emergentagent.com (user 0ee59a27-db9c-4647-aeee-f72173fcd757 / TEST_pw_user@emergent.com).",
   "seed_data_creation": "Created transient eval batches as side-effects of submit tests: TEST_iter25_multirun_<ts> (6 testing_agent_bench jobs across 3 runs), TEST_iter25_single_<ts> (2 testing_agent_bench jobs, single run), TEST_iter25_sb_<ts> (4 scratch_bench_phased jobs across 2 runs). One additional aborted batch TEST_iter25_failmid* with route-mocked 500 — only run 1 reached harness (2 jobs), run 2 was intercepted client-side. No data cleanup needed; jobs are isolated to TEST_ prefix.",
   "retest_needed": false,
   "should_main_agent_self_test": false,

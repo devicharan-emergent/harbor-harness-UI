@@ -73,7 +73,7 @@
   ],
   "updated_files": [],
   "success_rate": {"backend": "100% (3/3 deleted routes return 404, mongo collection dropped)", "frontend": "100% on removal asserts; no-regression POST-body verified via code review only"},
-  "test_credentials": "localStorage.acm_session_token=pw_emergent_gate_post; user_id=0ee59a27-db9c-4647-aeee-f72173fcd757; email=TEST_pw_user@emergent.com",
+  "test_credentials": "localStorage.acm_session_token=pw_emergent_gate_post; user_id=replay-browser-tests; email=TEST_pw_user@emergent.com",
   "seed_data_creation": "None",
   "retest_needed": false,
   "main_agent_can_self_test": true,

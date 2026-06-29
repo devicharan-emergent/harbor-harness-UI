@@ -12,7 +12,7 @@ import requests
 
 BASE_URL = os.environ.get(
     "REACT_APP_BACKEND_URL",
-    "https://ui-preview-debug.internal.preview.emergentagent.com",
+    "https://replay-browser-tests.internal.preview.emergentagent.com",
 ).rstrip("/")
 TOKEN = "pw_emergent_gate_post"
 USER_ID = "0ee59a27-db9c-4647-aeee-f72173fcd757"
