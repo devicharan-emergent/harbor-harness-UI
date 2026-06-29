@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { Loader2, Clock, Cpu, CheckCircle, XCircle, Ban, ActivitySquare, RefreshCw, Plus, ChevronDown, ChevronRight, Layers, ExternalLink, Timer, Pencil, MessageSquare } from 'lucide-react';
+import { Loader2, Clock, Cpu, CheckCircle, XCircle, Ban, ActivitySquare, RefreshCw, Plus, ChevronDown, ChevronRight, Layers, ExternalLink, Timer, Pencil, MessageSquare, BarChart3, Wrench } from 'lucide-react';
 import { formatDateTime } from '@/lib/utils';
 import { Progress } from '@/components/ui/progress';
 import { toast } from 'sonner';
@@ -589,6 +589,11 @@ export default function EvalRuns() {
             const meta = !isUngrouped ? (groupMeta[group.groupId] || {}) : {};
             const displayTitle = meta.group_name || group.groupId;
             const groupComment = meta.comment || '';
+            // Redash comparison dashboards, pre-filled with this group as
+            // group_set_1 (moved here from the Job Detail Quick Links).
+            const groupArr = encodeURIComponent(JSON.stringify([group.groupId]));
+            const redashSummaryUrl = `https://redash.internal-apps.emergentagent.com/dashboards/730?p_agent_name=All&p_group_set_1=${groupArr}&p_model=All`;
+            const redashToolUrl = `https://redash.internal-apps.emergentagent.com/dashboards/731?p_agent_name=All&p_group_set_1=${groupArr}&p_model=All&p_tool=execute_bash&p_window_end=All`;
 
             return (
               <Collapsible key={group.groupId} open={Boolean(isOpen)} onOpenChange={() => toggleGroup(group.groupId)}>
@@ -639,6 +644,30 @@ export default function EvalRuns() {
                                   title="Open group detail in new tab"
                                 >
                                   <ExternalLink className="w-3 h-3" />
+                                </a>
+                                <a
+                                  href={redashSummaryUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="inline-flex items-center justify-center h-6 w-6 rounded-md text-muted-foreground hover:text-blue-600 dark:hover:text-blue-400 hover:bg-accent flex-shrink-0"
+                                  data-testid={`group-redash-summary-${group.groupId}`}
+                                  aria-label="Open Eval Data Comparison (Redash dashboard 730)"
+                                  title="Eval Data Comparison (Redash 730) — this group preselected"
+                                >
+                                  <BarChart3 className="w-3 h-3" />
+                                </a>
+                                <a
+                                  href={redashToolUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="inline-flex items-center justify-center h-6 w-6 rounded-md text-muted-foreground hover:text-blue-600 dark:hover:text-blue-400 hover:bg-accent flex-shrink-0"
+                                  data-testid={`group-redash-tools-${group.groupId}`}
+                                  aria-label="Open Eval Tool-Usage Comparison (Redash dashboard 731)"
+                                  title="Eval Tool-Usage Comparison (Redash 731) — this group preselected"
+                                >
+                                  <Wrench className="w-3 h-3" />
                                 </a>
                               </>
                             )}
@@ -785,6 +814,21 @@ export default function EvalRuns() {
                           <span className="text-[10px] text-muted-foreground flex-shrink-0 w-24 text-right">
                             {formatDateTime(job.created_at)}
                           </span>
+
+                          {job.cortex_job_id && (
+                            <a
+                              href={`https://app.emergent.sh/home?job_id=${job.cortex_job_id}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="flex items-center gap-1 flex-shrink-0 text-[10px] text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300 underline-offset-2 hover:underline whitespace-nowrap"
+                              data-testid={`eval-job-emergent-link-${job.id}`}
+                              title="Open the Emergent job in a new tab"
+                            >
+                              <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                              View Emergent Job
+                            </a>
+                          )}
 
                           <a
                             href={`/evals/${job.id}`}

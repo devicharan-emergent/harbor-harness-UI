@@ -1,0 +1,31 @@
+{
+  "summary": "Iteration 43 — Verified 5 Evals-area UI changes via Playwright on the public preview URL. ALL 5 scenarios PASS. RunEvalModal Step 2 has Model/Comment removed and an Extra Options collapsible with 3 controls; Evals page group cards expose group-redash-summary/tools icon links pointing to dashboards 730/731 with p_group_set_1 containing the group id; expanded job rows and GroupDetailPage job rows expose 'View Emergent Job' links to app.emergent.sh/home?job_id=<cortex>; JobDetail Quick Links exposes quicklinks-cortex + quicklinks-replay-eval (correct hrefs) and the OLD quicklinks-redash-summary/tools are gone. stopPropagation verified on every new icon-link.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/evals/groups/{groupId}/jobs and GET /api/evals/aggregate?group_id=...", "issue": "Returns 500 for some groups (e.g. 976726de-..., e5b2e5ab-..., 31f422e4-... aggregate). Pre-existing — toggleGroup logs AxiosError in console but UI degrades gracefully (group still expands once a healthy group is tried). NOT introduced by this iteration's UI changes."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "RunEvalModal.js:1409-1456 — Extra Options Collapsible is correctly gated by !isTestingAgentMode and contains exactly the 3 expected toggles (Headed browser / Force rebuild / Phase breakpoint). data-testid='extra-options-content' is rendered by the Radix Collapsible so its hidden=true / data-state=closed are toggled correctly. Old eval-exp-model-name and eval-group-comment testids are confirmed absent in Step 2.",
+    "EvalRuns.js:648-671 — Both icon anchors use onClick={(e)=>e.stopPropagation()} AND target='_blank'+rel='noopener noreferrer'. Verified clicking them does NOT toggle the parent Collapsible — job rows count remained 0 before/after. URL-encoded p_group_set_1 array correctly carries the group id.",
+    "EvalRuns.js:825 — eval-job-emergent-link only renders when job.cortex_job_id is truthy (verified by groups where some/all rows lacked the link). Click does not propagate to the SPA row navigation handler.",
+    "GroupDetailPage.js:296 — group-job-emergent-link is identical to the EvalRuns variant; href and target verified, and the parent row's onClick navigation was not triggered.",
+    "JobDetail.js:1493-1506 — quicklinks-cortex correctly relabeled 'View Emergent Job' (text matched). quicklinks-replay-eval href exactly = 'https://eval-ui-replay.internal.preview.emergentagent.com/?job_id=<cortex>&env=prod&autoload=1' as specified. Old quicklinks-redash-summary/tools are GONE (DOM-confirmed)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only)", "frontend": "100% (5/5 scenarios)"},
+  "test_credentials": "localStorage acm_session_token='pw_emergent_gate_post' (also passed as ?access_token=). User TEST_pw_user@emergent.com per /app/memory/test_credentials.md.",
+  "seed_data_creation": "None. Used existing data — group 31f422e4-0125-43ac-bbc5-9cc37cc3fc71 ('test_123 (run 2 of 2)') with 1 job 9c2131f1-fc60-44ae-a907-2d2b89ed2136 having cortex_job_id 0727ae3d-c50b-4f77-b81a-320f837a0851.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All 4 Evals-area UI changes (Extra Options modal collapse, group-card redash icons, eval-job emergent link on EvalRuns + GroupDetail, JobDetail Quick Links overhaul) are working as specified. Live evidence: (1) Modal Step 2 testids = ['eval-step-1','eval-step-2','eval-step-3','eval-group-name','eval-agent-name-override','eval-num-runs','extra-options-trigger','extra-options-content','eval-cancel-btn','eval-back-btn','eval-next-step'] — confirms NO eval-exp-model-name / NO eval-group-comment. (2) Collapsible state-closed by default (height=0, hidden=true, data-state=closed). (3) Expanded labels = ['Headed browser','Force rebuild','Phase breakpoint'] — exactly 3. (4) Toggling breakpoint-toggle reveals breakpoint-duration input. (5) Group-card redash links produce hrefs like https://redash.internal-apps.emergentagent.com/dashboards/730?p_agent_name=All&p_group_set_1=%5B%22<gid>%22%5D&p_model=All (and /731 with extra p_tool/p_window_end params). (6) eval-job-emergent-link & group-job-emergent-link both href=https://app.emergent.sh/home?job_id=<cortex> target=_blank. Clicks on all 4 new link types verified non-propagating (no SPA navigation, no group expansion). (7) JobDetail /evals/<jobId> Quick Links has 'View Emergent Job' + 'Replay Eval', both target=_blank with the exact hrefs requested; quicklinks-redash-summary and quicklinks-redash-tools are absent from DOM.",
+  "rca of the issue": "N/A — verification iteration only. Some backend toggleGroup calls return 500 for older/orphan groups, which is unrelated to this iteration and was observed before; the UI handles it gracefully by leaving the row collapsed."
+}

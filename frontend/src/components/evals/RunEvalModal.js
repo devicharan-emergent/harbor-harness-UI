@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Card, CardContent } from '@/components/ui/card';
@@ -18,6 +17,7 @@ import { agentApi } from '@/lib/api';
 import { useCreatedBy } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { Loader2, Rocket, FileText, Search, ChevronRight, Check, AlertCircle, X, ChevronDown } from 'lucide-react';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { parseApiError } from '@/lib/errorUtils';
 import { useEnv } from '@/components/layout/EnvSwitcher';
 import { EphPicker } from '@/components/cortex/EphPicker';
@@ -1410,68 +1410,48 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 <>
               <Separator />
 
-              {/* Model name (non-testing-agent flow). Searchable preset
-                  combobox; free text commits via the "Use ‘…’" row. */}
-              <div>
-                <Label className="text-sm font-semibold">Model</Label>
-                <p className="text-[10px] text-muted-foreground mt-0.5 mb-1.5">
-                  Leave blank to use the agent&apos;s default model.
-                </p>
-                <ModelNamePicker
-                  value={expModelName}
-                  onChange={setExpModelName}
-                  options={modelOptions}
-                  testId="eval-exp-model-name"
-                />
-              </div>
-
-              {/* Group comment — small free-text describing what this run
-                  batch is testing. Stored on the eval-run-group, not in
-                  experiments.config. */}
-              <div>
-                <Label className="text-sm font-semibold">Comment <span className="text-muted-foreground font-normal">(optional)</span></Label>
-                <Textarea
-                  value={groupComment}
-                  onChange={e => setGroupComment(e.target.value)}
-                  rows={2}
-                  placeholder="What is this batch testing?"
-                  className="text-xs resize-none mt-1.5"
-                  data-testid="eval-group-comment"
-                />
-              </div>
-
-              {/* Run-behaviour toggles — formerly nested under Resources.
-                  Resources sizing UI was retired; defaults are locked in
-                  at module top (DEFAULT_CPUS / MEMORY / STORAGE). */}
-              <div className="flex items-center gap-6">
-                <div className="flex items-center gap-2">
-                  <Switch checked={headed} onCheckedChange={setHeaded} id="headed" />
-                  <Label htmlFor="headed" className="text-xs cursor-pointer">Headed browser</Label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Switch checked={forceBuild} onCheckedChange={setForceBuild} id="forceBuild" />
-                  <Label htmlFor="forceBuild" className="text-xs cursor-pointer">Force rebuild</Label>
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2">
-                  <Switch checked={breakpointEnabled} onCheckedChange={setBreakpointEnabled} id="breakpoint" data-testid="breakpoint-toggle" />
-                  <Label htmlFor="breakpoint" className="text-xs cursor-pointer">Phase breakpoint</Label>
-                </div>
-                {breakpointEnabled && (
-                  <div className="flex items-center gap-1.5">
-                    <Input
-                      type="number"
-                      value={breakpointMins}
-                      onChange={e => setBreakpointMins(Math.max(1, Number(e.target.value)))}
-                      min={1}
-                      className="w-16 h-7 text-xs font-mono"
-                      data-testid="breakpoint-duration"
-                    />
-                    <span className="text-[10px] text-muted-foreground">min per phase</span>
+              {/* Extra Options — advanced run-behaviour toggles, collapsed
+                  by default to keep the config step lean. */}
+              <Collapsible className="border border-border/60 rounded-md">
+                <CollapsibleTrigger
+                  className="group flex w-full items-center justify-between px-3 py-2 text-sm font-semibold"
+                  data-testid="extra-options-trigger"
+                >
+                  Extra Options
+                  <ChevronDown className="w-4 h-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+                </CollapsibleTrigger>
+                <CollapsibleContent className="px-3 pb-3 pt-1 space-y-3" data-testid="extra-options-content">
+                  <div className="flex items-center gap-6">
+                    <div className="flex items-center gap-2">
+                      <Switch checked={headed} onCheckedChange={setHeaded} id="headed" />
+                      <Label htmlFor="headed" className="text-xs cursor-pointer">Headed browser</Label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Switch checked={forceBuild} onCheckedChange={setForceBuild} id="forceBuild" />
+                      <Label htmlFor="forceBuild" className="text-xs cursor-pointer">Force rebuild</Label>
+                    </div>
                   </div>
-                )}
-              </div>
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2">
+                      <Switch checked={breakpointEnabled} onCheckedChange={setBreakpointEnabled} id="breakpoint" data-testid="breakpoint-toggle" />
+                      <Label htmlFor="breakpoint" className="text-xs cursor-pointer">Phase breakpoint</Label>
+                    </div>
+                    {breakpointEnabled && (
+                      <div className="flex items-center gap-1.5">
+                        <Input
+                          type="number"
+                          value={breakpointMins}
+                          onChange={e => setBreakpointMins(Math.max(1, Number(e.target.value)))}
+                          min={1}
+                          className="w-16 h-7 text-xs font-mono"
+                          data-testid="breakpoint-duration"
+                        />
+                        <span className="text-[10px] text-muted-foreground">min per phase</span>
+                      </div>
+                    )}
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
                 </>
               )}
             </div>

@@ -286,6 +286,20 @@ function JobRow({ job, selectable, selected, onToggleSelect }) {
         </span>
         <ExternalLink className="w-3 h-3 text-muted-foreground/40 flex-shrink-0" />
       </Link>
+      {job.cortex_job_id && (
+        <a
+          href={`https://app.emergent.sh/home?job_id=${job.cortex_job_id}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="flex items-center gap-1 flex-shrink-0 text-[10px] text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300 underline-offset-2 hover:underline whitespace-nowrap"
+          data-testid={`group-job-emergent-link-${job.id}`}
+          title="Open the Emergent job in a new tab"
+        >
+          <ExternalLink className="w-3 h-3 flex-shrink-0" />
+          View Emergent Job
+        </a>
+      )}
     </div>
   );
 }

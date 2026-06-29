@@ -1454,21 +1454,8 @@ export default function JobDetail() {
             const previewUrl = previewReady ? meta.preview_url : null;
             const temporalUrl = meta.temporal_url;
             const cortexJobId = meta.cortex_job_id || job.cortex_job_id;
-            const groupRunId = job.group_run_id || job.group_id;
 
-            // Pre-fill `p_group_set_1` on the Redash comparison dashboards
-            // with this job's group_run_id; leave p_group_set_2 unset so
-            // the user picks the comparison group on Redash side.
-            // `JSON.stringify(["x"])` → `["x"]` → URL-encoded for Redash.
-            const buildRedashUrl = (dashId, extraParams = '') => {
-              if (!groupRunId) return null;
-              const groupArr = encodeURIComponent(JSON.stringify([groupRunId]));
-              return `https://redash.internal-apps.emergentagent.com/dashboards/${dashId}?p_agent_name=All&p_group_set_1=${groupArr}&p_model=All${extraParams}`;
-            };
-            const redashSummaryUrl = buildRedashUrl(730);
-            const redashToolUrl = buildRedashUrl(731, '&p_tool=execute_bash&p_window_end=All');
-
-            if (!previewUrl && !temporalUrl && !cortexJobId && !redashSummaryUrl) return null;
+            if (!previewUrl && !temporalUrl && !cortexJobId) return null;
             return (
               <Card>
                 <CardHeader className="pb-2">
@@ -1504,37 +1491,23 @@ export default function JobDetail() {
                       rel="noopener noreferrer"
                       className="flex items-center gap-2 text-xs text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300 underline-offset-2 hover:underline"
                       data-testid="quicklinks-cortex"
-                      title="Open the Cortex job in Emergent in a new tab"
+                      title="Open the Emergent job in a new tab"
                     >
                       <ExternalLink className="w-3 h-3 flex-shrink-0" />
-                      <span className="text-muted-foreground">Cortex:</span>
-                      <span className="font-mono text-[10px] break-all">{cortexJobId}</span>
+                      View Emergent Job
                     </a>
                   )}
-                  {redashSummaryUrl && (
+                  {cortexJobId && (
                     <a
-                      href={redashSummaryUrl}
+                      href={`https://eval-ui-replay.internal.preview.emergentagent.com/?job_id=${cortexJobId}&env=prod&autoload=1`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex items-center gap-2 text-xs text-blue-600 dark:text-blue-400 hover:underline"
-                      data-testid="quicklinks-redash-summary"
-                      title="Open Eval Data Comparison (dashboard 730) with this group preselected"
+                      className="flex items-center gap-2 text-xs text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300 underline-offset-2 hover:underline"
+                      data-testid="quicklinks-replay-eval"
+                      title="Open the Replay Eval UI for this job in a new tab"
                     >
                       <ExternalLink className="w-3 h-3 flex-shrink-0" />
-                      Eval Data Comparison
-                    </a>
-                  )}
-                  {redashToolUrl && (
-                    <a
-                      href={redashToolUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-2 text-xs text-blue-600 dark:text-blue-400 hover:underline"
-                      data-testid="quicklinks-redash-tools"
-                      title="Open Eval Tool-Usage Comparison (dashboard 731) with this group preselected"
-                    >
-                      <ExternalLink className="w-3 h-3 flex-shrink-0" />
-                      Eval Tool-Usage Comparison
+                      Replay Eval
                     </a>
                   )}
                 </CardContent>
