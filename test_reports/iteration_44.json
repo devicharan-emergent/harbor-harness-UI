@@ -1,0 +1,44 @@
+{
+  "summary": "Iteration 44 — Tested the new multi-agent fan-out feature in RunEvalModal Step 2. UI scenarios 1, 2, 3, and 5 PASS (multi-select dropdown, chips/clear, live fan-out math, cap warning, Review disabled/enabled gating, review-agents + review-total-jobs). Scenario 4 (real end-to-end submit) FAILS: harness rejects with HTTP 400 `invalid agent_name: agent_name can't be empty while creating an eval (problem ...)` even though backend proxy correctly forwards `agent_names: [...]` and payload includes `evals: [{problem, ...}]`. The frontend never adds a per-eval `agent_name` (intentionally, since it's relying on `agent_names` fan-out at the harness), so submit is broken end-to-end. No toast was visibly rendered to the user when the 400 came back (parseApiError fired but sonner toast couldn't be captured in DOM scrape).",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/eval/jobs (proxy → harness POST /api/v1/evals)",
+        "issue": "Multi-agent fan-out submit fails with 400 from the harness: 'invalid request: invalid agent_name: agent_name can't be empty while creating an eval (problem \"scratch_bench_phased/ag1_Land_test_final_1\")'. Frontend posts {user_id, group_name, evals:[{problem,...}], agent_names:['agent_a','agent_b']} — no per-eval agent_name is stamped because the UI is designed to rely on harness-side fan-out of agent_names. Either (a) the harness contract requires the backend proxy to fan-out and stamp `agent_name` on each eval before calling /api/v1/evals, or (b) the harness is not honoring `agent_names`. Without this, the entire new multi-select feature is unusable end-to-end.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "RunEvalModal real submit (standard scratch/bug flow)",
+        "issue": "After the 400 from /api/eval/jobs, the user sees no clearly persistent error feedback — the modal stays open on Step 3 with no visible toast (queried [data-sonner-toast], li[role=status], etc., 0 matches). parseApiError catch path does run but the toast may be auto-dismissing too fast or rendering off-screen. Should at minimum hold the toast longer or surface inline in the Review pane.",
+        "affected_selectors": ["[data-testid=submit-eval-button]", "[data-sonner-toast]"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Fix the real submit: either fan-out `agent_names` × `evals` in /app/backend/server.py:proxy_submit_eval BEFORE calling harness /api/v1/evals (stamping agent_name on each eval row and expanding the array to N*M eval items), OR confirm the harness contract and route to a different harness endpoint that natively understands `agent_names`. Current behavior: harness rejects because each eval row has empty agent_name.",
+    "Ensure the API error toast remains visible long enough for the user to read (or surface the parseApiError text inline in the Review step) — current submit failure is silent from the user's perspective.",
+    "Once the fan-out is wired, verify per-agent sub-headers (data-testid='agent-group-header-<agentName>') render on /evals expanded group view (could not be verified this iteration because the submit failed)."
+  ],
+  "critical_code_review_comments": [
+    "RunEvalModal.js:982 — payload.agent_names = selectedAgentIds is set ONLY for the standard branch (good). Per-eval `agent_name` is intentionally NOT stamped. This depends on the harness fan-out contract being honored; currently it is NOT — see backend_issues.critical above.",
+    "server.py:1461-1462 — proxy correctly forwards `agent_names` as-is. If the harness doesn't fan out server-side, the proxy needs to expand `evals × agent_names` into `len(agent_names) * len(evals)` eval rows, each with `agent_name=<id>`, before POSTing to /api/v1/evals. The current forward-as-is is a no-op against the upstream contract.",
+    "AgentMultiSelect.jsx — cmdk filtering is correct, 396 options narrow to 85 on 'full_stack' substring; chips + clear + per-chip remove buttons work as specified.",
+    "RunEvalModal.js:1011-1016 — fanoutJobCount math (agents × problems × runs) is correct and live-updates on runs/agents/chip changes. exceedsJobCap (agents × problems > 100, ignoring runs) renders the red box with the exact phrase 'exceeds the limit of 100' — verified with 25 agents × 5 problems = 125."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "0% (1/1 critical: fan-out submit fails)", "frontend": "80% (4/5 scenarios pass; real submit fails due to backend contract mismatch)"},
+  "test_credentials": "localStorage acm_session_token='pw_emergent_gate_post' (also ?access_token=). User TEST_pw_user@emergent.com.",
+  "seed_data_creation": "Attempted to create group qa_fanout_1782741875 with 2 agents × 1 problem — submit rejected by harness, no group persisted.",
+  "retest_needed": true,
+  "main_agent_can_self_test": false,
+  "context_for_next_testing_agent": "UI side of the multi-agent feature is fully correct (testids, chips, search, fan-out math, cap warning, Review gating, review-agents/review-total-jobs all verified). The real submit fails with HTTP 400 from the harness because each eval row in the forwarded payload has no agent_name. Two reproducible payloads sent to POST /api/eval/jobs: {user_id, group_name:'qa_fanout_<ts>', evals:[{problem:'scratch_bench_phased/ag1_Land_test_final_1', cpus:2, memory:4096, storage:10, headed:true, force_build:false}], agent_names:['_cortex_ui_edit_test_1782308200','_cortex_ui_edit_test_1782725739']} → 400 'invalid agent_name: agent_name can't be empty while creating an eval (problem ...)'. Either fix backend proxy to fan-out, or change the upstream endpoint. Cap warning text verified: '25 agents × 5 problems = 125 jobs — exceeds the limit of 100, the server will reject this.' Was NOT able to verify agent-group-header-<agentName> on /evals expanded view because no group was actually persisted. The OLD data-testid='eval-agent-name-override' is confirmed REMOVED from the standard flow; data-testid='eval-testing-agent-name-override' still exists in the testing-agent-bench flow (unchanged, as expected).",
+  "rca of the issue": "Root cause (real submit failure): The harness at POST /api/v1/evals validates each `evals[i].agent_name` is non-empty regardless of the presence of a top-level `agent_names` array. The frontend (RunEvalModal.js:947-974) constructs `evals` without `agent_name` per item and instead relies on `payload.agent_names = selectedAgentIds` (line 982) to trigger fan-out. The backend proxy (server.py:1461-1462) forwards `agent_names` as-is. The harness either (a) is not actually consuming `agent_names` for fan-out, or (b) requires the proxy to do the fan-out before forwarding. Mitigation: in /app/backend/server.py:proxy_submit_eval, when `body.get('agent_names')` is a non-empty array AND `evals` is present, expand to a cross-product: `payload['evals'] = [{**ev, 'agent_name': a} for a in agent_names for ev in evals]` and DO NOT forward `agent_names`. This matches the harness's per-eval agent_name contract while preserving the 100-job cap (the harness still rejects when N*M > 100)."
+}

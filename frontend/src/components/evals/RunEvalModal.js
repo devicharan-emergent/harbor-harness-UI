@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
-import { listDatasetsByType, getDatasetForProblem, submitEvalJobs, submitEvalJobsWithEs, submitTestingAgentEval, checkAgentExists, getVerifierConfig, getDatasetView } from '@/services/evalApi';
+import { listDatasetsByType, getDatasetForProblem, submitEvalJobs, submitEvalJobsWithEs, submitTestingAgentEval, checkAgentExists, getVerifierConfig, getDatasetView, listEvalAgents } from '@/services/evalApi';
 import { listAgents } from '@/services/cortexApi';
 import { agentApi } from '@/lib/api';
 import { useCreatedBy } from '@/contexts/AuthContext';
@@ -22,6 +22,7 @@ import { parseApiError } from '@/lib/errorUtils';
 import { useEnv } from '@/components/layout/EnvSwitcher';
 import { EphPicker } from '@/components/cortex/EphPicker';
 import { ModelNamePicker } from './ModelNamePicker';
+import { AgentMultiSelect } from './AgentMultiSelect';
 import { Combobox } from '@/components/ui/combobox';
 import { JudgeConfigDialog } from './JudgeConfigDialog';
 import { DatasetViewsDropdown } from '@/components/datasets/DatasetViewsDropdown';
@@ -384,6 +385,28 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
   // Free-text agent_name override — sent at the batch level when set.
   const [agentNameOverride, setAgentNameOverride] = useState('');
 
+  // Multi-agent selection (standard/non-testing-agent flow). Agents come
+  // from the harness catalog (GET /api/eval/agents). Submitted as
+  // `agent_names: string[]` → the harness fans out one job per agent×problem.
+  const [evalAgents, setEvalAgents] = useState([]);
+  const [agentsLoading, setAgentsLoading] = useState(false);
+  const [agentsError, setAgentsError] = useState(null);
+  const [selectedAgentIds, setSelectedAgentIds] = useState([]);
+
+  const fetchEvalAgents = useCallback(async () => {
+    setAgentsLoading(true);
+    setAgentsError(null);
+    try {
+      const data = await listEvalAgents();
+      setEvalAgents(Array.isArray(data?.agents) ? data.agents : []);
+    } catch (err) {
+      setAgentsError(err);
+      setEvalAgents([]);
+    } finally {
+      setAgentsLoading(false);
+    }
+  }, []);
+
   // testing_agent_bench per-run model_name override. Pre-fills from the
   // selected dataset's `attributes.model_name` when entering Step 2, but
   // any user edit (incl. clearing) wins and is sent in the per-eval body.
@@ -474,8 +497,9 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
   useEffect(() => {
     if (open) {
       fetchDatasets();
+      fetchEvalAgents();
     }
-  }, [open, fetchDatasets]);
+  }, [open, fetchDatasets, fetchEvalAgents]);
 
   useEffect(() => {
     if (open) {
@@ -495,6 +519,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
       setAgentCheckMsg('');
       setModelNameOverride('');
       setModelOverrideTouched(false);
+      setSelectedAgentIds([]);
       setNumRunsRaw('1');
       setRunProgress(null);
       setJudgeConfig(null);
@@ -774,8 +799,16 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
     // is a stub ("agent_set_at_runtime") to satisfy the upstream
     // harness's dataset-creation check — the user-meaningful value lives
     // only on the eval submission.
-    if (!agentNameOverride.trim()) {
-      toast.error('Agent name is required');
+    // Agent selection is required. The testing-agent flow uses a single
+    // free-text agent_name; the standard flow uses the multi-select
+    // (submitted as agent_names[] → harness fan-out).
+    if (isTestingAgentMode) {
+      if (!agentNameOverride.trim()) {
+        toast.error('Agent name is required');
+        return;
+      }
+    } else if (selectedAgentIds.length === 0) {
+      toast.error('Select at least one agent');
       return;
     }
     const runsCount = Math.max(1, Math.min(NUM_RUNS_MAX, Math.trunc(Number(numRuns) || 1)));
@@ -944,7 +977,9 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
         // typed name + optional comment instead.
         const payload = { user_id: loggedInUserId, group_name: runGroupName, evals };
         if (trimmedComment) payload.comment = trimmedComment;
-        if (derivedAgentName) payload.agent_name = derivedAgentName;
+        // Multi-agent fan-out — the harness creates one job per
+        // (agent × problem). Replaces the old single agent_name field.
+        payload.agent_names = selectedAgentIds;
         if (submitEph) {
           payload.eph_name = submitEph;
           payload.emergent_agents_url = `https://emergent-agents-${submitEph}-tit7tznrtq-uc.a.run.app`;
@@ -974,6 +1009,11 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
 
 
   const totalJobs = selectedProblems.length;
+  // Multi-agent fan-out count: agents × problems × runs (testing-agent flow
+  // stays single-agent). Used for the pre-submit guardrail + review summary.
+  const effectiveAgentCount = isTestingAgentMode ? 1 : selectedAgentIds.length;
+  const fanoutJobCount = totalJobs * Math.max(effectiveAgentCount, isTestingAgentMode ? 1 : 0) * numRuns;
+  const exceedsJobCap = !isTestingAgentMode && totalJobs * Math.max(effectiveAgentCount, 0) > 100;
   const stepLabels = ['Problems', 'Configure', 'Review'];
 
   return (
@@ -1286,21 +1326,40 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 />
               </div>
 
-              {/* Agent name — always visible (moved above and out of collapse).
-                  Free-text input — searchable dropdown disabled until we
-                  have a reliable agents-list endpoint. */}
+              {/* Agents — multi-select from the harness catalog. The harness
+                  fans out one job per (agent × problem). Required (≥1). */}
               {!isTestingAgentMode && (
                 <div>
-                  <Label className="text-sm font-semibold">Agent name *</Label>
-                  <div className="mt-1.5">
-                    <Input
-                      value={agentNameOverride}
-                      onChange={(e) => setAgentNameOverride(e.target.value)}
-                      placeholder="e.g. full_stack_app_builder_cloud_v8_sonnet_4_5"
-                      className="font-mono text-sm"
-                      data-testid="eval-agent-name-override"
-                    />
-                  </div>
+                  <Label className="text-sm font-semibold">Agents *</Label>
+                  <p className="text-[10px] text-muted-foreground mt-0.5 mb-1.5">
+                    Pick one or more agents. One job is created per agent × problem.
+                  </p>
+                  <AgentMultiSelect
+                    agents={evalAgents}
+                    value={selectedAgentIds}
+                    onChange={setSelectedAgentIds}
+                    loading={agentsLoading}
+                    error={agentsError}
+                    onRetry={fetchEvalAgents}
+                    testId="eval-agents-multiselect"
+                  />
+                  {selectedAgentIds.length > 0 && (
+                    <div
+                      className={`mt-2 text-[11px] rounded-md px-2.5 py-1.5 border ${
+                        exceedsJobCap
+                          ? 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400'
+                          : 'bg-muted/40 border-border/60 text-muted-foreground'
+                      }`}
+                      data-testid="eval-fanout-count"
+                    >
+                      <span className="font-mono font-semibold text-foreground">{selectedAgentIds.length}</span> agent{selectedAgentIds.length === 1 ? '' : 's'} ×{' '}
+                      <span className="font-mono font-semibold text-foreground">{totalJobs}</span> problem{totalJobs === 1 ? '' : 's'}
+                      {numRuns > 1 && <> × <span className="font-mono font-semibold text-foreground">{numRuns}</span> run{numRuns === 1 ? '' : 's'}</>}
+                      {' '}={' '}
+                      <span className="font-mono font-semibold text-foreground">{fanoutJobCount}</span> job{fanoutJobCount === 1 ? '' : 's'}
+                      {exceedsJobCap && <> — exceeds the limit of 100, the server will reject this.</>}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1480,18 +1539,35 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 <div className="flex items-center gap-1.5">
                   <Rocket className="w-4 h-4 text-muted-foreground" />
                   <span className="text-muted-foreground">Total jobs:</span>
-                  <span className="font-mono font-bold" data-testid="review-total-jobs">{totalJobs * numRuns}</span>
+                  <span className="font-mono font-bold" data-testid="review-total-jobs">{isTestingAgentMode ? totalJobs * numRuns : fanoutJobCount}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="text-muted-foreground">Group:</span>
                   <Badge variant="secondary" className="font-mono text-[10px]" data-testid="review-group-name">{groupName || '—'}</Badge>
                 </div>
-                {agentNameOverride.trim() && (
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-muted-foreground">Agent:</span>
-                    <Badge variant="outline" className="font-mono text-[10px] bg-violet-500/10 text-violet-600 border-violet-500/20" data-testid="review-agent-name">
-                      {agentNameOverride.trim()}
-                    </Badge>
+                {isTestingAgentMode ? (
+                  agentNameOverride.trim() && (
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-muted-foreground">Agent:</span>
+                      <Badge variant="outline" className="font-mono text-[10px] bg-violet-500/10 text-violet-600 border-violet-500/20" data-testid="review-agent-name">
+                        {agentNameOverride.trim()}
+                      </Badge>
+                    </div>
+                  )
+                ) : (
+                  <div className="flex items-center gap-1.5 flex-wrap" data-testid="review-agents">
+                    <span className="text-muted-foreground">Agents ({selectedAgentIds.length}):</span>
+                    {selectedAgentIds.slice(0, 4).map((id) => {
+                      const a = evalAgents.find((x) => x.id === id);
+                      return (
+                        <Badge key={id} variant="outline" className="font-mono text-[10px] bg-violet-500/10 text-violet-600 border-violet-500/20">
+                          {a?.name || id}
+                        </Badge>
+                      );
+                    })}
+                    {selectedAgentIds.length > 4 && (
+                      <span className="text-[10px] text-muted-foreground">+{selectedAgentIds.length - 4} more</span>
+                    )}
                   </div>
                 )}
               </div>
@@ -1584,11 +1660,13 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 onClick={handleSubmit}
                 disabled={
                   submitting || totalJobs === 0 ||
-                  agentVerified === false
+                  agentVerified === false ||
+                  (!isTestingAgentMode && selectedAgentIds.length === 0)
                   // NOTE: eph readiness gate temporarily disabled (see Next btn).
                 }
                 title={
                   agentVerified === false ? 'Agent name failed verification — fix it or clear the eph check' :
+                  (!isTestingAgentMode && selectedAgentIds.length === 0) ? 'Select at least one agent' :
                   undefined
                 }
                 data-testid="submit-eval-button"

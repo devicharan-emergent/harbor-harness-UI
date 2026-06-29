@@ -1455,6 +1455,12 @@ async def proxy_submit_eval(body: dict):
         if body.get("agent_name"):
             payload["agent_name"] = body["agent_name"]
 
+        # Multi-agent fan-out — the harness creates one job per (agent ×
+        # problem) when `agent_names` is present. Forwarded as-is so the
+        # harness applies its own 100-job cap + unknown-agent validation.
+        if body.get("agent_names"):
+            payload["agent_names"] = body["agent_names"]
+
         # Per-user ownership (forwarded as-is)
         if body.get("created_by"):
             payload["created_by"] = body["created_by"]
@@ -1503,6 +1509,27 @@ async def proxy_submit_eval(body: dict):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Eval API error: {str(e)}")
+
+@api_router.get("/eval/agents")
+async def proxy_eval_agents(search: Optional[str] = None):
+    """Proxy → harness GET /api/v1/agents.
+
+    Returns the harness agent catalog used for multi-agent eval fan-out:
+      { count, agents: [{ id, name, description, version, tags, ... }] }
+    """
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as hclient:
+            params = {}
+            if search:
+                params["search"] = search
+            response = await hclient.get(
+                f"{EVAL_API_BASE}/api/v1/agents", params=params
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Eval API error: {str(e)}")
+
 
 @api_router.get("/eval/jobs")
 async def proxy_list_eval_jobs(

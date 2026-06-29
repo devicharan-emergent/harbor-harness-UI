@@ -733,8 +733,28 @@ export default function EvalRuns() {
                       </div>
                     ) : (<>
                       <GroupAggregateSummary aggregate={groupAggregates[group.groupId]} />
-                      <div className="space-y-1">
-                      {groupJobs.map(job => (
+                      <div className="space-y-2">
+                      {(() => {
+                        // Group jobs by agent so the same problem can be
+                        // compared across agents. Single-agent groups render
+                        // flat (no header).
+                        const buckets = new Map();
+                        for (const job of groupJobs) {
+                          const an = getJobAgentName(job) || '(unknown agent)';
+                          if (!buckets.has(an)) buckets.set(an, []);
+                          buckets.get(an).push(job);
+                        }
+                        const multiAgent = buckets.size > 1;
+                        return Array.from(buckets.entries()).map(([agentName, jobsInAgent]) => (
+                          <div key={agentName} className="space-y-1" data-testid={`agent-group-${group.groupId}-${agentName}`}>
+                            {multiAgent && (
+                              <div className="flex items-center gap-1.5 px-1 pt-1" data-testid={`agent-group-header-${agentName}`}>
+                                <Cpu className="w-3 h-3 text-violet-500 flex-shrink-0" />
+                                <span className="text-[10px] font-mono font-semibold text-violet-600 dark:text-violet-400 truncate">{agentName}</span>
+                                <Badge variant="outline" className="text-[9px] font-mono px-1 py-0">{jobsInAgent.length} job{jobsInAgent.length === 1 ? '' : 's'}</Badge>
+                              </div>
+                            )}
+                            {jobsInAgent.map(job => (
                         <div
                           key={job.id}
                           onClick={() => navigate(`/evals/${job.id}`)}
@@ -843,6 +863,9 @@ export default function EvalRuns() {
                           </a>
                         </div>
                       ))}
+                          </div>
+                        ));
+                      })()}
                       </div>
                     </>)}
                   </div>

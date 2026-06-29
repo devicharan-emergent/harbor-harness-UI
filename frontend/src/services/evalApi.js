@@ -40,6 +40,16 @@ attachOwnership(evalApiClient, [
 // ============ Eval Jobs ============
 
 /**
+ * List the harness agent catalog used for multi-agent eval fan-out.
+ * GET /api/eval/agents  →  harness GET /api/v1/agents
+ * Returns: { count, agents: [{ id, name, description, version, tags, ... }] }
+ */
+export const listEvalAgents = async () => {
+  const response = await evalApiClient.get('/agents');
+  return response.data;
+};
+
+/**
  * Submit eval jobs using the correct API format
  * POST /api/eval/jobs
  * Body: { user_id, group_id?, evals: [{ problem, cpus?, memory?, storage?, headed?, force_build?, experiments? }] }
