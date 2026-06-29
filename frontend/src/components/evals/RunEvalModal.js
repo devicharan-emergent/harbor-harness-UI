@@ -458,6 +458,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
   // resolution still applies in `submitEvalJobsWithEs`.
 
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
 
   // Fetch datasets
   const fetchDatasets = useCallback(async () => {
@@ -813,6 +814,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
     }
     const runsCount = Math.max(1, Math.min(NUM_RUNS_MAX, Math.trunc(Number(numRuns) || 1)));
     setSubmitting(true);
+    setSubmitError('');
     setRunProgress(runsCount > 1 ? { current: 0, total: runsCount } : null);
 
     // Pre-hydrate testing_agent items ONCE — same problems are reused
@@ -1000,7 +1002,9 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
       onClose();
       navigate('/evals');
     } catch (error) {
-      toast.error(parseApiError(error, 'Failed to submit evaluation'));
+      const msg = parseApiError(error, 'Failed to submit evaluation');
+      setSubmitError(msg);
+      toast.error(msg);
     } finally {
       setSubmitting(false);
       setRunProgress(null);
@@ -1519,6 +1523,15 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
           {/* ── Step 3: Review & Submit ────────────────────────── */}
           {step === 3 && (
             <div className="space-y-4 py-2">
+              {submitError && (
+                <div
+                  className="flex items-start gap-2 rounded-md border border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300 px-3 py-2 text-[11px]"
+                  data-testid="submit-error-banner"
+                >
+                  <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                  <span>{submitError}</span>
+                </div>
+              )}
               {selectedProblems.some(isBugBenchMissingImage) && (
                 <div
                   className="flex items-start gap-2 rounded-md border border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300 px-3 py-2 text-[11px]"

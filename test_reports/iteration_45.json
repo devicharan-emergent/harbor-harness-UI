@@ -1,0 +1,36 @@
+{
+  "summary": "Iteration 45 — RE-VERIFIED multi-agent fan-out submit (now PASSES end-to-end) and verified the NEW Live Results feature. All 5 review scenarios PASS. Backend: 5/5 pytest tests pass. Frontend: 5/5 UI scenarios pass.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/eval/runs/groups/{group_id}/aggregate (and group detail)", "issue": "Returns 500 for the freshly-created qa_live_* group right after submit (visible in console as 'Failed to fetch aggregate for 8b3709cc-2d1a-4faa-af60-4a475e5b5a6b'). UI still renders the expanded group and per-agent sub-headers correctly via the list endpoint, but the aggregate sidebar/widget is broken for brand-new groups. Likely a harness-side propagation lag or a missing index on group_run_id; not blocking the fan-out feature."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_45_fanout_and_live.py",
+    "/app/test_reports/pytest/iteration_45_results.xml"
+  ],
+  "action_items": [
+    "(Minor) Investigate the 500 from /api/eval/runs/groups/{id}/aggregate for newly-created groups — surfaces as console errors on /evals expansion immediately after submit. Non-blocking but noisy.",
+    "(Cleanup) Test data created during this run: groups qa_live_1782742982 (2 jobs), qa_pytest_<ts> (2 jobs from backend test), qa_cap_1782743117 was NOT submitted server-side (101 jobs blocked at the harness with 400 — verified message). Optionally delete the qa_live_*/qa_pytest_* groups."
+  ],
+  "critical_code_review_comments": [
+    "server.py:_expand_agent_fanout (line 1432) — correct cross-product implementation with exact cap message matching the UI copy. Used by both proxy_submit_eval and proxy_submit_eval_with_es.",
+    "server.py:proxy_eval_live_results / llm_calls / llm_call_detail (1618-1657) — three new GET proxies hit the harness GET /api/v1/evals/{id}/{live-results|llm-calls|llm-calls/{call_id}} and return raw JSON. Verified count=11 on the seed completed job and request_body+response_body present on call detail. Recommend: cache live-results responses for ~1-2s to reduce harness load when many tabs poll the same job (currently every tab independently polls every 4s).",
+    "RunEvalModal.js submit error banner — verified: 'too many jobs: 101 jobs (101 agents × 1 problems) exceeds the limit of 100' renders inside data-testid='submit-error-banner' on Review step and ALSO as a sonner toast bottom-right. Good redundant feedback.",
+    "LiveEvalResults polling — confirmed: card mounts only on generating/running, waiting state stable across 10s, polling 4s interval, no JS errors. CompletedJob page correctly does NOT render the card. Gating in JobDetail.js is correct."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration_45_fanout_and_live.py"],
+  "success_rate": {"backend": "100% (5/5 pytest)", "frontend": "100% (5/5 scenarios)"},
+  "test_credentials": "localStorage acm_session_token='pw_emergent_gate_post' OR query ?access_token=pw_emergent_gate_post; user TEST_pw_user@emergent.com.",
+  "seed_data_creation": "Created eval group 'qa_live_1782742982' (2 agents × 1 problem = 2 queued jobs) and 'qa_pytest_<ts>' from pytest. Both visible at top of /evals.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 45 fully verified the multi-agent fan-out fix from iteration_44. Backend _expand_agent_fanout in server.py:1432 correctly cross-products evals × agent_names and stamps agent_name per row before forwarding to harness POST /api/v1/evals. End-to-end submit creates 2 distinct jobs (verified ids + harness response). /evals expanded group view bucketizes jobs under data-testid='agent-group-header-<agentName>' headers. The 100-job cap message is enforced identically in client (red rose-500 banner under eval-fanout-count) and server (HTTPException 400 with message 'too many jobs: N jobs (X agents × Y problems) exceeds the limit of 100'). The Live Results feature works: data-testid='live-eval-results-card' mounts on running jobs and shows data-testid='live-results-waiting' when the harness emits no live rows (acceptable per E1). Polls every 4s without flicker or JS errors. The card is absent on completed jobs and the final Phase Results + eval_metrics view renders. Three new proxies (/live-results, /llm-calls, /llm-calls/{id}) verified via pytest: completed job c96f5f28 has 11 llm-calls and the detail endpoint returns request_body + response_body. Minor: a 500 from /api/eval/runs/groups/{id}/aggregate appears in console for newly-created groups — non-blocking, recommend investigation.",
+  "rca of the issue": "Iteration 44 RCA was correct: the harness validates per-eval agent_name. The fix in server.py:_expand_agent_fanout now expands agent_names × evals into the cross-product and drops the top-level agent_names from the forwarded payload, matching the harness contract. Verified by direct backend test (2 jobs returned) and end-to-end UI submit (group created, on /evals)."
+}

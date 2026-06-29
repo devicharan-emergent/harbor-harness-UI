@@ -158,10 +158,42 @@ export const checkAgentExists = async (ephName, agentName) => {
 /**
  * Get eval job by ID
  * GET /api/eval/jobs/{id}
- * Returns: { id, problem, status, progress, browser_reward?, lintiq_score?, combined_reward?, error?, ... }
  */
 export const getEvalJob = async (jobId) => {
   const response = await evalApiClient.get(`/jobs/${jobId}`);
+  return response.data;
+};
+
+/**
+ * Live (best-effort) test results while an eval is running.
+ * GET /api/eval/jobs/{id}/live-results
+ * Returns: { count, results: [{ phase_index, test_index, replay_index,
+ *   test_name, status, error_category, pass_cases, total_cases,
+ *   kernel_session_id, replay_id, started_at, updated_at }] }
+ */
+export const getEvalLiveResults = async (jobId) => {
+  const response = await evalApiClient.get(`/jobs/${jobId}/live-results`);
+  return response.data;
+};
+
+/**
+ * Live LLM-call summary feed (no bodies).
+ * GET /api/eval/jobs/{id}/llm-calls
+ * Returns: { count, llm_calls: [{ id, phase_index, test_index, call_seq,
+ *   model, status, prompt_tokens, completion_tokens, total_tokens,
+ *   latency_ms, created_at }] }
+ */
+export const getEvalLlmCalls = async (jobId) => {
+  const response = await evalApiClient.get(`/jobs/${jobId}/llm-calls`);
+  return response.data;
+};
+
+/**
+ * Full request/response for a single LLM call (lazy-loaded on click).
+ * GET /api/eval/jobs/{id}/llm-calls/{call_id}
+ */
+export const getEvalLlmCallDetail = async (jobId, callId) => {
+  const response = await evalApiClient.get(`/jobs/${jobId}/llm-calls/${callId}`);
   return response.data;
 };
 

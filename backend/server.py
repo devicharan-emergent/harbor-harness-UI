@@ -555,6 +555,14 @@ async def proxy_submit_eval_with_es(body: dict):
     re-runs the readiness preflight. Fall-back (no eph_name) keeps the
     explicit-URL behavior for back-compat.
     """
+    # Same multi-agent fan-out as /eval/jobs — expand agent_names × evals
+    # so each eval row carries its own agent_name (harness requirement).
+    agent_names = (body or {}).get("agent_names")
+    if agent_names and isinstance(body.get("evals"), list):
+        body = dict(body)
+        body["evals"], _ = _expand_agent_fanout(body["evals"], agent_names)
+        body.pop("agent_names", None)
+        body.pop("agent_name", None)
     return await _proxy_cortex(
         "POST", "/api/v1/internal/evals-with-es", json=body,
     )
@@ -1421,13 +1429,31 @@ async def reset_judge_config():
 
 
 
+def _expand_agent_fanout(evals: list, agent_names: list):
+    """Cross-product `evals × agent_names`, stamping `agent_name` on each
+    eval row. The harness requires a non-empty per-eval agent_name, so a
+    top-level `agent_names` array is expanded here. Enforces the 100-job cap
+    with the exact message the UI surfaces inline.
+    Returns (expanded_evals, total)."""
+    n_agents = len(agent_names)
+    n_probs = len(evals)
+    total = n_agents * n_probs
+    if total > 100:
+        raise HTTPException(
+            status_code=400,
+            detail=f"too many jobs: {total} jobs ({n_agents} agents × {n_probs} problems) exceeds the limit of 100",
+        )
+    return [{**ev, "agent_name": a} for a in agent_names for ev in evals], total
+
+
 @api_router.post("/eval/jobs")
 async def proxy_submit_eval(body: dict):
     """Proxy: Submit eval jobs to external Eval API.
-    
+
     Transforms frontend format to Eval API format:
-    Frontend: { user_id, group_id?, agent_name?, evals: [{ problem, cpus?, memory?, storage?, headed?, force_build?, experiments? }] }
+    Frontend: { user_id, group_id?, agent_name?, agent_names?, evals: [{ problem, ... }] }
     API:      { user_id, group_run_id?, agent_name?, evals: [...] }
+    When `agent_names` is present the evals are fanned out (agent × problem).
     """
     try:
         # Build the correct payload for the Eval API
@@ -1454,12 +1480,6 @@ async def proxy_submit_eval(body: dict):
         # Batch-level agent override (forwarded as-is)
         if body.get("agent_name"):
             payload["agent_name"] = body["agent_name"]
-
-        # Multi-agent fan-out — the harness creates one job per (agent ×
-        # problem) when `agent_names` is present. Forwarded as-is so the
-        # harness applies its own 100-job cap + unknown-agent validation.
-        if body.get("agent_names"):
-            payload["agent_names"] = body["agent_names"]
 
         # Per-user ownership (forwarded as-is)
         if body.get("created_by"):
@@ -1495,6 +1515,15 @@ async def proxy_submit_eval(body: dict):
                 payload["user_id"] = body["user_id"]
         else:
             raise HTTPException(status_code=400, detail="Request must contain 'evals' array")
+
+        # Multi-agent fan-out: the harness validates a non-empty `agent_name`
+        # on EVERY eval row, so we expand `agent_names × evals` into the
+        # cross-product here (one eval row per agent×problem, each stamped
+        # with its agent_name) and enforce the 100-job cap.
+        agent_names = body.get("agent_names")
+        if agent_names:
+            payload["evals"], _ = _expand_agent_fanout(payload["evals"], agent_names)
+            payload.pop("agent_name", None)
 
         async with httpx.AsyncClient(timeout=30.0) as hclient:
             response = await hclient.post(f"{EVAL_API_BASE}/api/v1/evals", json=payload)
@@ -1585,6 +1614,51 @@ async def proxy_update_breakpoint(job_id: str, body: dict):
             return response.json()
     except httpx.HTTPError as e:
         raise HTTPException(status_code=500, detail=f"Eval API error: {str(e)}")
+
+@api_router.get("/eval/jobs/{job_id}/live-results")
+async def proxy_eval_live_results(job_id: str):
+    """Proxy → harness GET /api/v1/evals/{id}/live-results (best-effort,
+    live test rows while the eval is running)."""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as hclient:
+            response = await hclient.get(
+                f"{EVAL_API_BASE}/api/v1/evals/{job_id}/live-results"
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=getattr(getattr(e, 'response', None), 'status_code', 500),
+                          detail=f"Eval API error: {str(e)}")
+
+@api_router.get("/eval/jobs/{job_id}/llm-calls")
+async def proxy_eval_llm_calls(job_id: str):
+    """Proxy → harness GET /api/v1/evals/{id}/llm-calls (summary, no bodies)."""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as hclient:
+            response = await hclient.get(
+                f"{EVAL_API_BASE}/api/v1/evals/{job_id}/llm-calls"
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=getattr(getattr(e, 'response', None), 'status_code', 500),
+                          detail=f"Eval API error: {str(e)}")
+
+@api_router.get("/eval/jobs/{job_id}/llm-calls/{call_id}")
+async def proxy_eval_llm_call_detail(job_id: str, call_id: str):
+    """Proxy → harness GET /api/v1/evals/{id}/llm-calls/{call_id}
+    (full request_body + response_body for one call)."""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as hclient:
+            response = await hclient.get(
+                f"{EVAL_API_BASE}/api/v1/evals/{job_id}/llm-calls/{call_id}"
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=getattr(getattr(e, 'response', None), 'status_code', 500),
+                          detail=f"Eval API error: {str(e)}")
+
 
 @api_router.get("/eval/jobs/{job_id}")
 async def proxy_get_eval_job(job_id: str, created_by: Optional[str] = None):
