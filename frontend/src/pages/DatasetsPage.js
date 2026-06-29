@@ -1,7 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  listDatasets,
   listDatasetsByType,
   deleteDataset,
   getDatasetInstance,
@@ -77,7 +76,10 @@ export default function DatasetsPage() {
 
   // Row selection (keyed by `${dataset_type}/${instance_id}` to keep cross-type
   // selection unambiguous; export sends instance_ids per dataset_type).
-  const [selectedKeys, setSelectedKeys] = useState(new Set());
+  // Map keyed by `${dataset_type}/${instance_id}` → the full dataset object,
+  // so selection (and bulk delete / export) persists across pagination and
+  // covers rows not on the current page.
+  const [selectedItems, setSelectedItems] = useState(new Map());
   const [exporting, setExporting] = useState(false);
 
   // Dataset views (saved selections). When `activeView` is set:
@@ -90,21 +92,13 @@ export default function DatasetsPage() {
   const [addItemsOpen, setAddItemsOpen] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const fetchDatasets = useCallback(async () => {
+  // Server-paginated fetch for the normal (non-view) table. "All Types"
+  // fans out per type to dodge the upstream 100-row alphabetical cap and
+  // is then paginated client-side.
+  const fetchServerDatasets = useCallback(async () => {
     setLoading(true);
     try {
-      let data;
-      // When narrowing to a loaded view's items, widen the fetch window
-      // so every item in the view actually shows up (the harness caps
-      // limit=200). Otherwise use normal pagination.
-      const narrowToView = !!activeView;
-      const limit = narrowToView ? 200 : pageSize;
-      const offset = narrowToView ? 0 : page * pageSize;
       if (typeFilter === 'all') {
-        // Upstream `/datasets?limit=N` truncates alphabetically, hiding
-        // bug_bench / testing_agent_bench / wingman_bench whenever
-        // scratch_bench_phased dominates the first N rows. Fetch each
-        // known type in parallel and merge so each type gets its own cap.
         const KNOWN_TYPES = DATASET_TYPES.map(t => t.value).filter(v => v !== 'all');
         const results = await Promise.allSettled(
           KNOWN_TYPES.map(t => listDatasetsByType(t, { limit: 200, offset: 0 })),
@@ -116,11 +110,8 @@ export default function DatasetsPage() {
           }
         }
         setDatasets(merged);
-      } else if (narrowToView) {
-        data = await listDatasets({ limit, offset });
-        setDatasets(data.datasets || []);
       } else {
-        data = await listDatasetsByType(typeFilter, { limit, offset });
+        const data = await listDatasetsByType(typeFilter, { limit: pageSize, offset: page * pageSize });
         setDatasets(data.datasets || []);
       }
     } catch (error) {
@@ -130,11 +121,56 @@ export default function DatasetsPage() {
     } finally {
       setLoading(false);
     }
-  }, [typeFilter, page, activeView]);
+  }, [typeFilter, page]);
 
+  // Dataset-view fetch: pull EXACTLY the view's items by instance so the
+  // table shows the full view membership regardless of upstream ordering
+  // or the 100-row cap. Pagination over this set is done client-side.
+  const fetchViewDatasets = useCallback(async (view) => {
+    setLoading(true);
+    try {
+      const items = (view.items || []).filter(it => it.dataset_type && it.instance_id);
+      const results = await Promise.allSettled(
+        items.map(it => getDatasetInstance(it.dataset_type, it.instance_id)),
+      );
+      const fetched = results.map((r, i) => (
+        r.status === 'fulfilled' && r.value
+          ? r.value
+          : {
+              dataset_type: items[i].dataset_type,
+              instance_id: items[i].instance_id,
+              name: `${items[i].dataset_type}/${items[i].instance_id}`,
+            }
+      ));
+      setDatasets(fetched);
+      // Pre-select every view item so multi-row actions + "Update view"
+      // work across pages.
+      setSelectedItems(new Map(fetched.map(d => [`${d.dataset_type}/${d.instance_id || d.id}`, d])));
+    } catch (error) {
+      console.error('Failed to fetch view datasets:', error);
+      toast.error('Failed to load view datasets');
+      setDatasets([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const refresh = useCallback(() => {
+    if (activeView) fetchViewDatasets(activeView);
+    else fetchServerDatasets();
+  }, [activeView, fetchViewDatasets, fetchServerDatasets]);
+
+  // View membership changed (load / add / remove) → refetch the view items.
   useEffect(() => {
-    fetchDatasets();
-  }, [fetchDatasets]);
+    if (activeView) fetchViewDatasets(activeView);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeView]);
+
+  // Normal table fetch (skipped while a view is active).
+  useEffect(() => {
+    if (!activeView) fetchServerDatasets();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [typeFilter, page, activeView]);
 
   const handleEdit = async (ds) => {
     // Fetch full dataset details if needed
@@ -161,7 +197,7 @@ export default function DatasetsPage() {
       await deleteDataset(deleteTarget.id);
       toast.success(`Deleted dataset: ${deleteTarget.name || deleteTarget.instance_id}`);
       setDeleteTarget(null);
-      fetchDatasets();
+      refresh();
     } catch (error) {
       toast.error(parseApiError(error, 'Failed to delete dataset'));
     } finally {
@@ -190,8 +226,8 @@ export default function DatasetsPage() {
       toast.warning(`Deleted ${succeeded}, failed ${failed.length}`);
     }
     // Clear selection + refresh table either way.
-    setSelectedKeys(new Set());
-    fetchDatasets();
+    setSelectedItems(new Map());
+    refresh();
   };
 
   const handlePreview = async (ds) => {
@@ -251,45 +287,53 @@ export default function DatasetsPage() {
     );
   });
 
-  // Reset selection whenever the underlying dataset list changes (page/type
-  // switch); keeping stale ids would let the user "Export Selected" rows
-  // they can't see anymore.
-  useEffect(() => {
-    setSelectedKeys(new Set());
-  }, [typeFilter, page]);
+  // "All Types" (merged) and dataset-view modes load the full set up front,
+  // so we paginate them client-side. Per-type mode is paginated server-side
+  // (datasets already holds just the current page).
+  const clientPaginated = !!activeView || typeFilter === 'all';
+  const pagedDatasets = clientPaginated
+    ? filteredDatasets.slice(page * pageSize, page * pageSize + pageSize)
+    : filteredDatasets;
 
-  const allVisibleSelected = filteredDatasets.length > 0 && filteredDatasets.every(ds => selectedKeys.has(keyOf(ds)));
-  const someVisibleSelected = filteredDatasets.some(ds => selectedKeys.has(keyOf(ds))) && !allVisibleSelected;
+  // Clamp the page if the filtered set shrank below the current offset
+  // (e.g. after a search narrows results or rows were removed).
+  useEffect(() => {
+    if (clientPaginated && page > 0 && page * pageSize >= filteredDatasets.length) {
+      setPage(0);
+    }
+  }, [clientPaginated, page, filteredDatasets.length]);
+
+  const allVisibleSelected = pagedDatasets.length > 0 && pagedDatasets.every(ds => selectedItems.has(keyOf(ds)));
+  const someVisibleSelected = pagedDatasets.some(ds => selectedItems.has(keyOf(ds))) && !allVisibleSelected;
 
   const toggleRow = (ds) => {
     const k = keyOf(ds);
-    setSelectedKeys(prev => {
-      const next = new Set(prev);
-      if (next.has(k)) next.delete(k); else next.add(k);
+    setSelectedItems(prev => {
+      const next = new Map(prev);
+      if (next.has(k)) next.delete(k); else next.set(k, ds);
       return next;
     });
   };
 
   const toggleAllVisible = () => {
-    setSelectedKeys(prev => {
-      const next = new Set(prev);
+    setSelectedItems(prev => {
+      const next = new Map(prev);
       if (allVisibleSelected) {
-        filteredDatasets.forEach(ds => next.delete(keyOf(ds)));
+        pagedDatasets.forEach(ds => next.delete(keyOf(ds)));
       } else {
-        filteredDatasets.forEach(ds => next.add(keyOf(ds)));
+        pagedDatasets.forEach(ds => next.set(keyOf(ds), ds));
       }
       return next;
     });
   };
 
-  const clearSelection = () => setSelectedKeys(new Set());
+  const clearSelection = () => setSelectedItems(new Map());
 
-  // Selected rows visible on the current page, grouped by type. The
-  // export endpoint is per-type and CSV columns differ per type, so the
-  // FE forces selection to a single type before allowing Export Selected.
+  // Every selected row across all pages (Map values), used for bulk
+  // delete / export and "Update view".
   const selectedRows = useMemo(
-    () => filteredDatasets.filter(d => selectedKeys.has(keyOf(d))),
-    [filteredDatasets, selectedKeys],
+    () => Array.from(selectedItems.values()),
+    [selectedItems],
   );
 
   const selectedType = useMemo(() => {
@@ -328,16 +372,9 @@ export default function DatasetsPage() {
     setActiveView(view);
     setTypeFilter('all');
     setPage(0);
-    // Pre-select every item in the view so cross-page selection persists
-    // and "Update view" can save modifications (add/remove items).
-    const nextKeys = new Set();
-    for (const it of view.items || []) {
-      if (it.dataset_type && it.instance_id) {
-        nextKeys.add(`${it.dataset_type}/${it.instance_id}`);
-      }
-    }
-    setSelectedKeys(nextKeys);
-    toast.success(`Loaded view "${view.name}" — ${view.items.length} items selected`);
+    // Selection is set by the view fetch effect (pre-selects all items)
+    // once the instances load.
+    toast.success(`Loaded view "${view.name}" — ${view.items.length} items`);
     const next = new URLSearchParams(searchParams);
     next.set('view', view.view_id);
     setSearchParams(next, { replace: true });
@@ -346,6 +383,7 @@ export default function DatasetsPage() {
   const clearActiveView = () => {
     setActiveView(null);
     clearSelection();
+    setPage(0);
     const next = new URLSearchParams(searchParams);
     next.delete('view');
     setSearchParams(next, { replace: true });
@@ -368,12 +406,7 @@ export default function DatasetsPage() {
     try {
       const updated = await updateDatasetView(activeView.view_id, { items: nextItems });
       setActiveView(updated);
-      // Drop the removed key from selection too so badges stay in sync.
-      setSelectedKeys(prev => {
-        const next = new Set(prev);
-        next.delete(k);
-        return next;
-      });
+      // The view fetch effect refetches + re-selects the new membership.
       toast.success(`Removed from "${updated.name}"`);
     } catch (err) {
       toast.error(parseApiError(err, 'Failed to remove from view'));
@@ -384,30 +417,20 @@ export default function DatasetsPage() {
   // returns the FULL chosen set (existing-plus-new) so we can just push it.
   const handleItemsAddedToView = (updated) => {
     setActiveView(updated);
-    // Sync selection with the new membership so multi-row actions still work.
-    const nextKeys = new Set();
-    for (const it of updated.items || []) {
-      nextKeys.add(`${it.dataset_type}/${it.instance_id}`);
-    }
-    setSelectedKeys(nextKeys);
+    // The view fetch effect refetches + re-selects the new membership.
   };
 
   // Build the items payload from the FULL selection set so that selections
-  // spanning multiple pages are saved correctly. We parse the composite
-  // `dataset_type/instance_id` keys directly instead of reading from the
-  // current-page-only `selectedRows`.
+  // spanning multiple pages are saved correctly.
   const selectionItemsForView = useMemo(
-    () => Array.from(selectedKeys)
-      .map(k => {
-        const idx = k.indexOf('/');
-        if (idx <= 0) return null;
-        const dataset_type = k.substring(0, idx);
-        const instance_id = k.substring(idx + 1);
-        if (!dataset_type || !instance_id) return null;
-        return { dataset_type, instance_id };
-      })
+    () => Array.from(selectedItems.values())
+      .map(d => (
+        d.dataset_type && d.instance_id
+          ? { dataset_type: d.dataset_type, instance_id: d.instance_id }
+          : null
+      ))
       .filter(Boolean),
-    [selectedKeys],
+    [selectedItems],
   );
 
   const runExport = async (datasetType, instanceIds, label) => {
@@ -445,7 +468,7 @@ export default function DatasetsPage() {
     // already; switching the page filter on top would just be noisy if
     // they were browsing "All Types" and importing into a specific one.
     clearSelection();
-    fetchDatasets();
+    refresh();
   };
 
   return (
@@ -554,7 +577,7 @@ export default function DatasetsPage() {
           <Input
             placeholder="Search datasets..."
             value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
+            onChange={e => { setSearchQuery(e.target.value); setPage(0); }}
             className="pl-8 font-mono text-sm"
             data-testid="datasets-search-input"
           />
@@ -670,7 +693,7 @@ export default function DatasetsPage() {
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
-                      onClick={fetchDatasets}
+                      onClick={refresh}
                       variant="ghost"
                       size="icon"
                       className="h-7 w-7"
@@ -725,8 +748,8 @@ export default function DatasetsPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredDatasets.map(ds => {
-                    const checked = selectedKeys.has(keyOf(ds));
+                  {pagedDatasets.map(ds => {
+                    const checked = selectedItems.has(keyOf(ds));
                     return (
                     <TableRow
                       key={ds.id || ds.name}
@@ -877,9 +900,8 @@ export default function DatasetsPage() {
               {/* Pagination */}
               <div className="flex items-center justify-between mt-4 pt-4 border-t">
                 <p className="text-xs text-muted-foreground">
-                  Showing {filteredDatasets.length} dataset{filteredDatasets.length !== 1 ? 's' : ''}{typeFilter === 'all' || activeView ? '' : ` (Page ${page + 1})`}
+                  Showing {Math.min(pagedDatasets.length, pageSize)} of {filteredDatasets.length} dataset{filteredDatasets.length !== 1 ? 's' : ''} (Page {page + 1})
                 </p>
-                {typeFilter !== 'all' && !activeView && (
                 <div className="flex items-center gap-2">
                   <Button
                     variant="outline"
@@ -896,7 +918,9 @@ export default function DatasetsPage() {
                     variant="outline"
                     size="sm"
                     onClick={() => setPage(p => p + 1)}
-                    disabled={datasets.length < pageSize}
+                    disabled={clientPaginated
+                      ? (page + 1) * pageSize >= filteredDatasets.length
+                      : datasets.length < pageSize}
                     className="h-7 text-xs"
                     data-testid="datasets-next-page"
                   >
@@ -904,7 +928,6 @@ export default function DatasetsPage() {
                     <ChevronRight className="w-3.5 h-3.5 ml-1" />
                   </Button>
                 </div>
-                )}
               </div>
             </>
           )}
@@ -923,7 +946,7 @@ export default function DatasetsPage() {
       <DatasetEditorModal
         open={editorOpen}
         onClose={() => { setEditorOpen(false); setEditingDataset(null); }}
-        onSaved={() => { setEditorOpen(false); setEditingDataset(null); fetchDatasets(); }}
+        onSaved={() => { setEditorOpen(false); setEditingDataset(null); refresh(); }}
         dataset={editingDataset}
       />
 

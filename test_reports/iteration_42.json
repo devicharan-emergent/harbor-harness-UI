@@ -1,0 +1,34 @@
+{
+  "summary": "Iteration 42 — DatasetsPage pagination + view-membership bug fixes. Frontend-only verification via Playwright on /datasets. ALL 5 scenarios PASS, both reported bugs are fixed and no regressions on bulk action badges.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "DatasetsPage.js:129-156 fetchViewDatasets correctly fans-out per view item via getDatasetInstance (no more 200-row first-page client filter). View membership is exact regardless of upstream ordering.",
+    "DatasetsPage.js:82, 309-328 selectedItems is now a Map<key, fullObject> (not just keys), so cross-page bulk delete/export can operate on rows not on the current page. Good fix.",
+    "DatasetsPage.js:164-173 useEffect on [typeFilter, page, activeView] no longer wipes selection — previously a selection-reset effect ran on every page/type change (the source of bug 2). Now ONLY clearActiveView() and handleImported() clear selection (and handleBulkDelete after a successful delete). Correct.",
+    "DatasetsPage.js:293-296 clientPaginated correctly switches between client slice (view + all-types) and server-paged (per-type). Footer text and Next disabled-rule both account for this.",
+    "Minor: on page 1 of scratch_bench_phased the 'select all on this page' header checkbox state correctly reflects allVisibleSelected/someVisibleSelected based on the current page's pagedDatasets — verified live (50→50→100 progression).",
+    "Nit (not blocking): The Next-button disabled rule for per-type mode uses `datasets.length < pageSize`, which means the very last page (where the upstream returned exactly pageSize items by coincidence) would leave Next enabled until the user clicks once and gets an empty page. Acceptable trade-off without a total count from the upstream."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only)", "frontend": "100% (5/5 scenarios)"},
+  "test_credentials": "localStorage acm_session_token=pw_emergent_gate_post (from /app/memory/test_credentials.md). User: TEST_pw_user@emergent.com.",
+  "seed_data_creation": "None. Used pre-existing views d6fdf2e2db5e49d79f44bb37e160a8d1 ('test', 4 items) and eed3fa28819f4eee9005538bb9e73dce ('test 2', 2 items). Used scratch_bench_phased which has 100+ datasets across 2+ pages (page1=50 rows, page2=50 rows). All Types merged set = 153 datasets.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "DatasetsPage selection + pagination is now solid. Verified flows: (1) /datasets?view=<id> loads view via per-instance fetch — chip shows name+count, table rows == view item count, all rows pre-selected. (2) per-type pagination preserves selection across Next/Prev, and previously-selected checkboxes remain ticked when paginating back. (3) select-all on page 1 + paginate keeps 50 selected, +select-all on page 2 grows to 100. (4) All Types client-side pagination (153 datasets, pageSize 50) preserves selection across client pages. (5) Export Selected + Bulk Delete toolbar badges reflect full cross-page selection count (verified count=3 across pages). No backend or design issues observed.",
+  "live_evidence": {
+    "view_test_4items": "chip 'Viewing: test · 4 items', rows=4, selection='4 selected', footer='Showing 4 of 4 datasets (Page 1)'",
+    "view_test2_2items": "chip 'Viewing: test 2 · 2 items', rows=2, selection='2 selected', footer='Showing 2 of 2 datasets (Page 1)'",
+    "per_type_persistence": "p1 tick 2 → '2 selected' → Next → still '2 selected' → tick 1 on p2 → '3 selected' → Prev → still '3 selected' and original p1 rows still show data-state=checked. Toolbar export/delete badges both = 3.",
+    "select_all_grow": "p1 select-all → '50 selected' → Next → '50 selected' (preserved) → p2 select-all → '100 selected'",
+    "all_types_client_pagination": "p1 footer 'Showing 50 of 153 (Page 1)' → tick 1 → '1 selected' → Next → '1 selected' preserved → tick 1 on p2 → '2 selected' → Prev → still '2 selected'"
+  },
+  "rca of the issue": "N/A — verification iteration confirming the refactor. Previous bug RCAs (from request): bug 1 caused by fetching first 200 datasets then client-filtering by view membership — fixed by per-instance fetch (fetchViewDatasets). Bug 2 caused by an effect that reset selection on page/type change — fixed by storing full objects in selectedItems Map (keyed by `<dataset_type>/<instance_id>`) and only clearing on explicit user action / view-clear / successful bulk-delete."
+}
