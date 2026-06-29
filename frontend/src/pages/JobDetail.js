@@ -325,12 +325,6 @@ export default function JobDetail() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Problem Statement + Progress + Scores */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Live results — polls while the eval is generating/running and
-              merges rows in place. Final scored view (phase_results) renders
-              below once the job reaches a terminal status. */}
-          {['generating', 'running'].includes(job.status) && (
-            <LiveEvalResults jobId={id} active={['generating', 'running'].includes(job.status)} />
-          )}
           {/* Problem Statement */}
           {datasetLoading && (
             <Card data-testid="problem-statement-card">
@@ -627,6 +621,13 @@ export default function JobDetail() {
               )}
             </CardContent>
           </Card>
+
+          {/* Live results — polls while the eval is generating/running and
+              merges rows in place (placed below Progress). Final scored view
+              (phase_results) renders below once the job is terminal. */}
+          {['generating', 'running'].includes(job.status) && (
+            <LiveEvalResults jobId={id} active={['generating', 'running'].includes(job.status)} />
+          )}
 
           {/* Scores */}
           {hasScores && (

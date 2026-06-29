@@ -25,6 +25,19 @@ to `@emergent*` email domains).
 - `/api/eval/stats` proxy computes the `replaying` status count.
 - RunEvalModal Agent Name reverted from Combobox to plain Input.
 - RunEvalModal "All Types" dataset truncation fixed via per-type parallel fan-out.
+- **(2026-06-29) Live Results on eval-detail + multi-agent eval submit**:
+  - Multi-agent New Eval: searchable multi-select sourced from harness
+    `/api/v1/agents` (396 agents) → submitted as `agent_names[]`; BFF
+    `_expand_agent_fanout` cross-products agent×problem (stamps agent_name per
+    eval row), enforces 100-job cap with exact message. Results grouped by
+    agent in EvalRuns (per-agent sub-headers). Inline submit-error banner.
+  - Live Results card (JobDetail, placed below Progress): polls
+    `/eval/jobs/{id}/live-results` + `/llm-calls` every 4s while
+    generating/running, merges rows by key (no flicker), shows status chips +
+    pass/total + grouped LLM-call feed; click a call → lazy
+    `/llm-calls/{call_id}` viewer (request transcript + raw response).
+    Stops/unmounts on terminal → final phase_results view renders. 3 new BFF
+    proxies added. Verified testing_agent iteration_45 (5/5 BE + 5/5 FE).
 - **(2026-06-29) Evals UI batch (testing_agent iteration_43, 5/5 pass)**:
   - RunEvalModal Step 2: removed Model picker + Comment textarea; moved the
     3 run-behaviour toggles (Headed browser / Force rebuild / Phase breakpoint)
@@ -52,7 +65,6 @@ to `@emergent*` email domains).
   backend healthy again.
 
 ## Backlog
-- P1: Refactor `/app/backend/server.py` into `routes/*` + `models.py`.
 - Blocked (upstream): CSV re-import with prior name throws `23505 datasets_name_key`
   due to soft-deleted rows persisting upstream. Not fixable from BFF side.
 
