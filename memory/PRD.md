@@ -25,6 +25,14 @@ to `@emergent*` email domains).
 - `/api/eval/stats` proxy computes the `replaying` status count.
 - RunEvalModal Agent Name reverted from Combobox to plain Input.
 - RunEvalModal "All Types" dataset truncation fixed via per-type parallel fan-out.
+- **(2026-06-29) DatasetsPage pagination + view bugs fixed** — (1) Dataset
+  views now fetch exactly the view's members by instance (`fetchViewDatasets`
+  via `getDatasetInstance`) instead of fetching the first 200 and client-
+  filtering, so all members show regardless of upstream ordering; (2) row
+  selection is now a `Map<key, fullObject>` that persists across pages (was
+  wiped by a page/type-change effect) — bulk delete/export operate on the
+  full cross-page selection. "All Types" + view modes paginate client-side.
+  Verified by testing_agent (iteration_42, 5/5 pass).
 - **(2026-06-29) DatasetsPage "All Types" truncation fixed** — `fetchDatasets`
   now fans out `listDatasetsByType` per type (limit 200) and merges; pagination
   hidden for "All Types"/active-view. Verified: 153 datasets, multiple types shown.
