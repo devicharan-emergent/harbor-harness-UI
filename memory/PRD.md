@@ -25,6 +25,17 @@ to `@emergent*` email domains).
 - `/api/eval/stats` proxy computes the `replaying` status count.
 - RunEvalModal Agent Name reverted from Combobox to plain Input.
 - RunEvalModal "All Types" dataset truncation fixed via per-type parallel fan-out.
+- **(2026-06-29) Evals UI batch (testing_agent iteration_43, 5/5 pass)**:
+  - RunEvalModal Step 2: removed Model picker + Comment textarea; moved the
+    3 run-behaviour toggles (Headed browser / Force rebuild / Phase breakpoint)
+    into a collapsed-by-default "Extra Options" collapsible.
+  - JobDetail Quick Links: relabeled Cortex → "View Emergent Job"; added
+    "Replay Eval" deep link (`eval-ui-replay.internal.preview.emergentagent.com/?job_id=<cortex>&env=prod&autoload=1`);
+    removed the two Redash comparison links.
+  - Moved the Redash Data/Tool-Usage comparison links onto the Evals group
+    name card (icon links, dashboards 730/731, group preselected).
+  - Added "View Emergent Job" (app.emergent.sh) link to job rows in EvalRuns
+    (expanded) and GroupDetailPage; all open in new tab with stopPropagation.
 - **(2026-06-29) DatasetsPage pagination + view bugs fixed** — (1) Dataset
   views now fetch exactly the view's members by instance (`fetchViewDatasets`
   via `getDatasetInstance`) instead of fetching the first 200 and client-
