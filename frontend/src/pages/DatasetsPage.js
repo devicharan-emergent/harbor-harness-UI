@@ -900,7 +900,13 @@ export default function DatasetsPage() {
               {/* Pagination */}
               <div className="flex items-center justify-between mt-4 pt-4 border-t">
                 <p className="text-xs text-muted-foreground">
-                  Showing {Math.min(pagedDatasets.length, pageSize)} of {filteredDatasets.length} dataset{filteredDatasets.length !== 1 ? 's' : ''} (Page {page + 1})
+                  {(() => {
+                    const start = filteredDatasets.length === 0 ? 0 : page * pageSize + 1;
+                    const end = page * pageSize + pagedDatasets.length;
+                    return clientPaginated
+                      ? `Showing ${start}-${end} of ${filteredDatasets.length} dataset${filteredDatasets.length !== 1 ? 's' : ''}`
+                      : `Showing ${start}-${end} (Page ${page + 1})`;
+                  })()}
                 </p>
                 <div className="flex items-center gap-2">
                   <Button
