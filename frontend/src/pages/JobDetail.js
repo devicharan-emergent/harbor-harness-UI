@@ -1499,7 +1499,7 @@ export default function JobDetail() {
                   )}
                   {cortexJobId && (
                     <a
-                      href={`https://eval-ui-replay.internal.preview.emergentagent.com/?job_id=${cortexJobId}&env=prod&autoload=1`}
+                      href={`https://eval-ui-replay.internal.emergent.host/?job_id=${cortexJobId}&env=prod&autoload=1`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex items-center gap-2 text-xs text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300 underline-offset-2 hover:underline"
