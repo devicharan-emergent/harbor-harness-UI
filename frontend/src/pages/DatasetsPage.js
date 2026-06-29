@@ -100,12 +100,29 @@ export default function DatasetsPage() {
       const narrowToView = !!activeView;
       const limit = narrowToView ? 200 : pageSize;
       const offset = narrowToView ? 0 : page * pageSize;
-      if (narrowToView || typeFilter === 'all') {
+      if (typeFilter === 'all') {
+        // Upstream `/datasets?limit=N` truncates alphabetically, hiding
+        // bug_bench / testing_agent_bench / wingman_bench whenever
+        // scratch_bench_phased dominates the first N rows. Fetch each
+        // known type in parallel and merge so each type gets its own cap.
+        const KNOWN_TYPES = DATASET_TYPES.map(t => t.value).filter(v => v !== 'all');
+        const results = await Promise.allSettled(
+          KNOWN_TYPES.map(t => listDatasetsByType(t, { limit: 200, offset: 0 })),
+        );
+        const merged = [];
+        for (const r of results) {
+          if (r.status === 'fulfilled' && Array.isArray(r.value?.datasets)) {
+            merged.push(...r.value.datasets);
+          }
+        }
+        setDatasets(merged);
+      } else if (narrowToView) {
         data = await listDatasets({ limit, offset });
+        setDatasets(data.datasets || []);
       } else {
         data = await listDatasetsByType(typeFilter, { limit, offset });
+        setDatasets(data.datasets || []);
       }
-      setDatasets(data.datasets || []);
     } catch (error) {
       console.error('Failed to fetch datasets:', error);
       toast.error('Failed to load datasets');
@@ -860,8 +877,9 @@ export default function DatasetsPage() {
               {/* Pagination */}
               <div className="flex items-center justify-between mt-4 pt-4 border-t">
                 <p className="text-xs text-muted-foreground">
-                  Showing {filteredDatasets.length} dataset{filteredDatasets.length !== 1 ? 's' : ''} (Page {page + 1})
+                  Showing {filteredDatasets.length} dataset{filteredDatasets.length !== 1 ? 's' : ''}{typeFilter === 'all' || activeView ? '' : ` (Page ${page + 1})`}
                 </p>
+                {typeFilter !== 'all' && !activeView && (
                 <div className="flex items-center gap-2">
                   <Button
                     variant="outline"
@@ -886,6 +904,7 @@ export default function DatasetsPage() {
                     <ChevronRight className="w-3.5 h-3.5 ml-1" />
                   </Button>
                 </div>
+                )}
               </div>
             </>
           )}
