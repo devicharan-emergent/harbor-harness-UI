@@ -12,7 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
-import { listDatasets, listDatasetsByType, getDatasetForProblem, submitEvalJobs, submitEvalJobsWithEs, submitTestingAgentEval, checkAgentExists, getVerifierConfig, getDatasetView } from '@/services/evalApi';
+import { listDatasetsByType, getDatasetForProblem, submitEvalJobs, submitEvalJobsWithEs, submitTestingAgentEval, checkAgentExists, getVerifierConfig, getDatasetView } from '@/services/evalApi';
 import { listAgents } from '@/services/cortexApi';
 import { agentApi } from '@/lib/api';
 import { useCreatedBy } from '@/contexts/AuthContext';
@@ -31,6 +31,7 @@ const DATASET_TYPES = [
   { value: 'scratch_bench_phased', label: 'Scratch Bench (Phased)' },
   { value: 'bug_bench', label: 'Bug Bench' },
   { value: 'testing_agent_bench', label: 'Testing Agent Bench' },
+  { value: 'wingman_bench', label: 'Wingman Bench' },
 ];
 
 // Resource sizing — formerly user-tweakable per-run. The UI was removed
@@ -439,13 +440,29 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
   const fetchDatasets = useCallback(async () => {
     setLoadingDatasets(true);
     try {
-      let data;
       if (datasetType === 'all') {
-        data = await listDatasets({ limit: 100 });
+        // Upstream `/datasets?limit=100` truncates to the first 100 rows
+        // (alphabetical), which hides bug_bench / testing_agent_bench /
+        // wingman_bench whenever scratch_bench_phased dominates. Fetch
+        // each known type in parallel and merge — that gives each type
+        // its own 100-row cap.
+        const KNOWN_TYPES = DATASET_TYPES
+          .map(t => t.value)
+          .filter(v => v !== 'all');
+        const results = await Promise.allSettled(
+          KNOWN_TYPES.map(t => listDatasetsByType(t, { limit: 100 })),
+        );
+        const merged = [];
+        for (const r of results) {
+          if (r.status === 'fulfilled' && Array.isArray(r.value?.datasets)) {
+            merged.push(...r.value.datasets);
+          }
+        }
+        setDatasets(merged);
       } else {
-        data = await listDatasetsByType(datasetType, { limit: 100 });
+        const data = await listDatasetsByType(datasetType, { limit: 100 });
+        setDatasets(data.datasets || []);
       }
-      setDatasets(data.datasets || []);
     } catch (error) {
       console.error('Failed to fetch datasets:', error);
       setDatasets([]);
@@ -1270,27 +1287,18 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
               </div>
 
               {/* Agent name — always visible (moved above and out of collapse).
-                  Searchable combobox synced with the agents "All list" for
-                  the selected eph; commits free text via the inline
-                  "Use ‘…’" row for agents not yet registered. */}
+                  Free-text input — searchable dropdown disabled until we
+                  have a reliable agents-list endpoint. */}
               {!isTestingAgentMode && (
                 <div>
                   <Label className="text-sm font-semibold">Agent name *</Label>
                   <div className="mt-1.5">
-                    <Combobox
+                    <Input
                       value={agentNameOverride}
-                      onChange={setAgentNameOverride}
-                      options={agentOptions}
-                      placeholder="Search agents…"
-                      searchPlaceholder={
-                        submitEph
-                          ? 'Search agents on this eph…'
-                          : ephAgents.length === 0 && prodAgents.length > 0
-                            ? 'Search prod agents (no eph selected)…'
-                            : 'Search agents…'
-                      }
-                      emptyText="No match — type to commit a custom agent id"
-                      testId="eval-agent-name-override"
+                      onChange={(e) => setAgentNameOverride(e.target.value)}
+                      placeholder="e.g. full_stack_app_builder_cloud_v8_sonnet_4_5"
+                      className="font-mono text-sm"
+                      data-testid="eval-agent-name-override"
                     />
                   </div>
                 </div>
@@ -1323,8 +1331,8 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
               </div>
 
               {/* Agent name — required for testing_agent_mode too.
-                  Searchable combobox synced with the agents "All list" (prod
-                  catalog when no eph is picked, eph-scoped when one is). */}
+                  Free-text input — searchable dropdown disabled until we
+                  have a reliable agents-list endpoint. */}
               {isTestingAgentMode && (
                 <div>
                   <Label className="text-sm font-semibold">Agent Name *</Label>
@@ -1333,20 +1341,12 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                     <code className="font-mono"> attributes.agent_name </code>
                     is a placeholder — this is the real value used at run-time.
                   </p>
-                  <Combobox
+                  <Input
                     value={agentNameOverride}
-                    onChange={setAgentNameOverride}
-                    options={agentOptions}
-                    placeholder="Search agents…"
-                    searchPlaceholder={
-                      submitEph
-                        ? 'Search agents on this eph…'
-                        : ephAgents.length === 0 && prodAgents.length > 0
-                          ? 'Search prod agents (no eph selected)…'
-                          : 'Search agents…'
-                    }
-                    emptyText="No match — type to commit a custom agent id"
-                    testId="eval-testing-agent-name-override"
+                    onChange={(e) => setAgentNameOverride(e.target.value)}
+                    placeholder="e.g. full_stack_app_builder_cloud_v8_sonnet_4_5"
+                    className="font-mono text-sm"
+                    data-testid="eval-testing-agent-name-override"
                   />
                 </div>
               )}
