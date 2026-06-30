@@ -199,11 +199,13 @@ export default function JobDetail() {
   const phaseResults = allPhaseResults.filter(p => p.kind !== 'replay');
   const replayPhases = allPhaseResults.filter(p => p.kind === 'replay');
 
-  // Replay eligibility (mirrors backend): completed + scratch_bench_phased.
-  // Note the harness also accepts the dataset_type embedded in the
-  // problem name, so check both shapes.
+  // Replay eligibility: a scratch_bench_phased job that has a live preview
+  // URL. The harness now permits replay whenever a preview exists (it is no
+  // longer gated on status === 'completed'), so the button follows the
+  // preview, not the job status.
   const datasetType = job.dataset_type || (job.problem || '').split('/')[0];
-  const isReplayEligible = job.status === 'completed' && datasetType === 'scratch_bench_phased';
+  const previewUrl = job.progress?.metadata?.preview_url || null;
+  const isReplayEligible = !!previewUrl && datasetType === 'scratch_bench_phased';
 
   return (
     <div className="space-y-6" data-testid="job-detail-page">

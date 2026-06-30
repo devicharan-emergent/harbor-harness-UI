@@ -215,12 +215,11 @@ function JobRow({ job, selectable, selected, onToggleSelect }) {
   const StatusIcon = cfg.icon;
   const agentName = getJobAgentName(job);
   const modelName = getJobModelName(job);
-  // Replay-eligible: only completed scratch_bench_phased jobs can be
-  // replayed (browser verifier only re-runs on a built preview). The
-  // harness will also enforce this server-side, but client filtering
-  // keeps the checkbox UI honest.
+  // Replay-eligible: scratch_bench_phased jobs that have a live preview URL.
+  // The harness now permits replay whenever a preview exists (no longer gated
+  // on status === 'completed'); client filtering keeps the checkbox honest.
   const isReplayEligible =
-    job.status === 'completed' &&
+    !!job.progress?.metadata?.preview_url &&
     (job.dataset_type === 'scratch_bench_phased' ||
       (job.problem || '').startsWith('scratch_bench_phased/'));
   const isReplaying = job.status === 'replaying';
@@ -385,7 +384,7 @@ export default function GroupDetailPage() {
 
   // ── Replay-eligibility helper (mirrors JobRow's gate) ────────────────
   const isJobReplayEligible = useCallback((j) => (
-    j.status === 'completed' &&
+    !!j.progress?.metadata?.preview_url &&
     (j.dataset_type === 'scratch_bench_phased' ||
       (j.problem || '').startsWith('scratch_bench_phased/'))
   ), []);
