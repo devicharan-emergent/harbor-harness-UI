@@ -1,0 +1,20 @@
+{
+  "summary": "Iteration 49 — End-to-end verification of the Judge `reasoning_effort` feature for testing_agent_bench. All 5 scenarios PASS: (1) verifier-reasoning-effort Select exists in the JudgeConfigDialog with (default)/low/medium/high options and persists on re-open after Save (high → high), (2) Step 2 judge-config-summary shows 'Reasoning effort: high', (3) Review step review-judge-verifier-reasoning displays 'high' with the 'custom — sent with run' badge, (4) Submit succeeded for 1 problem × 1 agent — no submit-error-banner, modal closed and navigated to /evals, (5) Reset returns the reasoning effort to '(default — not sent)' and the summary now shows '(default)' with the 'default' badge (is_default=true). Cleanup done (state reset to default).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "JudgeConfigDialog.js correctly stores `reasoning_effort` as the local sentinel 'default' and translates to empty string on save payload (line 149: `showReasoning && reasoningEffort !== 'default' ? reasoningEffort : ''`). The reset path (line 169) maps cfg.reasoning_effort || 'default' back to UI value — symmetric and correct.",
+    "RunEvalModal.js judge-config-summary is rendered inside the `ta-extra-options-trigger` collapsible (collapsed by default). Test had to expand it before asserting — works as designed. VerifierReview at Step 3 surfaces `config.reasoning_effort` only when truthy, so default config correctly omits the row (line 265-272).",
+    "Submit payload conditionally adds `judge_reasoning_effort` only when judgeConfig is non-default AND has reasoning_effort set (RunEvalModal.js line 1010). Matches the spec exactly — no leak when reset to defaults."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only; backend curl pre-verified by main agent)", "frontend": "100% (5/5 scenarios)"},
+  "test_credentials": "localStorage acm_session_token='pw_emergent_gate_post'",
+  "seed_data_creation": "Submitted 1 minimal eval job: group TEST_reasoning_high_1782805158, 1 testing_agent_bench problem (testing_agent_bench/131151e-dc80-4a7a-880f-187dba1afe6b), agent=full_stack_app_builder_cloud_v8_sonnet_4_5, judge_reasoning_effort=high. Submit succeeded (no submit-error-banner, modal closed → navigated to /evals). After the run, the testing_agent_bench verifier config was RESET to default via the dialog so the global judge state is clean for the next test agent (Reasoning effort back to '(default)', is_default=true, summary shows the 'default' badge).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Feature: VerifierConfigForm exposes the Reasoning Effort Select only for benchType==='testing_agent_bench' (showReasoning gate in JudgeConfigDialog.js:104). Saved value flows through evalApi.updateVerifierConfig → backend PUT /api/verifier-config/testing_agent_bench. Step 2 judge-config-summary lives INSIDE the ta-extra-options-trigger collapsible — must expand it before asserting. Step 3 VerifierReview surfaces both model and reasoning effort with data-testids review-judge-verifier-{model,reasoning,prompt-toggle}. Submit forwards `judge_reasoning_effort` at the batchBody root (not inside experiments) and ONLY when judgeConfig.is_default === false AND reasoning_effort truthy. Reset endpoint zeros out reasoning_effort along with prompt/model. Verified end-to-end PUT high → re-open shows high, Reset → summary shows '(default)' + 'default' badge.",
+  "rca of the issue": "N/A — feature verification only. No regressions; spec implemented exactly."
+}

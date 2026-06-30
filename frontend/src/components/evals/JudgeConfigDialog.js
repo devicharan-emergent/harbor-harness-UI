@@ -100,6 +100,8 @@ export function VerifierConfigForm({ benchType, onClose, onSaved, showSaveFooter
   const [isDefault, setIsDefault] = useState(true);
   const [updatedAt, setUpdatedAt] = useState(null);
   const [modelForceCustom, setModelForceCustom] = useState(false);
+  const [reasoningEffort, setReasoningEffort] = useState('default');
+  const showReasoning = benchType === 'testing_agent_bench';
 
   useEffect(() => {
     let cancelled = false;
@@ -110,6 +112,7 @@ export function VerifierConfigForm({ benchType, onClose, onSaved, showSaveFooter
         if (cancelled) return;
         setPrompt(cfg.prompt || '');
         setModel(cfg.model || MODEL_PRESETS[0]);
+        setReasoningEffort(cfg.reasoning_effort || 'default');
         setIsDefault(!!cfg.is_default);
         setUpdatedAt(cfg.updated_at || null);
         setModelForceCustom(false);
@@ -143,6 +146,7 @@ export function VerifierConfigForm({ benchType, onClose, onSaved, showSaveFooter
       const cfg = await updateVerifierConfig(benchType, {
         prompt,
         model: model.trim() || MODEL_PRESETS[0],
+        reasoning_effort: showReasoning && reasoningEffort !== 'default' ? reasoningEffort : '',
       });
       setIsDefault(!!cfg.is_default);
       setUpdatedAt(cfg.updated_at);
@@ -162,6 +166,7 @@ export function VerifierConfigForm({ benchType, onClose, onSaved, showSaveFooter
       const cfg = await resetVerifierConfig(benchType);
       setPrompt(cfg.prompt);
       setModel(cfg.model);
+      setReasoningEffort(cfg.reasoning_effort || 'default');
       setIsDefault(true);
       setUpdatedAt(null);
       setModelForceCustom(false);
@@ -239,6 +244,29 @@ export function VerifierConfigForm({ benchType, onClose, onSaved, showSaveFooter
               )}
             </div>
           </div>
+
+          {showReasoning && (
+            <div>
+              <Label className="text-xs font-medium">Reasoning Effort</Label>
+              <div className="mt-1">
+                <Select value={reasoningEffort} onValueChange={setReasoningEffort}>
+                  <SelectTrigger className="text-sm" data-testid="verifier-reasoning-effort">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="default">(default — not sent)</SelectItem>
+                    <SelectItem value="low">low</SelectItem>
+                    <SelectItem value="medium">medium</SelectItem>
+                    <SelectItem value="high">high</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Passed to the judge model as <code className="font-mono">reasoning_effort</code>. Leave on
+                {' '}<span className="font-mono">(default)</span> to omit (model decides).
+              </p>
+            </div>
+          )}
 
           <div>
             <div className="flex items-center justify-between mb-1">
