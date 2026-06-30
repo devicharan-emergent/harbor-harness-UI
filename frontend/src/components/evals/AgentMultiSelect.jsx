@@ -10,7 +10,6 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 
 /**
@@ -82,25 +81,28 @@ export function AgentMultiSelect({
 
   return (
     <div className="space-y-1.5">
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger asChild>
-          <Button
-            type="button"
-            variant="outline"
-            role="combobox"
-            aria-expanded={open}
-            className="w-full justify-between font-normal"
-            data-testid={`${testId}-trigger`}
-          >
-            <span className="truncate text-xs">
-              {value.length === 0
-                ? 'Select agents…'
-                : `${value.length} agent${value.length === 1 ? '' : 's'} selected`}
-            </span>
-            <ChevronsUpDown className="w-4 h-4 opacity-50 flex-shrink-0" />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+      {/* Rendered INLINE (not a portaled Popover) so wheel-scroll works
+          inside the Radix Dialog's scroll-lock (react-remove-scroll only
+          allows scrolling of nodes within the locked subtree). */}
+      <Button
+        type="button"
+        variant="outline"
+        role="combobox"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className="w-full justify-between font-normal"
+        data-testid={`${testId}-trigger`}
+      >
+        <span className="truncate text-xs">
+          {value.length === 0
+            ? 'Select agents…'
+            : `${value.length} agent${value.length === 1 ? '' : 's'} selected`}
+        </span>
+        <ChevronsUpDown className="w-4 h-4 opacity-50 flex-shrink-0" />
+      </Button>
+
+      {open && (
+        <div className="rounded-md border bg-popover shadow-md">
           <Command
             filter={(itemValue, search) =>
               itemValue.toLowerCase().includes(search.toLowerCase()) ? 1 : 0
@@ -111,12 +113,11 @@ export function AgentMultiSelect({
               className="text-xs"
               data-testid={`${testId}-input`}
             />
-            <CommandList>
+            <CommandList className="max-h-64">
               <CommandEmpty>No agents match.</CommandEmpty>
               <CommandGroup>
                 {agents.map((a) => {
                   const selected = value.includes(a.id);
-                  // searchable string: id + name + tags
                   const searchVal = `${a.id} ${a.name || ''} ${(a.tags || []).join(' ')}`;
                   return (
                     <CommandItem
@@ -139,8 +140,8 @@ export function AgentMultiSelect({
               </CommandGroup>
             </CommandList>
           </Command>
-        </PopoverContent>
-      </Popover>
+        </div>
+      )}
 
       {value.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5" data-testid={`${testId}-chips`}>

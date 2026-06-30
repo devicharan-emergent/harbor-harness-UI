@@ -458,11 +458,19 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
   const [taAgentNames, setTaAgentNames] = useState([]);
   const [taAgentsTouched, setTaAgentsTouched] = useState(false);
   // Agent objects keyed so the testing-agent multi-select can use NAME as the
-  // identity (agent_name is a name string, not the catalog id).
-  const evalAgentsByName = useMemo(
-    () => evalAgents.map((a) => ({ ...a, id: a.name || a.id })),
-    [evalAgents],
-  );
+  // identity (agent_name is a name string, not the catalog id). De-duped by
+  // name — the harness catalog returns some agent_names more than once.
+  const evalAgentsByName = useMemo(() => {
+    const seen = new Set();
+    const out = [];
+    for (const a of evalAgents) {
+      const id = a.name || a.id;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push({ ...a, id });
+    }
+    return out;
+  }, [evalAgents]);
 
   const fetchEvalAgents = useCallback(async () => {
     setAgentsLoading(true);

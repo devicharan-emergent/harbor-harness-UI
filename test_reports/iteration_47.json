@@ -1,0 +1,20 @@
+{
+  "summary": "Iteration 47 — Verified the mouse-wheel scroll fix in AgentMultiSelect for BOTH scratch_bench_phased (eval-agents-multiselect) and testing_agent_bench (eval-testing-agents-multiselect) flows of the RunEvalModal. The inline (no-Popover) Command panel now scrolls under the dialog's react-remove-scroll lock. The evalAgentsByName de-dupe also eliminates the prior React duplicate-key warnings. All 4 reported scenarios PASS.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "AgentMultiSelect.jsx now renders the Command panel INLINE inside the dialog (lines 104-144) instead of a portaled Popover. CommandList has className='max-h-64' (256px) with overflow-y-auto. Verified scrollHeight≈17432px / clientHeight=256px on 396 options for scratch and 16992px / 256px on the testing list — page.mouse.wheel(0,600) over the cmdk-list moves scrollTop from 0→600, and another wheel(0,400) moves it to 1000 in both flows. Selecting from the wheel-scrolled position still toggles correctly.",
+    "RunEvalModal.js:463-473 evalAgentsByName is now de-duped by name||id via a seen Set. Console produced ZERO 'Encountered two children with the same key' warnings during opening + scrolling + searching the testing-agent list (previously ~10 in iteration 46). Console errors during the whole flow: 0.",
+    "Regression checks all pass: scratch flow — typing 'sonnet' in input filters to 81 options; selecting 2 options shows '2 agents selected' on the trigger, 2 chips, eval-fanout-count='2 agents × 1 problem = 2 jobs'; chip-remove takes it to '1 agent selected'; clear takes it to 'Select agents…'. Testing-agent flow — pre-populated '1 agent selected' on entering Step 2; adding a 2nd agent (after wheel-scrolling) updates trigger to '2 agents selected', 2 chips render, ta-fanout-count='2 agents × 1 dataset = 2 jobs'."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only)", "frontend": "100% (4/4 scenarios)"},
+  "test_credentials": "localStorage acm_session_token='pw_emergent_gate_post'",
+  "seed_data_creation": "None — no eval submitted.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Mouse-wheel scroll inside the New Eval modal's agent multi-select now works in both scratch_bench and testing_agent_bench flows because AgentMultiSelect renders the Command list INLINE (not in a portaled Popover), keeping it inside the Radix Dialog's scroll-lock subtree. The cmdk-list element has the [cmdk-list] attribute and scrolls via page.mouse.wheel after moving the mouse over it. evalAgentsByName in RunEvalModal.js is now de-duped by name, removing the React duplicate-key warnings. The only pre-existing noise still present is the unrelated 500 on /api/eval/runs/groups/{id}/aggregate for brand-new groups (not exercised in this iteration since no submit was needed).",
+  "rca of the issue": "N/A — fix verification only. Original root cause (from review request): the agent list was inside a portaled Popover that lived OUTSIDE the Radix Dialog's DOM subtree; react-remove-scroll, used by the Dialog's scroll-lock, blocks wheel events targeted at nodes outside the locked subtree, so wheel events on the popover list were swallowed. Moving the Command panel INLINE inside the dialog body puts it inside the allowed subtree, so wheel events propagate and the cmdk-list's overflow-y-auto handles scrolling normally."
+}
