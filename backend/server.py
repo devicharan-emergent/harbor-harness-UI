@@ -1551,6 +1551,7 @@ async def _read_verifier_doc(bench: str) -> dict:
             "bench_type": bench,
             "prompt": defaults["prompt"],
             "model": defaults["model"],
+            "effort": "",
             "is_default": True,
             "updated_at": None,
         }
@@ -1560,6 +1561,7 @@ async def _read_verifier_doc(bench: str) -> dict:
         # /"judge_model") field names.
         "prompt": doc.get("prompt") or doc.get("judge_prompt") or defaults["prompt"],
         "model": doc.get("model") or doc.get("judge_model") or defaults["model"],
+        "effort": doc.get("effort") or "",
         "is_default": False,
         "updated_at": doc.get("updated_at"),
     }
@@ -1576,17 +1578,21 @@ async def update_verifier_config(body: dict, bench: str = "testing_agent_bench")
     _ensure_known_bench(bench)
     prompt = (body.get("prompt") or "").strip()
     model = (body.get("model") or "").strip() or BENCH_VERIFIER_DEFAULTS[bench]["model"]
+    effort = (body.get("effort") or "").strip().lower()
+    if effort not in ("", "low", "medium", "high"):
+        raise HTTPException(status_code=400, detail="effort must be one of: low, medium, high (or empty)")
     _validate_verifier_prompt(prompt, bench)
     now = datetime.now(timezone.utc).isoformat()
     await db.judge_config.update_one(
         {"_id": bench},
-        {"$set": {"prompt": prompt, "model": model, "updated_at": now}},
+        {"$set": {"prompt": prompt, "model": model, "effort": effort, "updated_at": now}},
         upsert=True,
     )
     return {
         "bench_type": bench,
         "prompt": prompt,
         "model": model,
+        "effort": effort,
         "is_default": False,
         "updated_at": now,
     }
@@ -1604,6 +1610,7 @@ async def reset_verifier_config(bench: str = "testing_agent_bench"):
         "bench_type": bench,
         "prompt": defaults["prompt"],
         "model": defaults["model"],
+        "effort": "",
         "is_default": True,
         "updated_at": None,
     }

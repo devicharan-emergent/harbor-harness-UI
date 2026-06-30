@@ -6,16 +6,16 @@ export const THINKING_TYPES = ['enabled', 'adaptive', 'disabled'];
 
 export const THINKING_EFFORTS = ['low', 'medium', 'high'];
 
-// Judge models selectable per testing-agent eval run. `thinking: true` => the
-// model supports a reasoning-effort control (Off/low/medium/high); `false` =>
-// hide the effort control (the harness can't honor thinking on it).
-// NOTE: if a backend smoke-test finds gemini-3-flash 404s, change the id here
-// to 'gemini-3-flash-preview' — single source of truth.
-export const JUDGE_MODELS = [
-  { id: 'gpt-5.5',             label: 'GPT-5.5',               provider: 'openai', thinking: true  },
-  { id: 'gemini-3-flash',      label: 'Gemini 3 Flash',        provider: 'gemini', thinking: true  },
-  { id: 'gemini-flash-latest', label: 'Gemini Flash (latest)', provider: 'gemini', thinking: false },
-];
+// Single source of truth mirroring the backend gating: does this model honor a
+// reasoning-effort param? Gemini 3 (thinking_level) + OpenAI gpt-5*/o-series
+// (reasoning_effort) do; gemini-flash-latest / gemini-2.5* etc. do not (the
+// harness drops effort there). UX-only gate — the harness safely ignores it.
+export const modelSupportsEffort = (model = '') => {
+  const m = (model || '').toLowerCase();
+  if (m.includes('gemini-3-flash') || m.includes('gemini-3.1-flash') || m.includes('gemini-3-pro')) return true;
+  if (m.startsWith('gpt-5') || /^o[1-9]/.test(m)) return true;
+  return false;
+};
 
 export const TRANSPORT_TYPES = ['http', 'stdio'];
 

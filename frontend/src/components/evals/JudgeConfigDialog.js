@@ -28,9 +28,10 @@ import {
   resetVerifierConfig,
 } from '@/services/evalApi';
 import { parseApiError } from '@/lib/errorUtils';
+import { THINKING_EFFORTS, modelSupportsEffort } from '@/lib/constants';
 
 // Shared shortlist + free-text Custom for the model picker.
-const MODEL_PRESETS = ['gemini-flash-latest', 'gpt-5.5'];
+const MODEL_PRESETS = ['gemini-flash-latest', 'gemini-3-flash-preview', 'gpt-5.5'];
 const CUSTOM_SENTINEL = '__custom__';
 
 // Per-bench labels, defaults, and required-token rules. The page passes
@@ -100,6 +101,13 @@ export function VerifierConfigForm({ benchType, onClose, onSaved, showSaveFooter
   const [isDefault, setIsDefault] = useState(true);
   const [updatedAt, setUpdatedAt] = useState(null);
   const [modelForceCustom, setModelForceCustom] = useState(false);
+  // Reasoning effort persisted alongside model/prompt. 'off' => not sent.
+  const [effort, setEffort] = useState('off');
+
+  // Effort only applies to effort-capable models; reset when the model can't use it.
+  useEffect(() => {
+    if (!modelSupportsEffort(model) && effort !== 'off') setEffort('off');
+  }, [model, effort]);
 
   useEffect(() => {
     let cancelled = false;
@@ -110,6 +118,7 @@ export function VerifierConfigForm({ benchType, onClose, onSaved, showSaveFooter
         if (cancelled) return;
         setPrompt(cfg.prompt || '');
         setModel(cfg.model || MODEL_PRESETS[0]);
+        setEffort(cfg.effort || 'off');
         setIsDefault(!!cfg.is_default);
         setUpdatedAt(cfg.updated_at || null);
         setModelForceCustom(false);
@@ -143,6 +152,7 @@ export function VerifierConfigForm({ benchType, onClose, onSaved, showSaveFooter
       const cfg = await updateVerifierConfig(benchType, {
         prompt,
         model: model.trim() || MODEL_PRESETS[0],
+        effort: (modelSupportsEffort(model) && effort !== 'off') ? effort : '',
       });
       setIsDefault(!!cfg.is_default);
       setUpdatedAt(cfg.updated_at);
@@ -162,6 +172,7 @@ export function VerifierConfigForm({ benchType, onClose, onSaved, showSaveFooter
       const cfg = await resetVerifierConfig(benchType);
       setPrompt(cfg.prompt);
       setModel(cfg.model);
+      setEffort(cfg.effort || 'off');
       setIsDefault(true);
       setUpdatedAt(null);
       setModelForceCustom(false);
@@ -239,6 +250,28 @@ export function VerifierConfigForm({ benchType, onClose, onSaved, showSaveFooter
               )}
             </div>
           </div>
+
+          {modelSupportsEffort(model) && (
+            <div>
+              <Label className="text-xs font-medium">Reasoning effort</Label>
+              <div className="mt-1">
+                <Select value={effort} onValueChange={setEffort}>
+                  <SelectTrigger className="text-sm" data-testid="verifier-effort-select">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="off">Off</SelectItem>
+                    {THINKING_EFFORTS.map((e) => (
+                      <SelectItem key={e} value={e}>{e}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Mapped to the model's native reasoning param (Gemini <span className="font-mono">thinking_level</span> / OpenAI <span className="font-mono">reasoning_effort</span>). Sent on each eval; omitted when Off.
+              </p>
+            </div>
+          )}
 
           <div>
             <div className="flex items-center justify-between mb-1">

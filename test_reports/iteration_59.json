@@ -1,0 +1,35 @@
+{
+  "summary": "Iteration 59 — Verifier-Config reasoning-effort feature: PASSED end-to-end. Validated round-trip persistence on /judge-config for both benches, conditional visibility (gemini-3-flash-preview / gpt-5.5 show, gemini-flash-latest hides), reset-to-Off when switching to unsupported model and back, and submit-payload stamping with POST /api/eval/jobs intercepted. All 7 review-request scenarios passed.",
+  "scope_tested": [
+    "Frontend /judge-config (VerifierConfigForm) — testing_agent_bench + scratch_bench_phased",
+    "Frontend RunEvalModal submit payload (testing + scratch) with route interception",
+    "Off-omits behavior"
+  ],
+  "results": {
+    "1_testing_round_trip_low": "PASS — model=gemini-3-flash-preview, effort=low saved + persisted after reload",
+    "2_effort_visibility_hide_show": "PASS — hidden for gemini-flash-latest, visible for gemini-3-flash-preview & gpt-5.5",
+    "3_effort_resets_to_off": "PASS — switching to unsupported then back resets effort to Off (not 'high')",
+    "4_scratch_round_trip_medium": "PASS — scratch_bench_phased model+effort=medium persisted after reload",
+    "5_submit_testing_payload": "PASS — evals[0].experiments.judge_model='gemini-3-flash-preview', judge_thinking={'effort':'low'}, judge_prompt present",
+    "6_submit_scratch_payload": "PASS — evals[0].experiments.browser_model='gemini-3-flash-preview', browser_thinking={'effort':'medium'}",
+    "7_off_omits_judge_thinking": "PASS — with effort=Off, experiments keys = [prod_job_id, hitl_input, golden_output, judge_prompt, judge_model]; NO judge_thinking key"
+  },
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "JudgeConfigDialog.js — effort reset effect ('if !modelSupportsEffort && effort!=off => setEffort(off)') correctly triggers on model change; verified via manual reproduction.",
+    "RunEvalModal.js stamps judge_thinking only when judgeConfig.effort truthy (non-empty string) — correctly omits when Off. Same for browser_thinking.",
+    "evalApi.updateVerifierConfig passes effort verbatim (sent as '' when Off) — matches backend contract.",
+    "Note: scratchVerifier stamping is also gated on dataset_type==='scratch_bench_phased' (not just bench select) which means mixed-type batches will only stamp browser_thinking on scratch problems — sensible but worth documenting."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (backend curl previously verified by main agent)", "frontend": "100% (7/7 scenarios)"},
+  "test_credentials": "localStorage acm_session_token = pw_emergent_gate_post (TEST_pw_user@emergent.com, admin)",
+  "seed_data_creation": "No persistent test data created. Verifier configs (testing + scratch) were mutated during tests; left in: testing_agent_bench={model:gemini-3-flash-preview, effort:''(Off)}, scratch_bench_phased={model:gemini-3-flash-preview, effort:'medium'}. Reset-to-default on each from /judge-config if desired.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "POST /api/eval/jobs interception works via page.route('**/eval/jobs**') AND '**/api/eval/jobs**' (auth interceptor appends ?access_token=...). Modal Step 2 requires a non-empty Group Name (data-testid 'eval-group-name') before the Next button enables. To close the agent multiselect dropdown without dismissing the modal, click on 'eval-group-name' (DO NOT press Escape — it closes the modal). Agent multiselect testids: 'eval-testing-agents-multiselect-*' on the testing_agent_bench flow, 'eval-agents-multiselect-*' on the standard scratch flow.",
+  "mocked_apis_used": ["POST /api/eval/jobs (fulfilled with {jobs:[{id:'fake'}],group_run_id:'fake'})"]
+}
