@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Separator } from '@/components/ui/separator';
-import { Loader2, ArrowLeft, ExternalLink, RefreshCw, Layers, Clock, Cpu, ActivitySquare, CheckCircle, XCircle, Ban, Copy, Timer, Play } from 'lucide-react';
+import { Loader2, ArrowLeft, ExternalLink, RefreshCw, Layers, Clock, Cpu, ActivitySquare, CheckCircle, XCircle, Ban, Copy, Timer, Play, BarChart3, Wrench } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
 import { getEvalRunGroup, listGroupJobs, getEvalAggregate, listEvalJobs, replayEvalJobs } from '@/services/evalApi';
@@ -449,6 +449,10 @@ export default function GroupDetailPage() {
   };
 
   const displayName = meta?.group_name || groupRunId;
+  // Redash comparison dashboards, pre-filled with this group as group_set_1.
+  const redashGroupArr = encodeURIComponent(JSON.stringify([groupRunId]));
+  const redashSummaryUrl = `https://redash.internal-apps.emergentagent.com/dashboards/730?p_agent_name=All&p_group_set_1=${redashGroupArr}&p_model=All`;
+  const redashToolUrl = `https://redash.internal-apps.emergentagent.com/dashboards/731?p_agent_name=All&p_group_set_1=${redashGroupArr}&p_model=All&p_tool=execute_bash&p_window_end=All`;
   const groupComment = meta?.comment || '';
   const createdAt = meta?.created_at;
   const updatedAt = meta?.updated_at;
@@ -482,6 +486,28 @@ export default function GroupDetailPage() {
               <Layers className="w-4 h-4 text-muted-foreground flex-shrink-0" />
               <h1 className="text-xl font-bold truncate" data-testid="group-detail-name">{displayName}</h1>
               <Badge variant="secondary" className="text-[10px] font-mono">{jobs.length} job{jobs.length === 1 ? '' : 's'}</Badge>
+              <a
+                href={redashSummaryUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center justify-center h-6 w-6 rounded-md text-muted-foreground hover:text-blue-600 dark:hover:text-blue-400 hover:bg-accent flex-shrink-0"
+                data-testid="group-detail-redash-summary"
+                aria-label="Open Eval Data Comparison (Redash dashboard 730)"
+                title="Eval Data Comparison (Redash 730) — this group preselected"
+              >
+                <BarChart3 className="w-3.5 h-3.5" />
+              </a>
+              <a
+                href={redashToolUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center justify-center h-6 w-6 rounded-md text-muted-foreground hover:text-blue-600 dark:hover:text-blue-400 hover:bg-accent flex-shrink-0"
+                data-testid="group-detail-redash-tools"
+                aria-label="Open Eval Tool-Usage Comparison (Redash dashboard 731)"
+                title="Eval Tool-Usage Comparison (Redash 731) — this group preselected"
+              >
+                <Wrench className="w-3.5 h-3.5" />
+              </a>
             </div>
             <div className="flex items-center gap-2 mt-1 flex-wrap">
               <code className="text-[10px] font-mono text-muted-foreground break-all" data-testid="group-detail-id">{groupRunId}</code>

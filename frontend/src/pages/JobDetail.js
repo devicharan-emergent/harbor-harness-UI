@@ -1463,7 +1463,8 @@ export default function JobDetail() {
             const temporalUrl = meta.temporal_url;
             const cortexJobId = meta.cortex_job_id || job.cortex_job_id;
 
-            if (!previewUrl && !temporalUrl && !cortexJobId) return null;
+            // Browser LLM Logs link always available (keyed on eval job id),
+            // so the Quick Links card always renders.
             return (
               <Card>
                 <CardHeader className="pb-2">
@@ -1518,6 +1519,17 @@ export default function JobDetail() {
                       Replay Eval
                     </a>
                   )}
+                  <a
+                    href={`https://eval-ui-replay.internal.emergent.host/browser-evals?eval_job_id=${id}&autoload=1`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 text-xs text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300 underline-offset-2 hover:underline"
+                    data-testid="quicklinks-browser-llm-logs"
+                    title="Open the browser-eval LLM logs for this job in a new tab"
+                  >
+                    <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                    Browser LLM Logs
+                  </a>
                 </CardContent>
               </Card>
             );

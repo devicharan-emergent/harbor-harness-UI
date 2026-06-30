@@ -634,18 +634,6 @@ export default function EvalRuns() {
                                   <Pencil className="w-3 h-3" />
                                 </Button>
                                 <a
-                                  href={`/evals/group/${group.groupId}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="inline-flex items-center justify-center h-6 w-6 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent flex-shrink-0"
-                                  data-testid={`open-group-${group.groupId}`}
-                                  aria-label="Open group detail in new tab"
-                                  title="Open group detail in new tab"
-                                >
-                                  <ExternalLink className="w-3 h-3" />
-                                </a>
-                                <a
                                   href={redashSummaryUrl}
                                   target="_blank"
                                   rel="noopener noreferrer"
@@ -720,6 +708,22 @@ export default function EvalRuns() {
                         <span className="text-[10px] text-muted-foreground flex-shrink-0">
                           {formatDateTime(group.latestCreated)}
                         </span>
+
+                        {/* Open group detail in new tab — far right of the card */}
+                        {!isUngrouped && (
+                          <a
+                            href={`/evals/group/${group.groupId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex items-center justify-center h-6 w-6 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent flex-shrink-0"
+                            data-testid={`open-group-${group.groupId}`}
+                            aria-label="Open group detail in new tab"
+                            title="Open group detail in new tab"
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        )}
                       </div>
                     </CardContent>
                   </Card>
