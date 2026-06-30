@@ -1475,12 +1475,15 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                     <code className="font-mono"> attributes.agent_name </code>
                     is a placeholder — this is the real value used at run-time.
                   </p>
-                  <Input
+                  <Combobox
                     value={agentNameOverride}
-                    onChange={(e) => setAgentNameOverride(e.target.value)}
-                    placeholder="e.g. full_stack_app_builder_cloud_v8_sonnet_4_5"
-                    className="font-mono text-sm"
-                    data-testid="eval-testing-agent-name-override"
+                    onChange={setAgentNameOverride}
+                    options={evalAgents.map((a) => a.name || a.id)}
+                    placeholder={agentsLoading ? 'Loading agents…' : 'Select or type an agent…'}
+                    searchPlaceholder="Search agents…"
+                    emptyText={agentsError ? 'Failed to load agents — type a name' : 'No agents match'}
+                    allowCustom
+                    testId="eval-testing-agent-name-override"
                   />
                   {reviewAgentNames.length > 0 && (
                     <div className="mt-2 flex flex-wrap items-center gap-1.5" data-testid="ta-agents-list">
