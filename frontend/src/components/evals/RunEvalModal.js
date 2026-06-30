@@ -1382,15 +1382,6 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                   <span>Mixed types — submit testing_agent_bench separately.</span>
                 </div>
               )}
-              {isTestingAgentMode && (
-                <div
-                  className="flex items-center gap-2 rounded-md border border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-300 px-3 py-1.5 text-[11px]"
-                  data-testid="testing-agent-mode-banner"
-                >
-                  <Rocket className="w-3.5 h-3.5 flex-shrink-0" />
-                  <span>Testing Agent Bench mode — infra inherited from forked prod job.</span>
-                </div>
-              )}
 
               {/* Group name — required, always visible */}
               <div>
