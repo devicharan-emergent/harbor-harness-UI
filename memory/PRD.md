@@ -30,6 +30,7 @@ ACM is a React + FastAPI + MongoDB app acting as a frontend and BFF proxy for an
 - DatasetsPage pagination + "All Types" fan-out fetch fixes.
 - Extra Options collapsible, Redash links on group cards, AgentMultiSelect chips, ModelNamePicker `(default)`.
 - **2026-06-30: Fully reverted `reasoning_effort` feature** (backend + JudgeConfigDialog + RunEvalModal). Verified via curl; frontend compiles clean.
+- **2026-06-30: Multi-agent fan-out for testing_agent_bench (frontend-only).** RunEvalModal now uses the same `AgentMultiSelect` + `selectedAgentIds` for testing_agent_bench as the build benches. Catalog split by tags: `testingAgents` (tags include 'testing', fallback 'subagent') for testing_agent_bench, `builderAgents` (not tagged 'testing') for build benches. Submits via unified `/api/eval/jobs` with top-level `agent_names` (agent ids); evals carry `{problem, experiments:{prod_job_id,hitl_input,golden_output,model_name?,judge_prompt?,judge_model?}}` (no agent_name in experiments). BFF `_expand_agent_fanout` enforces 100-cap; harness validates agent_names server-side. Removed legacy `taAgentNames`/`submitTestingAgentEval` path. Verified e2e (iter 50–52): testing multiselect shows 40 testing-tagged agents, fan-out 2×2=4, review totals/agents correct; build-bench regression shows 356 builder agents with 0 testing leakage.
 
 ## Backlog
 - **P1**: Refactor `server.py` (>2600 lines) into `routes/*` + `models.py`.
