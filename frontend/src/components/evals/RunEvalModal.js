@@ -1076,6 +1076,19 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
   const effectiveAgentCount = isTestingAgentMode ? 1 : selectedAgentIds.length;
   const fanoutJobCount = totalJobs * Math.max(effectiveAgentCount, isTestingAgentMode ? 1 : 0) * numRuns;
   const exceedsJobCap = !isTestingAgentMode && totalJobs * Math.max(effectiveAgentCount, 0) > 100;
+  // Distinct agent names for the Review step. Standard flow uses the
+  // multi-select ids; testing_agent_bench derives the agent from each
+  // selected dataset's attributes.agent_name (or the batch override).
+  const reviewAgentNames = useMemo(() => {
+    if (!isTestingAgentMode) return [];
+    const override = agentNameOverride.trim();
+    const set = new Set();
+    for (const p of testingAgentSelections) {
+      const an = override || (p.attributes?.agent_name || '').trim();
+      if (an) set.add(an);
+    }
+    return Array.from(set);
+  }, [isTestingAgentMode, agentNameOverride, testingAgentSelections]);
   const stepLabels = ['Problems', 'Configure', 'Review'];
 
   return (
@@ -1617,14 +1630,23 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                   <Badge variant="secondary" className="font-mono text-[10px]" data-testid="review-group-name">{groupName || '—'}</Badge>
                 </div>
                 {isTestingAgentMode ? (
-                  agentNameOverride.trim() && (
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-muted-foreground">Agent:</span>
-                      <Badge variant="outline" className="font-mono text-[10px] bg-violet-500/10 text-violet-600 border-violet-500/20" data-testid="review-agent-name">
-                        {agentNameOverride.trim()}
+                  <div className="flex items-center gap-1.5 flex-wrap" data-testid="review-agents">
+                    <span className="text-muted-foreground">
+                      Agent{reviewAgentNames.length === 1 ? '' : 's'} ({reviewAgentNames.length})
+                      {agentNameOverride.trim() && <span className="text-[10px]"> · override</span>}:
+                    </span>
+                    {reviewAgentNames.slice(0, 4).map((name) => (
+                      <Badge key={name} variant="outline" className="font-mono text-[10px] bg-violet-500/10 text-violet-600 border-violet-500/20" data-testid={`review-agent-name-${name}`}>
+                        {name}
                       </Badge>
-                    </div>
-                  )
+                    ))}
+                    {reviewAgentNames.length > 4 && (
+                      <span className="text-[10px] text-muted-foreground">+{reviewAgentNames.length - 4} more</span>
+                    )}
+                    {reviewAgentNames.length === 0 && (
+                      <span className="text-[10px] text-muted-foreground">— (set on dataset or via override)</span>
+                    )}
+                  </div>
                 ) : (
                   <div className="flex items-center gap-1.5 flex-wrap" data-testid="review-agents">
                     <span className="text-muted-foreground">Agents ({selectedAgentIds.length}):</span>
