@@ -64,3 +64,13 @@ Re-seed everyone as admin if the allowlist is reset:
 for e in <emails>: db.allowlist.update_one({'email':e},{'$set':{'role':'admin','active':True}}, upsert=True)
 ```
 Test session user (token `pw_emergent_gate_post`) = `TEST_pw_user@emergent.com`, role admin.
+
+## Verifier-config reasoning effort (added 2026-06-30)
+`judge_config` docs now persist an `effort` field ('' | low | medium | high) alongside
+prompt/model. Backend (`server.py`) validates it in `update_verifier_config` and returns
+it from `_read_verifier_doc`/reset. Frontend: `JudgeConfigDialog` shows a "Reasoning effort"
+select only when `modelSupportsEffort(model)` (gemini-3*/gpt-5*/o-series); `gemini-3-flash-preview`
+added to MODEL_PRESETS. On submit, RunEvalModal stamps `experiments.judge_thinking={effort}`
+(testing_agent_bench) / `experiments.browser_thinking={effort}` (scratch_bench_phased) when the
+verifier is customized and effort is set. The earlier inline judge-model/effort selector approach
+was reverted.
