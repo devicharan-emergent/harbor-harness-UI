@@ -451,6 +451,19 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
   const [agentsError, setAgentsError] = useState(null);
   const [selectedAgentIds, setSelectedAgentIds] = useState([]);
 
+  // testing_agent_bench multi-agent selection (agent NAME strings). Defaults
+  // to the distinct agent_names baked into the selected datasets; the user
+  // can add/remove agents (catalog from GET /api/eval/agents). Each selected
+  // agent runs against every selected dataset (agents × datasets jobs).
+  const [taAgentNames, setTaAgentNames] = useState([]);
+  const [taAgentsTouched, setTaAgentsTouched] = useState(false);
+  // Agent objects keyed so the testing-agent multi-select can use NAME as the
+  // identity (agent_name is a name string, not the catalog id).
+  const evalAgentsByName = useMemo(
+    () => evalAgents.map((a) => ({ ...a, id: a.name || a.id })),
+    [evalAgents],
+  );
+
   const fetchEvalAgents = useCallback(async () => {
     setAgentsLoading(true);
     setAgentsError(null);
@@ -579,6 +592,8 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
       setModelNameOverride('');
       setModelOverrideTouched(false);
       setSelectedAgentIds([]);
+      setTaAgentNames([]);
+      setTaAgentsTouched(false);
       setNumRunsRaw('1');
       setRunProgress(null);
       setJudgeConfig(null);
@@ -605,6 +620,19 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
       setModelNameOverride(seed);
     }
   }, [step, isTestingAgentMode, modelOverrideTouched, selectedProblems, modelNameOverride]);
+
+  // Pre-populate the testing-agent multi-select with the distinct agent_names
+  // baked into the selected datasets (once, until the user edits it).
+  useEffect(() => {
+    if (step !== 2 || !isTestingAgentMode || taAgentsTouched) return;
+    const set = new Set();
+    for (const p of selectedProblems) {
+      const an = (p.attributes?.agent_name || '').trim();
+      if (an) set.add(an);
+    }
+    const seed = Array.from(set);
+    setTaAgentNames((prev) => (prev.length === 0 && seed.length > 0 ? seed : prev));
+  }, [step, isTestingAgentMode, taAgentsTouched, selectedProblems]);
 
   // Lazy-load the bench-appropriate verifier config on entering Step 2.
   // Cached on the modal so users can pop the dialog open without a re-fetch.
@@ -862,8 +890,8 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
     // free-text agent_name; the standard flow uses the multi-select
     // (submitted as agent_names[] → harness fan-out).
     if (isTestingAgentMode) {
-      if (!agentNameOverride.trim()) {
-        toast.error('Agent name is required');
+      if (taAgentNames.length === 0) {
+        toast.error('Select at least one agent');
         return;
       }
     } else if (selectedAgentIds.length === 0) {
@@ -907,25 +935,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
       const trimmedComment = groupComment.trim();
 
       let totalJobsSubmitted = 0;
-      const trimmedAgentOverride = agentNameOverride.trim();
       const trimmedTemplate = templateName.trim();
-
-      // Derive the batch-level agent_name for the non-testing_agent flow
-      // from (in order):
-      //   1. The manual override input on this page
-      //   2. The `initialAgentName` prop (deep-link from the Cortex editor)
-      //   3. The first selected dataset's `attributes.agent_name` (so when
-      //      the user just picks a dataset without typing anything, the
-      //      agent baked into that dataset still rides along).
-      // This is essential when Number of Runs > 1 — each iteration builds a
-      // fresh payload and we were previously dropping `agent_name` whenever
-      // the override field happened to be empty, even though it could be
-      // resolved from a dataset attribute or the deep-link prop.
-      const derivedAgentName = (
-        trimmedAgentOverride
-        || (initialAgentName || '').trim()
-        || ((selectedProblems[0]?.attributes?.agent_name) || '').trim()
-      );
 
       for (let i = 1; i <= runsCount; i++) {
         // Each run sends the SAME group_name; the harness mints distinct
@@ -938,64 +948,55 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
 
         // ── testing_agent_bench fork-eval branch ───────────────
         if (isTestingAgentMode) {
-          const items = [];
-          for (const full of hydratedItems) {
-            const attrs = full.attributes || {};
-            const agent = trimmedAgentOverride || (attrs.agent_name || '').trim();
-            const hitl = full.problem_statement || '';
-            const golden = full.natural_language_tests || '';
-            const prodJobId = (attrs.prod_job_id || full.instance_id || '').trim();
-            if (!agent) {
-              throw new Error(
-                `Dataset ${full.name}: agent_name is required (set on the dataset or via the override)`
-              );
+          // Fan out: each selected agent runs against EVERY selected dataset
+          // → one batch (group) per agent so results stay grouped by agent.
+          for (const agentName of taAgentNames) {
+            const agent = (agentName || '').trim();
+            if (!agent) continue;
+            const items = [];
+            for (const full of hydratedItems) {
+              const attrs = full.attributes || {};
+              const hitl = full.problem_statement || '';
+              const golden = full.natural_language_tests || '';
+              const prodJobId = (attrs.prod_job_id || full.instance_id || '').trim();
+              if (!hitl.trim() || !golden.trim()) {
+                throw new Error(
+                  `Dataset ${full.name}: HITL input and golden output are required`
+                );
+              }
+              if (!prodJobId) {
+                throw new Error(
+                  `Dataset ${full.name}: prod_job_id (or instance_id) is required`
+                );
+              }
+              const item = {
+                prod_job_id: prodJobId,
+                agent_name: agent,
+                hitl_input: hitl,
+                golden_output: golden,
+              };
+              const resolvedModel = modelOverrideTouched
+                ? modelNameOverride.trim()
+                : String(attrs.model_name || '').trim();
+              if (resolvedModel) item.model_name = resolvedModel;
+              items.push(item);
             }
-            if (!hitl.trim() || !golden.trim()) {
-              throw new Error(
-                `Dataset ${full.name}: HITL input and golden output are required`
-              );
-            }
-            if (!prodJobId) {
-              throw new Error(
-                `Dataset ${full.name}: prod_job_id (or instance_id) is required`
-              );
-            }
-            const item = {
-              prod_job_id: prodJobId,
+            const batchBody = {
+              group_name: runGroupName,
+              items,
               agent_name: agent,
-              hitl_input: hitl,
-              golden_output: golden,
             };
-            const resolvedModel = modelOverrideTouched
-              ? modelNameOverride.trim()
-              : String(attrs.model_name || '').trim();
-            if (resolvedModel) item.model_name = resolvedModel;
-            items.push(item);
+            if (trimmedComment) batchBody.comment = trimmedComment;
+            if (loggedInUserId) batchBody.user_id = loggedInUserId;
+            if (judgeConfig && !judgeConfig.is_default) {
+              if (judgeConfig.prompt) batchBody.judge_prompt = judgeConfig.prompt;
+              if (judgeConfig.model) batchBody.judge_model = judgeConfig.model;
+            }
+            const result = await submitTestingAgentEval(batchBody);
+            totalJobsSubmitted += Array.isArray(result?.jobs)
+              ? result.jobs.length
+              : items.length;
           }
-          const batchBody = {
-            // No group_run_id — harness mints a UUID server-side.
-            group_name: runGroupName,
-            items,
-          };
-          // Always stamp the batch-level `agent_name` so the harness +
-          // downstream group views can identify the agent without
-          // peeking into items[]. Use the same resolution chain as the
-          // standard branch (override → deep-link prop → dataset attr).
-          const batchAgent = derivedAgentName || (items[0]?.agent_name || '').trim();
-          if (batchAgent) batchBody.agent_name = batchAgent;
-          if (trimmedComment) batchBody.comment = trimmedComment;
-          if (loggedInUserId) batchBody.user_id = loggedInUserId;
-          // Only stamp the saved judge config when the user has actually
-          // customized it — otherwise omit so the harness applies its
-          // built-in default.
-          if (judgeConfig && !judgeConfig.is_default) {
-            if (judgeConfig.prompt) batchBody.judge_prompt = judgeConfig.prompt;
-            if (judgeConfig.model) batchBody.judge_model = judgeConfig.model;
-          }
-          const result = await submitTestingAgentEval(batchBody);
-          totalJobsSubmitted += Array.isArray(result?.jobs)
-            ? result.jobs.length
-            : items.length;
           continue;
         }
 
@@ -1073,22 +1074,16 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
   const totalJobs = selectedProblems.length;
   // Multi-agent fan-out count: agents × problems × runs (testing-agent flow
   // stays single-agent). Used for the pre-submit guardrail + review summary.
-  const effectiveAgentCount = isTestingAgentMode ? 1 : selectedAgentIds.length;
-  const fanoutJobCount = totalJobs * Math.max(effectiveAgentCount, isTestingAgentMode ? 1 : 0) * numRuns;
+  const effectiveAgentCount = isTestingAgentMode ? taAgentNames.length : selectedAgentIds.length;
+  const fanoutJobCount = totalJobs * Math.max(effectiveAgentCount, isTestingAgentMode ? 0 : 0) * numRuns;
   const exceedsJobCap = !isTestingAgentMode && totalJobs * Math.max(effectiveAgentCount, 0) > 100;
   // Distinct agent names for the Review step. Standard flow uses the
-  // multi-select ids; testing_agent_bench derives the agent from each
-  // selected dataset's attributes.agent_name (or the batch override).
+  // multi-select ids; testing_agent_bench uses the testing-agent multi-select
+  // (taAgentNames), each applied to every selected dataset.
   const reviewAgentNames = useMemo(() => {
     if (!isTestingAgentMode) return [];
-    const override = agentNameOverride.trim();
-    const set = new Set();
-    for (const p of testingAgentSelections) {
-      const an = override || (p.attributes?.agent_name || '').trim();
-      if (an) set.add(an);
-    }
-    return Array.from(set);
-  }, [isTestingAgentMode, agentNameOverride, testingAgentSelections]);
+    return taAgentNames;
+  }, [isTestingAgentMode, taAgentNames]);
   const stepLabels = ['Problems', 'Configure', 'Review'];
 
   return (
@@ -1464,102 +1459,100 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 <span className="text-[10px] text-muted-foreground">max {NUM_RUNS_MAX}</span>
               </div>
 
-              {/* Agent name — required for testing_agent_mode too.
-                  Free-text input — searchable dropdown disabled until we
-                  have a reliable agents-list endpoint. */}
+              {/* Agents — multi-select for testing_agent_bench. Defaults to
+                  the dataset agent(s); each selected agent runs against every
+                  selected dataset. */}
               {isTestingAgentMode && (
                 <div>
-                  <Label className="text-sm font-semibold">Agent Name *</Label>
+                  <Label className="text-sm font-semibold">Agents *</Label>
                   <p className="text-[10px] text-muted-foreground mt-0.5 mb-1.5">
-                    The agent the testing harness will run. The dataset&apos;s stored
-                    <code className="font-mono"> attributes.agent_name </code>
-                    is a placeholder — this is the real value used at run-time.
+                    The agent(s) the testing harness will run. Pre-filled from the
+                    dataset; add more to run the same problems across agents.
                   </p>
-                  <Combobox
-                    value={agentNameOverride}
-                    onChange={setAgentNameOverride}
-                    options={evalAgents.map((a) => a.name || a.id)}
-                    placeholder={agentsLoading ? 'Loading agents…' : 'Select or type an agent…'}
-                    searchPlaceholder="Search agents…"
-                    emptyText={agentsError ? 'Failed to load agents — type a name' : 'No agents match'}
-                    allowCustom
-                    testId="eval-testing-agent-name-override"
+                  <AgentMultiSelect
+                    agents={evalAgentsByName}
+                    value={taAgentNames}
+                    onChange={(next) => { setTaAgentNames(next); setTaAgentsTouched(true); }}
+                    loading={agentsLoading}
+                    error={agentsError}
+                    onRetry={fetchEvalAgents}
+                    testId="eval-testing-agents-multiselect"
                   />
-                  {reviewAgentNames.length > 0 && (
-                    <div className="mt-2 flex flex-wrap items-center gap-1.5" data-testid="ta-agents-list">
-                      <span className="text-[10px] text-muted-foreground">
-                        {agentNameOverride.trim()
-                          ? 'Override applies to all:'
-                          : `From selected datasets (${reviewAgentNames.length}):`}
-                      </span>
-                      {reviewAgentNames.map((name) => (
-                        <Badge
-                          key={name}
-                          variant="outline"
-                          className="font-mono text-[10px] bg-violet-500/10 text-violet-600 border-violet-500/20"
-                          data-testid={`ta-agent-chip-${name}`}
-                        >
-                          {name}
-                        </Badge>
-                      ))}
+                  {taAgentNames.length > 0 && totalJobs > 0 && (
+                    <div className="mt-2 text-[11px] rounded-md px-2.5 py-1.5 border bg-muted/40 border-border/60 text-muted-foreground" data-testid="ta-fanout-count">
+                      <span className="font-mono font-semibold text-foreground">{taAgentNames.length}</span> agent{taAgentNames.length === 1 ? '' : 's'} ×{' '}
+                      <span className="font-mono font-semibold text-foreground">{totalJobs}</span> dataset{totalJobs === 1 ? '' : 's'}
+                      {numRuns > 1 && <> × <span className="font-mono font-semibold text-foreground">{numRuns}</span> run{numRuns === 1 ? '' : 's'}</>}
+                      {' '}={' '}
+                      <span className="font-mono font-semibold text-foreground">{taAgentNames.length * totalJobs * numRuns}</span> job{taAgentNames.length * totalJobs * numRuns === 1 ? '' : 's'}
                     </div>
                   )}
                 </div>
               )}
 
-              {/* Model name override — testing_agent_mode only */}
+              {/* Extra Options (testing_agent) — Model + LLM Judge, collapsed. */}
               {isTestingAgentMode && (
-                <div>
-                  <Label className="text-sm font-semibold">Model Name</Label>
-                  <p className="text-[10px] text-muted-foreground mt-0.5 mb-1.5">
-                    Pre-filled from dataset. Leave on <span className="font-mono">(default)</span> to omit.
-                  </p>
-                  <ModelNamePicker
-                    value={modelNameOverride}
-                    onChange={(v) => {
-                      setModelNameOverride(v);
-                      setModelOverrideTouched(true);
-                    }}
-                    options={modelOptions}
-                    testId="eval-testing-model-override"
-                  />
-                </div>
-              )}
-
-              {/* LLM Judge config — testing_agent_mode only */}
-              {isTestingAgentMode && (
-                <div>
-                  <div className="flex items-center justify-between">
-                    <Label className="text-sm font-semibold">LLM Judge</Label>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-7 text-[11px]"
-                      onClick={() => setJudgeConfigOpen(true)}
-                      data-testid="open-judge-config"
-                    >
-                      Edit judge prompt &amp; model
-                    </Button>
-                  </div>
-                  <div
-                    className="mt-1.5 rounded-md border bg-muted/30 px-3 py-2 text-[11px] space-y-1"
-                    data-testid="judge-config-summary"
+                <Collapsible className="border border-border/60 rounded-md">
+                  <CollapsibleTrigger
+                    className="group flex w-full items-center justify-between px-3 py-2 text-sm font-semibold"
+                    data-testid="ta-extra-options-trigger"
                   >
-                    <div className="flex items-center gap-2">
-                      <span className="text-muted-foreground">Model:</span>
-                      <code className="font-mono">{judgeConfig?.model || 'gemini-flash-latest'}</code>
-                      {judgeConfig?.is_default !== false && (
-                        <Badge variant="outline" className="text-[9px] font-mono">default</Badge>
-                      )}
+                    Extra Options
+                    <ChevronDown className="w-4 h-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="px-3 pb-3 pt-1 space-y-4" data-testid="ta-extra-options-content">
+                    {/* Model name override */}
+                    <div>
+                      <Label className="text-sm font-semibold">Model Name</Label>
+                      <p className="text-[10px] text-muted-foreground mt-0.5 mb-1.5">
+                        Pre-filled from dataset. Leave on <span className="font-mono">(default)</span> to omit.
+                      </p>
+                      <ModelNamePicker
+                        value={modelNameOverride}
+                        onChange={(v) => {
+                          setModelNameOverride(v);
+                          setModelOverrideTouched(true);
+                        }}
+                        options={modelOptions}
+                        testId="eval-testing-model-override"
+                      />
                     </div>
-                    <div className="text-muted-foreground">
-                      Prompt: {judgeConfig?.prompt
-                        ? `${judgeConfig.prompt.length} chars · {golden} + {candidate} tokens`
-                        : 'using harness default'}
+
+                    {/* LLM Judge config */}
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <Label className="text-sm font-semibold">LLM Judge</Label>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-[11px]"
+                          onClick={() => setJudgeConfigOpen(true)}
+                          data-testid="open-judge-config"
+                        >
+                          Edit judge prompt &amp; model
+                        </Button>
+                      </div>
+                      <div
+                        className="mt-1.5 rounded-md border bg-muted/30 px-3 py-2 text-[11px] space-y-1"
+                        data-testid="judge-config-summary"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-muted-foreground">Model:</span>
+                          <code className="font-mono">{judgeConfig?.model || 'gemini-flash-latest'}</code>
+                          {judgeConfig?.is_default !== false && (
+                            <Badge variant="outline" className="text-[9px] font-mono">default</Badge>
+                          )}
+                        </div>
+                        <div className="text-muted-foreground">
+                          Prompt: {judgeConfig?.prompt
+                            ? `${judgeConfig.prompt.length} chars · {golden} + {candidate} tokens`
+                            : 'using harness default'}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
+                  </CollapsibleContent>
+                </Collapsible>
               )}
 
               {!isTestingAgentMode && (
@@ -1645,7 +1638,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 <div className="flex items-center gap-1.5">
                   <Rocket className="w-4 h-4 text-muted-foreground" />
                   <span className="text-muted-foreground">Total jobs:</span>
-                  <span className="font-mono font-bold" data-testid="review-total-jobs">{isTestingAgentMode ? totalJobs * numRuns : fanoutJobCount}</span>
+                  <span className="font-mono font-bold" data-testid="review-total-jobs">{isTestingAgentMode ? taAgentNames.length * totalJobs * numRuns : fanoutJobCount}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="text-muted-foreground">Group:</span>
@@ -1654,8 +1647,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 {isTestingAgentMode ? (
                   <div className="flex items-center gap-1.5 flex-wrap" data-testid="review-agents">
                     <span className="text-muted-foreground">
-                      Agent{reviewAgentNames.length === 1 ? '' : 's'} ({reviewAgentNames.length})
-                      {agentNameOverride.trim() && <span className="text-[10px]"> · override</span>}:
+                      Agent{reviewAgentNames.length === 1 ? '' : 's'} ({reviewAgentNames.length}):
                     </span>
                     {reviewAgentNames.slice(0, 4).map((name) => (
                       <Badge key={name} variant="outline" className="font-mono text-[10px] bg-violet-500/10 text-violet-600 border-violet-500/20" data-testid={`review-agent-name-${name}`}>
@@ -1666,7 +1658,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                       <span className="text-[10px] text-muted-foreground">+{reviewAgentNames.length - 4} more</span>
                     )}
                     {reviewAgentNames.length === 0 && (
-                      <span className="text-[10px] text-muted-foreground">— (set on dataset or via override)</span>
+                      <span className="text-[10px] text-muted-foreground">— (select an agent)</span>
                     )}
                   </div>
                 ) : (
@@ -1785,12 +1777,14 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 disabled={
                   submitting || totalJobs === 0 ||
                   agentVerified === false ||
-                  (!isTestingAgentMode && selectedAgentIds.length === 0)
+                  (isTestingAgentMode
+                    ? taAgentNames.length === 0
+                    : selectedAgentIds.length === 0)
                   // NOTE: eph readiness gate temporarily disabled (see Next btn).
                 }
                 title={
                   agentVerified === false ? 'Agent name failed verification — fix it or clear the eph check' :
-                  (!isTestingAgentMode && selectedAgentIds.length === 0) ? 'Select at least one agent' :
+                  (isTestingAgentMode ? taAgentNames.length === 0 : selectedAgentIds.length === 0) ? 'Select at least one agent' :
                   undefined
                 }
                 data-testid="submit-eval-button"

@@ -1,0 +1,34 @@
+{
+  "summary": "Iteration 46 — Verified the 3 reported bugs in RunEvalModal Step 2 (testing_agent_bench) are FIXED end-to-end, plus regression submit and review counts. 6/6 scenarios pass.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/eval/runs/groups/{id} and /aggregate", "issue": "Still returns 500 for freshly-created groups (e.g. 198578f4-f525-4e08-9aea-d3876e5fc1c8 / qa_ta_multi_1782798079) immediately after submit — same pre-existing issue noted in iteration 45, surfaces in console as 'Failed to fetch group ... 500' and 'Failed to fetch aggregate ... 500' when the user expands the group. UI continues to render normally via the list endpoint. Non-blocking for the 3 bug fixes under test."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "(Code quality) The AgentMultiSelect throws repeated React warning 'Encountered two children with the same key' for ~10 agent names (e.g. fork_fullstack_prompt_v2_fable_5, full_stack_app_builder_cloud_v8_opus_4_6, infinite_fullstack_prompt_v2_opus_4_7/4_8, resume_full_stack_v2_e3_*). The harness GET /api/eval/agents returns duplicates of the same agent_name. Either de-dupe by name in evalAgentsByName before mapping, or use a composite key (id + idx). Not user-visible but noisy in console and could cause subtle rendering bugs.",
+    "(Pre-existing) Investigate 500 from /api/eval/runs/groups/{id}/aggregate for newly-created groups (same as iteration 45)."
+  ],
+  "critical_code_review_comments": [
+    "RunEvalModal.js:458 taAgentNames state + Step-2 effect that prepopulates from datasets' attributes.agent_name works correctly — verified the trigger reads '1 agent selected' immediately on entering Step 2 with no user action.",
+    "RunEvalModal.js:462 evalAgentsByName memo maps each agent to {id: name||id} but does not de-duplicate by id, which is why React emits 'duplicate key' warnings. Recommend: `const seen = new Set(); evalAgents.filter(a => { const k = a.name||a.id; if(seen.has(k)) return false; seen.add(k); return true; }).map(...)`.",
+    "RunEvalModal.js:1493-1555 'Extra Options' Collapsible is correctly defaultOpen=false and houses both Model Name (ModelNamePicker testId='eval-testing-model-override') and the full LLM Judge block (judge-config-summary + open-judge-config). Verified all three children are absent from the DOM tree visibility before clicking ta-extra-options-trigger and become visible after click.",
+    "AgentMultiSelect CommandList renders with max-h-[300px] and overflow-y-auto — verified scrollHeight=17432px / clientHeight=300px on a list of 396 options; setting scrollTop=200 succeeded. Search input filters to 81 options for 'sonnet'.",
+    "Submit branch (~line 953) correctly iterates `for (const agentName of taAgentNames)` and posts one batch per agent. Each batch becomes its own group on the backend (so '2 agents × 2 datasets' produces TWO groups of 2 jobs each, both sharing the user-supplied group name). This is consistent with iteration 44/45 RCA. Review screen still aggregates: review-agents lists both agents and review-total-jobs = 4."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only request)", "frontend": "100% (6/6 scenarios)"},
+  "test_credentials": "localStorage acm_session_token='pw_emergent_gate_post'; user TEST_pw_user@emergent.com",
+  "seed_data_creation": "Created 2 eval groups both named 'qa_ta_multi_1782798079' (one per agent: full_stack_app_builder_cloud_v8_sonnet_4_5 and ai_products_agents_sonnet_4_5), 2 queued jobs each = 4 jobs total. Visible at top of /evals.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All 3 reported bugs are fixed. (1) Dropdown scrolls: AgentMultiSelect CommandList has max-h-[300px]/overflow-y-auto; 396 options render and the inner scroll works. (2) Multi-select pre-populated: data-testid='eval-testing-agents-multiselect-trigger' replaces the old free-text input (data-testid='eval-testing-agent-name-override' confirmed absent). Pre-populates '1 agent selected' from the datasets' attributes.agent_name and the user can add more (verified going to '2 agents selected' with chips and fan-out updating). (3) Extra Options: Model Name + LLM Judge sit inside a Collapsible (data-testid='ta-extra-options-trigger') that is collapsed by default — verified eval-testing-model-override / judge-config-summary / open-judge-config are not visible until clicked. Submit pathway is unchanged from iteration 45 (one batch per agent, fanned out by datasets). Known noise: pre-existing 500 on /api/eval/runs/groups/{id}/{,aggregate} for brand-new groups + React duplicate-key warnings for ~10 agents whose names appear twice in /api/eval/agents.",
+  "rca of the issue": "Not applicable — feature verification, all three reported bugs are correctly fixed."
+}
