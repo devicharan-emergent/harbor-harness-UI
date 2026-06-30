@@ -366,6 +366,22 @@ export const listDatasetsByType = async (datasetType, params = {}) => {
 };
 
 /**
+ * List ALL datasets of a type by paginating with offset. The upstream harness
+ * caps each page at 100 (and returns empty for limit>100), so we walk pages of
+ * 100 until a short/empty page. Guarded by maxPages to avoid runaway loops.
+ */
+export const listAllDatasetsByType = async (datasetType, { pageSize = 100, maxPages = 50 } = {}) => {
+  const all = [];
+  for (let page = 0; page < maxPages; page += 1) {
+    const data = await listDatasetsByType(datasetType, { limit: pageSize, offset: page * pageSize });
+    const rows = Array.isArray(data?.datasets) ? data.datasets : [];
+    all.push(...rows);
+    if (rows.length < pageSize) break;
+  }
+  return all;
+};
+
+/**
  * Get a specific dataset by type and instance ID
  * GET /api/eval/datasets/types/{type}/instances/{instance_id}
  * Returns full dataset with problem_statement, natural_language_tests, attributes, etc.

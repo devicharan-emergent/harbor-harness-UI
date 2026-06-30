@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
-import { listDatasetsByType, getDatasetForProblem, submitEvalJobs, submitEvalJobsWithEs, checkAgentExists, getVerifierConfig, getDatasetView, listEvalAgents } from '@/services/evalApi';
+import { listAllDatasetsByType, getDatasetForProblem, submitEvalJobs, submitEvalJobsWithEs, checkAgentExists, getVerifierConfig, getDatasetView, listEvalAgents } from '@/services/evalApi';
 import { listAgents } from '@/services/cortexApi';
 import { agentApi } from '@/lib/api';
 import { useCreatedBy } from '@/contexts/AuthContext';
@@ -534,27 +534,24 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
     setLoadingDatasets(true);
     try {
       if (datasetType === 'all') {
-        // Upstream `/datasets?limit=100` truncates to the first 100 rows
-        // (alphabetical), which hides bug_bench / testing_agent_bench /
-        // wingman_bench whenever scratch_bench_phased dominates. Fetch
-        // each known type in parallel and merge — that gives each type
-        // its own 100-row cap.
+        // Upstream `/datasets` caps each page at 100 (and returns empty for
+        // limit>100), so paginate every known type in parallel and merge.
         const KNOWN_TYPES = DATASET_TYPES
           .map(t => t.value)
           .filter(v => v !== 'all');
         const results = await Promise.allSettled(
-          KNOWN_TYPES.map(t => listDatasetsByType(t, { limit: 100 })),
+          KNOWN_TYPES.map(t => listAllDatasetsByType(t)),
         );
         const merged = [];
         for (const r of results) {
-          if (r.status === 'fulfilled' && Array.isArray(r.value?.datasets)) {
-            merged.push(...r.value.datasets);
+          if (r.status === 'fulfilled' && Array.isArray(r.value)) {
+            merged.push(...r.value);
           }
         }
         setDatasets(merged);
       } else {
-        const data = await listDatasetsByType(datasetType, { limit: 100 });
-        setDatasets(data.datasets || []);
+        const rows = await listAllDatasetsByType(datasetType);
+        setDatasets(rows);
       }
     } catch (error) {
       console.error('Failed to fetch datasets:', error);

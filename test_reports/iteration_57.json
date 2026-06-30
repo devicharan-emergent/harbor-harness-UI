@@ -1,0 +1,25 @@
+{
+  "summary": "Frontend-only verification of the Run Eval modal dataset-pagination fix (listAllDatasetsByType). All review-request assertions pass: scratch_bench_phased now renders 131 (was capped at 100), testing_agent_bench renders 34, All Types renders 165 (merged across all types), and Step 1 → Step 2 navigation still works.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "evalApi.js listAllDatasetsByType correctly paginates with offset=page*pageSize, stops on rows.length < pageSize (handles short last page + empty page), and is guarded by maxPages=50 to avoid runaway loops. Page size 100 matches the upstream cap.",
+    "RunEvalModal.js fetchDatasets() uses listAllDatasetsByType for both specific-type and 'all' merge (Promise.allSettled across KNOWN_TYPES), so one failing type doesn't blank the whole list — good resiliency.",
+    "Minor: in the 'all' merge, fetched rows from each type are appended in order — there's no global dedupe, but dataset names are namespaced by type so collisions shouldn't occur in practice.",
+    "Carry-over: RunEvalModal.js is still ~1788 lines; consider splitting Step 1/2/3 into separate components (non-blocking)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped per request)", "frontend": "100%"},
+  "test_credentials": "localStorage acm_session_token=pw_emergent_gate_post (still valid; /api/auth/me returned the seeded admin and /evals loaded immediately).",
+  "seed_data_creation": "None — used existing seeded session from iteration_56.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Viewport 1920x800. Verified counts via THREE independent signals per filter: (1) 'eval-list-count' text, (2) 'select-all-datasets' Select-all label, (3) rendered DOM rows matching [data-testid^='dataset-item-']. All three agreed: scratch=131, testing_agent_bench=34, all=165. Modal opened cleanly via [data-testid='new-eval-btn'] at /evals. After selecting first dataset + Next, Step 2 group-name input rendered with Browser Verifier summary card (scratch path).",
+  "rca_of_the_issue": "Previously the modal called listDatasetsByType with limit=100 (single page). Upstream harness caps each /datasets page at 100 and returns empty for limit>100, so types with >100 rows silently lost the tail (e.g. scratch_bench_phased's page-2 of 31 rows). Fix adds listAllDatasetsByType which walks offset=0,100,200,… until a short/empty page, and RunEvalModal.fetchDatasets uses it for both single-type and 'all' merge — restoring the full 131 scratch rows and the merged 165 across all types."
+}
