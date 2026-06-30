@@ -24,7 +24,7 @@ import { EphPicker } from '@/components/cortex/EphPicker';
 import { ModelNamePicker } from './ModelNamePicker';
 import { AgentMultiSelect } from './AgentMultiSelect';
 import { Combobox } from '@/components/ui/combobox';
-import { JudgeConfigDialog } from './JudgeConfigDialog';
+import { VerifierConfigDialog } from './JudgeConfigDialog';
 import { DatasetViewsDropdown } from '@/components/datasets/DatasetViewsDropdown';
 
 const DATASET_TYPES = [
@@ -1515,6 +1515,44 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
 
               {!isTestingAgentMode && (
                 <>
+              {selectedProblems.some(p => p.dataset_type === 'scratch_bench_phased') && (
+                <div>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm font-semibold">Browser Verifier</Label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-[11px]"
+                      onClick={() => setJudgeConfigOpen(true)}
+                      data-testid="open-browser-verifier-config"
+                    >
+                      Edit browser prompt &amp; model
+                    </Button>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    Used to drive &amp; score every <span className="font-mono">scratch_bench_phased</span> browser test.
+                  </p>
+                  <div
+                    className="mt-1.5 rounded-md border bg-muted/30 px-3 py-2 text-[11px] space-y-1"
+                    data-testid="browser-verifier-summary"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground">Model:</span>
+                      <code className="font-mono">{scratchVerifier?.model || 'harness default'}</code>
+                      {scratchVerifier?.is_default !== false && (
+                        <Badge variant="outline" className="text-[9px] font-mono">default</Badge>
+                      )}
+                    </div>
+                    <div className="text-muted-foreground">
+                      Prompt: {scratchVerifier?.prompt
+                        ? `${scratchVerifier.prompt.length} chars · {preview_url} + {test_case} tokens`
+                        : 'using harness default'}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <Separator />
 
               {/* Extra Options — advanced run-behaviour toggles, collapsed
@@ -1738,10 +1776,11 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
           </div>
         </DialogFooter>
       </DialogContent>
-      <JudgeConfigDialog
+      <VerifierConfigDialog
         open={judgeConfigOpen}
         onOpenChange={setJudgeConfigOpen}
-        onSaved={(cfg) => setJudgeConfig(cfg)}
+        benchType={isTestingAgentMode ? 'testing_agent_bench' : 'scratch_bench_phased'}
+        onSaved={(cfg) => (isTestingAgentMode ? setJudgeConfig(cfg) : setScratchVerifier(cfg))}
       />
     </Dialog>
   );

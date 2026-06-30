@@ -1,0 +1,25 @@
+{
+  "summary": "Frontend-only verification of the new Step 2 'Browser Verifier' edit affordance on Run Eval modal for scratch_bench_phased + regression of testing_agent_bench judge editor. All review-request items met.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "RunEvalModal.js (lines 1518-1554): 'Browser Verifier' section correctly renders only when at least one selected problem is scratch_bench_phased AND !isTestingAgentMode. Summary card has data-testid 'browser-verifier-summary' and Edit button has 'open-browser-verifier-config' as specified.",
+    "JudgeConfigDialog.js BENCH_META[scratch_bench_phased]: label 'Scratch Bench', promptLabel 'Browser Prompt', modelLabel 'Browser Model', required tokens {preview_url}+{test_case}. Dialog title renders '{label} — Verifier Configuration' = 'Scratch Bench — Verifier Configuration'.",
+    "VerifierConfigDialog onSaved correctly routes to setScratchVerifier in scratch path and setJudgeConfig in TA path (RunEvalModal line ~1730 area).",
+    "RunEvalModal.js is 1788 lines — exceeds the 700-line guideline. Consider splitting Step 1 / Step 2 / Step 3 panels into dedicated components (carry-over comment from prior iterations, not blocking)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped per request)", "frontend": "100%"},
+  "test_credentials": "localStorage acm_session_token=pw_emergent_gate_post. Note: session_token row was missing in Mongo and the allowlist entry was stored with mixed-case 'TEST_pw_user@emergent.com' while _norm_email lowercases lookups. Re-seeded users.email='test_pw_user@emergent.com' + matching allowlist row + fresh user_sessions doc so /api/auth/me now returns role=admin. See /tmp/seed2.py.",
+  "seed_data_creation": "Re-seeded user_sessions(pw_emergent_gate_post) + users(test_pw_user@emergent.com) + allowlist(test_pw_user@emergent.com, role=admin, active=true) — token was previously rejected because the email had been stored mixed-case and _allowlist_entry looks up by lowercased email. /app/memory/test_credentials.md should be updated to use lowercase 'test_pw_user@emergent.com' when re-seeding.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Viewport 1920x800. Findings:\n- Step 1: 'Scratch Bench (Phased)' filter returns 100 datasets; clicking the first selects it.\n- Step 2 (scratch_bench_phased): 'Browser Verifier' section renders below Group name with summary card. BEFORE save: Model=gemini-flash-latest, Prompt=1231 chars · {preview_url}+{test_case} tokens, NO 'default' badge (the saved config already had is_default=false from prior tests). Button label: 'Edit browser prompt & model'.\n- Dialog title: 'Scratch Bench — Verifier Configuration' (no 'Judge' word anywhere). Labels show 'Browser Prompt' + 'Browser Model'. Token chips: ✓ {preview_url}, ✓ {test_case}. Prompt body contains QA tester phrasing (qa=True).\n- Edit prompt → click Save → dialog closes (count=0) → toast 'Scratch Bench verifier saved' → summary updates to 1258 chars (marker appended) and still no 'default' badge.\n- Regression (testing_agent_bench): 34 datasets, pick 1, Next → Step 2 → expand 'Extra Options' (ta-extra-options-trigger) → 'open-judge-config' opens dialog 'Testing Agent Bench — Verifier Configuration' with 'Judge Prompt'/'Judge Model' labels; NO 'Browser Prompt'/'Browser Model' tokens. Token chips: ✓ {golden}, ✓ {candidate}.\n- No backend testing performed.\n- IMPORTANT for next agent: if session token returns 'Not authenticated', re-seed with /tmp/seed2.py — the issue is mixed-case email in allowlist vs lowercased lookup.",
+  "rca_of_the_issue": "Pre-test auth gate returned 401 because db.user_sessions had no row for pw_emergent_gate_post AND the allowlist email had been seeded mixed-case ('TEST_pw_user@emergent.com') while _allowlist_entry uses _norm_email(email).lower() to query. Fix: seed both `users.email` and `allowlist.email` as 'test_pw_user@emergent.com' (lowercase). After seeding, /api/auth/me returns user with role=admin and the SPA loads /evals normally. All review-request frontend assertions then pass."
+}
