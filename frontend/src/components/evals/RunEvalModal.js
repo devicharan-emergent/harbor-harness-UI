@@ -451,17 +451,12 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
   const [agentsError, setAgentsError] = useState(null);
   const [selectedAgentIds, setSelectedAgentIds] = useState([]);
 
-  // testing_agent_bench multi-agent selection now shares `selectedAgentIds`
-  // with the build benches (catalog `id` values, fanned out via the
-  // top-level `agent_names` array). Split the harness catalog by purpose:
-  // testing subagents (tags include "testing", fallback "subagent") for
-  // testing_agent_bench, builder agents (not tagged "testing") for the
-  // build benches.
-  const testingAgents = useMemo(() => {
-    const tagged = evalAgents.filter((a) => (a.tags || []).includes('testing'));
-    if (tagged.length > 0) return tagged;
-    return evalAgents.filter((a) => (a.tags || []).includes('subagent'));
-  }, [evalAgents]);
+  // testing_agent_bench multi-agent selection shares `selectedAgentIds` with
+  // the build benches (catalog `id` values, fanned out via the top-level
+  // `agent_names` array). Per request, the testing_agent_bench picker shows
+  // ALL agents (no tag filter); build benches still use builder agents
+  // (not tagged "testing").
+  const testingAgents = evalAgents;
   const builderAgents = useMemo(
     () => evalAgents.filter((a) => !(a.tags || []).includes('testing')),
     [evalAgents],
