@@ -49,3 +49,12 @@ async def seed():
 
 asyncio.run(seed())
 ```
+
+## Admin role (added 2026-06-30 for Eval Credits verification)
+The seeded test user (`user_id 0ee59a27-db9c-4647-aeee-f72173fcd757`) has `role: 'admin'`
+set on its `users` doc so the admin-only "Eval credits" indicator renders.
+`/auth/me` returns the full user doc, so `role` flows through automatically.
+NOTE: `/api/credits` is NOT implemented in this repo's backend — the backend team
+provides it. With role=admin but no `/api/credits`, the indicator shows "unavailable"
+(graceful). To re-add the role if the user doc is reset:
+`db.users.update_one({'user_id':'0ee59a27-db9c-4647-aeee-f72173fcd757'},{'$set':{'role':'admin'}})`
