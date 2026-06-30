@@ -25,6 +25,7 @@ import { ModelNamePicker } from './ModelNamePicker';
 import { AgentMultiSelect } from './AgentMultiSelect';
 import { Combobox } from '@/components/ui/combobox';
 import { VerifierConfigDialog } from './JudgeConfigDialog';
+import { JUDGE_MODELS, THINKING_EFFORTS } from '@/lib/constants';
 import { DatasetViewsDropdown } from '@/components/datasets/DatasetViewsDropdown';
 
 const DATASET_TYPES = [
@@ -509,6 +510,10 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
   const [judgeConfig, setJudgeConfig] = useState(null);
   const [scratchVerifier, setScratchVerifier] = useState(null);
   const [judgeConfigOpen, setJudgeConfigOpen] = useState(false);
+  // Per-run judge model override + reasoning effort (testing_agent_bench).
+  // judgeModel '' => use the verifier-config model / harness default.
+  const [judgeModel, setJudgeModel] = useState('');
+  const [judgeEffort, setJudgeEffort] = useState('off');
 
   // Eph (ephemeral cortex deployment) name + existence check state.
   // Only used for the "Check" button beside the agent name input.
@@ -587,6 +592,8 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
       setModelNameOverride('');
       setModelOverrideTouched(false);
       setSelectedAgentIds([]);
+      setJudgeModel('');
+      setJudgeEffort('off');
       setNumRunsRaw('1');
       setRunProgress(null);
       setJudgeConfig(null);
@@ -950,7 +957,14 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
             if (resolvedModel) experiments.model_name = resolvedModel;
             if (judgeConfig && !judgeConfig.is_default) {
               if (judgeConfig.prompt) experiments.judge_prompt = judgeConfig.prompt;
-              if (judgeConfig.model) experiments.judge_model = judgeConfig.model;
+            }
+            // Per-run judge model override wins over the verifier-config model.
+            const chosenJudgeModel = judgeModel
+              || (judgeConfig && !judgeConfig.is_default ? judgeConfig.model : '');
+            if (chosenJudgeModel) experiments.judge_model = chosenJudgeModel;
+            // judge_thinking is an object (kept extensible for other providers).
+            if (judgeEffort && judgeEffort !== 'off') {
+              experiments.judge_thinking = { effort: judgeEffort };
             }
             return { problem: full.name, experiments };
           });
@@ -1041,6 +1055,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
   // Fan-out count (agents × problems × runs) — shared by both flows now that
   // testing_agent_bench routes through the same top-level agent_names fan-out.
   const fanoutJobCount = totalJobs * selectedAgentIds.length * numRuns;
+  const selectedJudgeModel = JUDGE_MODELS.find((m) => m.id === judgeModel) || null;
   const exceedsJobCap = totalJobs * selectedAgentIds.length > 100;
   const stepLabels = ['Problems', 'Configure', 'Review'];
 
@@ -1505,6 +1520,52 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                             : 'using harness default'}
                         </div>
                       </div>
+
+                      {/* Per-run judge model + reasoning effort */}
+                      <div className="mt-2 grid grid-cols-2 gap-2">
+                        <div>
+                          <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">Judge model (override)</Label>
+                          <Select
+                            value={judgeModel || '__default__'}
+                            onValueChange={(v) => {
+                              const next = v === '__default__' ? '' : v;
+                              setJudgeModel(next);
+                              setJudgeEffort('off');
+                            }}
+                          >
+                            <SelectTrigger className="h-8 text-xs mt-1" data-testid="judge-model-select">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__default__">
+                                <span className="text-muted-foreground">(use config / default)</span>
+                              </SelectItem>
+                              {JUDGE_MODELS.map((m) => (
+                                <SelectItem key={m.id} value={m.id}>
+                                  <span className="font-mono text-xs">{m.id}</span>
+                                  <span className="text-muted-foreground ml-1">— {m.label}</span>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        {selectedJudgeModel?.thinking && (
+                          <div>
+                            <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">Reasoning effort</Label>
+                            <Select value={judgeEffort} onValueChange={setJudgeEffort}>
+                              <SelectTrigger className="h-8 text-xs mt-1" data-testid="judge-effort-select">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="off">Off</SelectItem>
+                                {THINKING_EFFORTS.map((e) => (
+                                  <SelectItem key={e} value={e}>{e}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </CollapsibleContent>
                 </Collapsible>
@@ -1658,7 +1719,18 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
 
               {/* Active verifier (browser / judge) that will be sent. */}
               {isTestingAgentMode ? (
-                <VerifierReview label="Judge verifier" config={judgeConfig} testId="review-judge-verifier" />
+                <>
+                  <VerifierReview label="Judge verifier" config={judgeConfig} testId="review-judge-verifier" />
+                  {(judgeModel || (judgeEffort && judgeEffort !== 'off')) && (
+                    <div className="flex items-center gap-2 text-[11px] text-muted-foreground" data-testid="review-judge-model-override">
+                      <span>Judge model override:</span>
+                      {judgeModel && <code className="font-mono text-foreground">{judgeModel}</code>}
+                      {judgeEffort !== 'off' && (
+                        <Badge variant="outline" className="text-[9px] font-mono">effort: {judgeEffort}</Badge>
+                      )}
+                    </div>
+                  )}
+                </>
               ) : (
                 selectedProblems.some(p => p.dataset_type === 'scratch_bench_phased') && (
                   <VerifierReview label="Browser verifier" config={scratchVerifier} testId="review-browser-verifier" />

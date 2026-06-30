@@ -6,6 +6,17 @@ export const THINKING_TYPES = ['enabled', 'adaptive', 'disabled'];
 
 export const THINKING_EFFORTS = ['low', 'medium', 'high'];
 
+// Judge models selectable per testing-agent eval run. `thinking: true` => the
+// model supports a reasoning-effort control (Off/low/medium/high); `false` =>
+// hide the effort control (the harness can't honor thinking on it).
+// NOTE: if a backend smoke-test finds gemini-3-flash 404s, change the id here
+// to 'gemini-3-flash-preview' — single source of truth.
+export const JUDGE_MODELS = [
+  { id: 'gpt-5.5',             label: 'GPT-5.5',               provider: 'openai', thinking: true  },
+  { id: 'gemini-3-flash',      label: 'Gemini 3 Flash',        provider: 'gemini', thinking: true  },
+  { id: 'gemini-flash-latest', label: 'Gemini Flash (latest)', provider: 'gemini', thinking: false },
+];
+
 export const TRANSPORT_TYPES = ['http', 'stdio'];
 
 export const SQUASHING_STRATEGIES = ['bulk_checkpoint', 'rolling', 'none'];

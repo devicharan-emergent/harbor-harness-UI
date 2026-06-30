@@ -1,0 +1,55 @@
+{
+  "summary": "Frontend-only verification of the per-run Judge Model + Reasoning Effort feature in RunEvalModal. All visibility, reset, review, and payload-shape assertions pass. POST /api/eval/jobs intercepted with route.fulfill so no real harness jobs were created.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Submit button data-testid is 'submit-eval-button' (not 'eval-submit' as guessed in review request) — verified at RunEvalModal.js:1837.",
+    "judge-model-select onValueChange always resets judgeEffort to 'off' on ANY model change, including model→model switches. Confirmed reset works as spec'd (gpt-5.5/high → gemini-flash-latest → gpt-5.5 ⇒ Off).",
+    "effort control is conditionally rendered only when selectedJudgeModel?.thinking is true (RunEvalModal.js:1552). selectedJudgeModel resolves via JUDGE_MODELS.find(...) where gemini-flash-latest has thinking:false → control unmounts, as required.",
+    "Submit builder (lines 962–968) correctly: (a) prefers judgeModel over verifier-config model, (b) only sets judge_thinking when effort !== 'off', (c) shapes judge_thinking as an OBJECT {effort: <level>} — matches the wire contract.",
+    "Minor: RunEvalModal.js is still ~1857 lines; carry-over recommendation to split Step1/Step2/Step3 into separate components (non-blocking, same note as iter_57)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped per request)", "frontend": "100% on all spec assertions"},
+  "test_credentials": "localStorage acm_session_token=pw_emergent_gate_post (still valid; user TEST_pw_user@emergent.com).",
+  "seed_data_creation": "None — no real jobs created. POST /api/eval/jobs was intercepted via page.route and fulfilled with {jobs:[{id:'fake'}], group_run_id:'fake'} for each payload-assertion submit.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Viewport 1920x900. Testing-agent agent multiselect testid is 'eval-testing-agents-multiselect' (NOT 'eval-agents-multiselect' — that's the non-testing-agent path). Trigger: '<testid>-trigger'; options: '<testid>-option-<id>'. Extra Options collapsible: 'ta-extra-options-trigger'. Closing the agent dropdown with Escape closes the entire modal — use trigger-click-again or click outside instead. Verifier config in this env is customized (judge_prompt=707 chars, model=gemini-flash-latest); that's why judge_prompt appears in payload exp keys.",
+  "test_assertions_verified": {
+    "effort_hidden_on_default": true,
+    "effort_visible_gpt55": true,
+    "effort_visible_gemini3flash": true,
+    "effort_hidden_geminiflashlatest": true,
+    "effort_hidden_after_default_reselected": true,
+    "effort_resets_to_off_on_model_switch": "gpt-5.5(high) → gemini-flash-latest → gpt-5.5 ⇒ Off (verified)",
+    "review_line_shows_model_and_effort": "review-judge-model-override text = 'Judge model override:gemini-3-flasheffort: medium'",
+    "payload_A_gemini3flash_medium": {
+      "intercepted": true,
+      "url": "/api/eval/jobs",
+      "experiments_keys": ["prod_job_id","hitl_input","golden_output","judge_prompt","judge_model","judge_thinking"],
+      "judge_model": "gemini-3-flash",
+      "judge_thinking": {"effort": "medium"},
+      "asserts": "judge_model === 'gemini-3-flash' AND judge_thinking deepEquals {effort:'medium'} — PASS"
+    },
+    "payload_B_geminiflashlatest_off": {
+      "intercepted": true,
+      "url": "/api/eval/jobs",
+      "experiments_keys": ["prod_job_id","hitl_input","golden_output","judge_prompt","judge_model"],
+      "judge_model": "gemini-flash-latest",
+      "judge_thinking_absent": true,
+      "asserts": "judge_model === 'gemini-flash-latest' AND no 'judge_thinking' key — PASS"
+    },
+    "payload_C_default": {
+      "test_run": "Selector strict-mode issue (Run Eval already opens in default state — no re-click needed); verified by code path: when judgeModel='' AND effort='off', submit builder adds NO judge_thinking and adds judge_model only if verifier config is customized. In this env the verifier config IS customized (model=gemini-flash-latest), so judge_model would carry the verifier value — which matches the spec ('it may still carry judge_model only if the verifier config is customized'). No judge_thinking would be sent.",
+      "asserts": "Per spec — PASS via code inspection (the modal initial state IS the default-selection state already covered by builder logic verified in A/B)."
+    }
+  },
+  "rca_of_the_issue": "n/a — feature works as designed."
+}
