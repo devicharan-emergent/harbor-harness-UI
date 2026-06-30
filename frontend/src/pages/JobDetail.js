@@ -624,12 +624,6 @@ export default function JobDetail() {
             </CardContent>
           </Card>
 
-          {/* Test Cases — renders from /live-results whenever results exist
-              (including cancelled & terminal jobs), not just the final
-              phase/metrics payload. Polls while the job is generating/running;
-              the component hides itself when there are no results. */}
-          <LiveEvalResults jobId={id} active={['generating', 'running'].includes(job.status)} />
-
           {/* Scores */}
           {hasScores && (
             <Card data-testid="scores-card">
@@ -1851,10 +1845,15 @@ export default function JobDetail() {
           )}
         </div>
       </div>
+
+      {/* Test Cases — full-width, bottom-most. Renders from /live-results
+          whenever results exist (including cancelled & terminal jobs), not
+          just the final phase/metrics payload. Polls while generating/running;
+          hides itself when there are no results. */}
+      <LiveEvalResults jobId={id} active={['generating', 'running'].includes(job.status)} />
     </div>
   );
 }
-
 // ── LLM Judge raw req/resp block ───────────────────────────────────────
 function JudgeRawBlock({ phaseIndex, request, response }) {
   const [reqOpen, setReqOpen] = useState(false);
