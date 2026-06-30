@@ -18,7 +18,12 @@ to `@emergent*` email domains).
 ```
 
 ## Implemented (chronological)
-- Replay browser tests feature: bulk (GroupDetailPage) + single (JobDetail).
+- **(2026-06-30) Eval modal + verifier-config enhancements** (all testing_agent verified, iter 46-49):
+  - Multi-agent New Eval (scratch + testing-agent) via shared AgentMultiSelect (inline, wheel-scrollable inside the dialog); testing-agent fans out one batch per agent; pre-populated from dataset agent_name.
+  - Testing-agent Configure: Model + LLM Judge moved under collapsed "Extra Options"; ModelNamePicker has a "(default)" option to omit model_name.
+  - Active verifier (Browser/Judge) prompt+model surfaced in Review for both benches.
+  - Judge `reasoning_effort` (low/med/high, default=omit): editable in verifier-config dialog, persisted (db.judge_config), shown in Step 2 + Review, forwarded on submit as `judge_reasoning_effort`.
+  - Quick Links: "View Emergent Job", "Replay Eval", "Browser LLM Logs". Redash links moved to Evals group card + GroupDetail header; open-group icon moved to far right of group card.
 - `testing_agent_bench` dataset name formatting fixed in EvalRuns.
 - "Watch Replay" link blindly uses backend `replay_url` (no FE URL construction).
 - JobDetail "Phase Results (raw)" split into per-phase collapsible blocks.
