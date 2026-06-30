@@ -6,6 +6,7 @@ import { Menu, Cpu, Home, GitCompare, ActivitySquare, Database, CalendarClock, S
 import { ThemeToggle } from './ThemeToggle';
 import { ApiHealthIndicator } from '@/components/evals/ApiHealthIndicator';
 import { DataSourceIndicator } from './DataSourceIndicator';
+import { EvalCredits } from './EvalCredits';
 import { UserMenu } from './UserMenu';
 
 const navItems = [
@@ -72,6 +73,7 @@ export default function AppShell() {
       <div className="pt-3 mt-3 border-t border-[hsl(var(--border)/0.5)] space-y-2 flex-shrink-0">
         <DataSourceIndicator />
         <ApiHealthIndicator />
+        <EvalCredits />
         <UserMenu />
         <div className="flex items-center justify-between px-2.5">
           <span className="text-xs text-muted-foreground">v1.0.0</span>

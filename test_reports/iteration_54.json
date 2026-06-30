@@ -1,0 +1,25 @@
+{
+  "summary": "Frontend-only verification of the new admin-only 'Eval credits' sidebar indicator (EvalCredits.js). All 7 review-request scenarios verified end-to-end against the live preview using Playwright route interception and the seeded admin session token. All assertions passed.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "EvalCredits.js is well-scoped (~110 lines) and follows the spec: admin-only render (early-return null), authAxios.get('/credits') on mount via useEffect + manual refresh via button, Math.round(ecu).toLocaleString('en-US') + ' ECU', tooltip total, amber<2000, rose<=0, graceful degrade (try/catch swallows errors; no toast/throw).",
+    "Confirmed via interception that on mount the component fired ~2 /api/credits requests (StrictMode double-invoke in dev — harmless; in production build only 1). No interval/polling — count remained flat over a 15s observation window after the manual refresh click.",
+    "Non-admin gating is correctly implemented at both layers: render returns null AND useEffect only fires fetchCredits when isAdmin===true, so /api/credits is genuinely NEVER called for users without role==='admin' (verified by counting route hits → 0).",
+    "Graceful degrade on 404 verified: shows muted 'unavailable' (data-testid eval-credits-unavailable), the page is fully usable, no toast/dialog appears, and nav remains interactive. Tooltip swaps to 'Credits unavailable right now.' on error."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped per request)", "frontend": "100%"},
+  "test_credentials": "localStorage.acm_session_token = 'pw_emergent_gate_post' (from /app/memory/test_credentials.md). Session valid, seeded user has role='admin'.",
+  "seed_data_creation": "None — used existing seeded admin session.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "EvalCredits indicator verified across 7 scenarios on viewport 1920x800:\n1) ADMIN+available (ecu=4999.4, total=4863.3) → eval-credits-value shows '4,999 ECU'; tooltip shows 'Spendable balance: 4,999 ECU' and 'Total incl. monthly/daily: 4,863 ECU'. PASS\n2) Low balance (ecu=1500) → '1,500 ECU' with class containing text-amber-600 dark:text-amber-400. PASS\n3) Zero/negative (ecu=0) → '0 ECU' with class containing text-rose-600 dark:text-rose-400. PASS\n4) available=false with reason → eval-credits-unavailable shown, eval-credits-value absent, no toast. PASS\n5) HTTP 404 → eval-credits-unavailable shown gracefully, page still usable (nav-agents present). PASS\n6) Refresh button → clicking eval-credits-refresh increments request counter by 1. No polling observed over 15s idle. PASS\n7) Non-admin gating (intercepted /api/auth/me to return user WITHOUT role field) → eval-credits-indicator absent AND zero /api/credits requests made. PASS\nNote: On mount in dev build, /api/credits is fetched twice due to React StrictMode (harmless, single fetch in prod). Not a bug.",
+  "rca_of_the_issue": "No issues found. Feature meets all acceptance criteria from the review request."
+}
