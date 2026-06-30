@@ -1,0 +1,35 @@
+{
+  "summary": "Iteration 50 — Testing the new testing_agent_bench multi-select-agents flow in RunEvalModal. Two issues found, ONE BLOCKING runtime crash fixed by testing agent so the feature could be verified. (1) BLOCKING (FIXED by tester): /evals page crashed with `ReferenceError: setTaAgentNames is not defined` thrown from a useEffect mount reset block — stale references to renamed state setters (`setTaAgentNames`, `setTaAgentsTouched`) were left in the reset block after the refactor to `selectedAgentIds`. After removing the two dangling calls the modal mounts cleanly. (2) Apparent watcher/HMR issue: webpack ENOSPC (file watchers exhausted) was logged, meaning the originally-served bundle did NOT reflect the on-disk source — earlier this masked the crash and made the testing multiselect look like it had 386 entries (the OLD build was still showing the build-bench branch). After restart with fresh build, the testing-mode branch correctly mounts and the filter returns the expected 40 options. Core feature verified post-fix.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "RunEvalModal (modal reset useEffect)",
+        "issue": "ReferenceError: setTaAgentNames is not defined — two stale state setters (`setTaAgentNames([])`, `setTaAgentsTouched(false)`) at lines 598–599 referenced state that was renamed to `selectedAgentIds`. Crashes the entire /evals page on first render after fresh build.",
+        "selector": "/evals",
+        "priority": "CRITICAL"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Confirm the testing-agent dangling setter cleanup at RunEvalModal.js (lines 598–599) and keep it removed; ensure no other `setTa*` references remain.",
+    "Re-run the full flow (Step 1 → Step 2 → Step 3 Review → build-bench regression) end-to-end. Tester verified Step 1, Step 2 filter correctness and option count (40), but ran into a self-inflicted Escape-closes-modal during chip selection so review-total-jobs / review-agents and build-bench regression are NOT fully verified.",
+    "Note: ENOSPC watcher warnings appear on every container start (`sudo sysctl fs.inotify.max_user_watches=524288` would help, but is environment-level). HMR may not reflect edits without a full `supervisorctl restart frontend`."
+  ],
+  "critical_code_review_comments": [
+    "RunEvalModal.js testingAgents/builderAgents memos are correct: `(a.tags||[]).includes('testing')` matches the 40 testing-tagged agents from the harness catalog; fallback to 'subagent' is fine. builderAgents is the complement set (`!includes('testing')`), so any 'testing'-tagged agent (including e1_tester*, deep_testing_*, auto_frontend_testing_*, e1_expo_frontend_tester) is correctly excluded from the build dropdown.",
+    "isTestingAgentMode is `selectedProblems.every(p => p.dataset_type==='testing_agent_bench')` AND non-empty — fine.",
+    "Backend GET /api/eval/agents returns 396 agents with proper tag arrays. Verified ai_products_agents_*, brainstorm_v0_*, full_stack_app_builder_* are NOT tagged 'testing'."
+  ],
+  "updated_files": ["/app/frontend/src/components/evals/RunEvalModal.js (removed dead setTaAgentNames/setTaAgentsTouched lines 598-599)"],
+  "success_rate": {"backend": "n/a (frontend-only)", "frontend": "Verified: testing-agent multiselect mounts and shows exactly 40 testing-tagged options with no builder leakage. NOT verified end-to-end: fanout-count chip render, review-step totals, build-bench regression — partial blocker was the runtime crash."},
+  "test_credentials": "localStorage acm_session_token='pw_emergent_gate_post'",
+  "seed_data_creation": "None. No eval jobs submitted (per spec — stop at Review).",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "BLOCKING bug FIXED by tester: removed two stale `setTaAgentNames([])` and `setTaAgentsTouched(false)` references in RunEvalModal.js modal-reset useEffect (≈line 598). Without the fix, the /evals page throws `ReferenceError: setTaAgentNames is not defined` immediately on mount and the modal is unusable. Confirmed post-fix: dataset-type-filter='Testing Agent Bench' → 34 datasets, picking 2 and Next opens Step 2 → `eval-testing-agents-multiselect-trigger` mounts (build trigger does NOT), dropdown shows exactly 40 options. Sample verified absent (builders): ai_products_agents_1mil_opus_4_6, brainstorm_v0_gemini_3_1, full_stack_app_builder_cloud_v8_opus_4_8. Sample verified present (testing): deep_testing_backend_v2_sonnet_4, e1_tester_sonnet_4_6, auto_frontend_testing_agent_sonnet_3_7. CommandInput inline-renders (NOT a portaled Popover), so `page.keyboard.press('Escape')` closes the WHOLE modal — close just the dropdown by clicking the trigger again, never Escape. Build-bench multiselect (`eval-agents-multiselect-*`) and ta-fanout-count / eval-fanout-count testids exist in code and were validated by inspection but NOT clicked through end-to-end after the fix. ENOSPC watcher warnings ⇒ HMR may not auto-reflect edits; always `sudo supervisorctl restart frontend` and wait ~20s after edits.",
+  "rca of the issue": "REGRESSION ROOT CAUSE: The refactor that unified testing_agent_bench into the same selectedAgentIds + AgentMultiSelect pattern renamed `taAgentNames`/`setTaAgentNames` and `taAgentsTouched`/`setTaAgentsTouched` (presumably to `selectedAgentIds`/`setSelectedAgentIds`) but left the two reset calls intact in the modal-open useEffect at lines 598–599. JavaScript module-scope evaluation of the file succeeds, but as soon as the modal opens and the reset effect runs, the undefined identifier throws — and because the effect runs synchronously on mount, the entire EvalRuns page is crashed by React's error boundary fallback. Removing the two dead lines restores the modal. Reproduction: open /evals (with valid acm_session_token) → page shows React error overlay 'ReferenceError: setTaAgentNames is not defined'. Mitigation/fix applied: deleted lines 598–599 (`setTaAgentNames([]); setTaAgentsTouched(false);`)."
+}

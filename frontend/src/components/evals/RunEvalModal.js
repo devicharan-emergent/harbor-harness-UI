@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
-import { listDatasetsByType, getDatasetForProblem, submitEvalJobs, submitEvalJobsWithEs, submitTestingAgentEval, checkAgentExists, getVerifierConfig, getDatasetView, listEvalAgents } from '@/services/evalApi';
+import { listDatasetsByType, getDatasetForProblem, submitEvalJobs, submitEvalJobsWithEs, checkAgentExists, getVerifierConfig, getDatasetView, listEvalAgents } from '@/services/evalApi';
 import { listAgents } from '@/services/cortexApi';
 import { agentApi } from '@/lib/api';
 import { useCreatedBy } from '@/contexts/AuthContext';
@@ -451,26 +451,21 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
   const [agentsError, setAgentsError] = useState(null);
   const [selectedAgentIds, setSelectedAgentIds] = useState([]);
 
-  // testing_agent_bench multi-agent selection (agent NAME strings). Defaults
-  // to the distinct agent_names baked into the selected datasets; the user
-  // can add/remove agents (catalog from GET /api/eval/agents). Each selected
-  // agent runs against every selected dataset (agents × datasets jobs).
-  const [taAgentNames, setTaAgentNames] = useState([]);
-  const [taAgentsTouched, setTaAgentsTouched] = useState(false);
-  // Agent objects keyed so the testing-agent multi-select can use NAME as the
-  // identity (agent_name is a name string, not the catalog id). De-duped by
-  // name — the harness catalog returns some agent_names more than once.
-  const evalAgentsByName = useMemo(() => {
-    const seen = new Set();
-    const out = [];
-    for (const a of evalAgents) {
-      const id = a.name || a.id;
-      if (seen.has(id)) continue;
-      seen.add(id);
-      out.push({ ...a, id });
-    }
-    return out;
+  // testing_agent_bench multi-agent selection now shares `selectedAgentIds`
+  // with the build benches (catalog `id` values, fanned out via the
+  // top-level `agent_names` array). Split the harness catalog by purpose:
+  // testing subagents (tags include "testing", fallback "subagent") for
+  // testing_agent_bench, builder agents (not tagged "testing") for the
+  // build benches.
+  const testingAgents = useMemo(() => {
+    const tagged = evalAgents.filter((a) => (a.tags || []).includes('testing'));
+    if (tagged.length > 0) return tagged;
+    return evalAgents.filter((a) => (a.tags || []).includes('subagent'));
   }, [evalAgents]);
+  const builderAgents = useMemo(
+    () => evalAgents.filter((a) => !(a.tags || []).includes('testing')),
+    [evalAgents],
+  );
 
   const fetchEvalAgents = useCallback(async () => {
     setAgentsLoading(true);
@@ -600,8 +595,6 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
       setModelNameOverride('');
       setModelOverrideTouched(false);
       setSelectedAgentIds([]);
-      setTaAgentNames([]);
-      setTaAgentsTouched(false);
       setNumRunsRaw('1');
       setRunProgress(null);
       setJudgeConfig(null);
@@ -628,19 +621,6 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
       setModelNameOverride(seed);
     }
   }, [step, isTestingAgentMode, modelOverrideTouched, selectedProblems, modelNameOverride]);
-
-  // Pre-populate the testing-agent multi-select with the distinct agent_names
-  // baked into the selected datasets (once, until the user edits it).
-  useEffect(() => {
-    if (step !== 2 || !isTestingAgentMode || taAgentsTouched) return;
-    const set = new Set();
-    for (const p of selectedProblems) {
-      const an = (p.attributes?.agent_name || '').trim();
-      if (an) set.add(an);
-    }
-    const seed = Array.from(set);
-    setTaAgentNames((prev) => (prev.length === 0 && seed.length > 0 ? seed : prev));
-  }, [step, isTestingAgentMode, taAgentsTouched, selectedProblems]);
 
   // Lazy-load the bench-appropriate verifier config on entering Step 2.
   // Cached on the modal so users can pop the dialog open without a re-fetch.
@@ -897,12 +877,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
     // Agent selection is required. The testing-agent flow uses a single
     // free-text agent_name; the standard flow uses the multi-select
     // (submitted as agent_names[] → harness fan-out).
-    if (isTestingAgentMode) {
-      if (taAgentNames.length === 0) {
-        toast.error('Select at least one agent');
-        return;
-      }
-    } else if (selectedAgentIds.length === 0) {
+    if (selectedAgentIds.length === 0) {
       toast.error('Select at least one agent');
       return;
     }
@@ -955,56 +930,47 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
         if (runsCount > 1) setRunProgress({ current: i, total: runsCount });
 
         // ── testing_agent_bench fork-eval branch ───────────────
+        // Unified path: same /eval/jobs endpoint + top-level agent_names
+        // fan-out as the build benches. The harness pins each selected agent
+        // per job (agent × problem) and validates agent_names server-side.
+        // prod_job_id / hitl_input / golden_output (and optional model_name /
+        // judge config) go in `experiments`; agent_name is NOT set here.
         if (isTestingAgentMode) {
-          // Fan out: each selected agent runs against EVERY selected dataset
-          // → one batch (group) per agent so results stay grouped by agent.
-          for (const agentName of taAgentNames) {
-            const agent = (agentName || '').trim();
-            if (!agent) continue;
-            const items = [];
-            for (const full of hydratedItems) {
-              const attrs = full.attributes || {};
-              const hitl = full.problem_statement || '';
-              const golden = full.natural_language_tests || '';
-              const prodJobId = (attrs.prod_job_id || full.instance_id || '').trim();
-              if (!hitl.trim() || !golden.trim()) {
-                throw new Error(
-                  `Dataset ${full.name}: HITL input and golden output are required`
-                );
-              }
-              if (!prodJobId) {
-                throw new Error(
-                  `Dataset ${full.name}: prod_job_id (or instance_id) is required`
-                );
-              }
-              const item = {
-                prod_job_id: prodJobId,
-                agent_name: agent,
-                hitl_input: hitl,
-                golden_output: golden,
-              };
-              const resolvedModel = modelOverrideTouched
-                ? modelNameOverride.trim()
-                : String(attrs.model_name || '').trim();
-              if (resolvedModel) item.model_name = resolvedModel;
-              items.push(item);
+          const evals = hydratedItems.map((full) => {
+            const attrs = full.attributes || {};
+            const hitl = full.problem_statement || '';
+            const golden = full.natural_language_tests || '';
+            const prodJobId = (attrs.prod_job_id || full.instance_id || '').trim();
+            if (!hitl.trim() || !golden.trim()) {
+              throw new Error(`Dataset ${full.name}: HITL input and golden output are required`);
             }
-            const batchBody = {
-              group_name: runGroupName,
-              items,
-              agent_name: agent,
+            if (!prodJobId) {
+              throw new Error(`Dataset ${full.name}: prod_job_id (or instance_id) is required`);
+            }
+            const experiments = {
+              prod_job_id: prodJobId,
+              hitl_input: hitl,
+              golden_output: golden,
             };
-            if (trimmedComment) batchBody.comment = trimmedComment;
-            if (loggedInUserId) batchBody.user_id = loggedInUserId;
+            const resolvedModel = modelOverrideTouched
+              ? modelNameOverride.trim()
+              : String(attrs.model_name || '').trim();
+            if (resolvedModel) experiments.model_name = resolvedModel;
             if (judgeConfig && !judgeConfig.is_default) {
-              if (judgeConfig.prompt) batchBody.judge_prompt = judgeConfig.prompt;
-              if (judgeConfig.model) batchBody.judge_model = judgeConfig.model;
+              if (judgeConfig.prompt) experiments.judge_prompt = judgeConfig.prompt;
+              if (judgeConfig.model) experiments.judge_model = judgeConfig.model;
             }
-            const result = await submitTestingAgentEval(batchBody);
-            totalJobsSubmitted += Array.isArray(result?.jobs)
-              ? result.jobs.length
-              : items.length;
-          }
+            return { problem: full.name, experiments };
+          });
+          const payload = {
+            user_id: loggedInUserId,
+            group_name: runGroupName,
+            evals,
+            agent_names: selectedAgentIds,
+          };
+          if (trimmedComment) payload.comment = trimmedComment;
+          const result = await submitEvalJobs(payload);
+          totalJobsSubmitted += result.jobs?.length || evals.length * selectedAgentIds.length;
           continue;
         }
 
@@ -1080,18 +1046,10 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
 
 
   const totalJobs = selectedProblems.length;
-  // Multi-agent fan-out count: agents × problems × runs (testing-agent flow
-  // stays single-agent). Used for the pre-submit guardrail + review summary.
-  const effectiveAgentCount = isTestingAgentMode ? taAgentNames.length : selectedAgentIds.length;
-  const fanoutJobCount = totalJobs * Math.max(effectiveAgentCount, isTestingAgentMode ? 0 : 0) * numRuns;
-  const exceedsJobCap = !isTestingAgentMode && totalJobs * Math.max(effectiveAgentCount, 0) > 100;
-  // Distinct agent names for the Review step. Standard flow uses the
-  // multi-select ids; testing_agent_bench uses the testing-agent multi-select
-  // (taAgentNames), each applied to every selected dataset.
-  const reviewAgentNames = useMemo(() => {
-    if (!isTestingAgentMode) return [];
-    return taAgentNames;
-  }, [isTestingAgentMode, taAgentNames]);
+  // Fan-out count (agents × problems × runs) — shared by both flows now that
+  // testing_agent_bench routes through the same top-level agent_names fan-out.
+  const fanoutJobCount = totalJobs * selectedAgentIds.length * numRuns;
+  const exceedsJobCap = totalJobs * selectedAgentIds.length > 100;
   const stepLabels = ['Problems', 'Configure', 'Review'];
 
   return (
@@ -1404,7 +1362,7 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                     Pick one or more agents. One job is created per agent × problem.
                   </p>
                   <AgentMultiSelect
-                    agents={evalAgents}
+                    agents={builderAgents}
                     value={selectedAgentIds}
                     onChange={setSelectedAgentIds}
                     loading={agentsLoading}
@@ -1458,32 +1416,38 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 <span className="text-[10px] text-muted-foreground">max {NUM_RUNS_MAX}</span>
               </div>
 
-              {/* Agents — multi-select for testing_agent_bench. Defaults to
-                  the dataset agent(s); each selected agent runs against every
-                  selected dataset. */}
+              {/* Agents — multi-select for testing_agent_bench. Testing
+                  subagents only; one job per agent × problem. */}
               {isTestingAgentMode && (
                 <div>
                   <Label className="text-sm font-semibold">Agents *</Label>
                   <p className="text-[10px] text-muted-foreground mt-0.5 mb-1.5">
-                    The agent(s) the testing harness will run. Pre-filled from the
-                    dataset; add more to run the same problems across agents.
+                    Pick one or more testing agents. One job is created per agent × problem.
                   </p>
                   <AgentMultiSelect
-                    agents={evalAgentsByName}
-                    value={taAgentNames}
-                    onChange={(next) => { setTaAgentNames(next); setTaAgentsTouched(true); }}
+                    agents={testingAgents}
+                    value={selectedAgentIds}
+                    onChange={setSelectedAgentIds}
                     loading={agentsLoading}
                     error={agentsError}
                     onRetry={fetchEvalAgents}
                     testId="eval-testing-agents-multiselect"
                   />
-                  {taAgentNames.length > 0 && totalJobs > 0 && (
-                    <div className="mt-2 text-[11px] rounded-md px-2.5 py-1.5 border bg-muted/40 border-border/60 text-muted-foreground" data-testid="ta-fanout-count">
-                      <span className="font-mono font-semibold text-foreground">{taAgentNames.length}</span> agent{taAgentNames.length === 1 ? '' : 's'} ×{' '}
-                      <span className="font-mono font-semibold text-foreground">{totalJobs}</span> dataset{totalJobs === 1 ? '' : 's'}
+                  {selectedAgentIds.length > 0 && (
+                    <div
+                      className={`mt-2 text-[11px] rounded-md px-2.5 py-1.5 border ${
+                        exceedsJobCap
+                          ? 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400'
+                          : 'bg-muted/40 border-border/60 text-muted-foreground'
+                      }`}
+                      data-testid="ta-fanout-count"
+                    >
+                      <span className="font-mono font-semibold text-foreground">{selectedAgentIds.length}</span> agent{selectedAgentIds.length === 1 ? '' : 's'} ×{' '}
+                      <span className="font-mono font-semibold text-foreground">{totalJobs}</span> problem{totalJobs === 1 ? '' : 's'}
                       {numRuns > 1 && <> × <span className="font-mono font-semibold text-foreground">{numRuns}</span> run{numRuns === 1 ? '' : 's'}</>}
                       {' '}={' '}
-                      <span className="font-mono font-semibold text-foreground">{taAgentNames.length * totalJobs * numRuns}</span> job{taAgentNames.length * totalJobs * numRuns === 1 ? '' : 's'}
+                      <span className="font-mono font-semibold text-foreground">{fanoutJobCount}</span> job{fanoutJobCount === 1 ? '' : 's'}
+                      {exceedsJobCap && <> — exceeds the limit of 100, the server will reject this.</>}
                     </div>
                   )}
                 </div>
@@ -1637,45 +1601,29 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 <div className="flex items-center gap-1.5">
                   <Rocket className="w-4 h-4 text-muted-foreground" />
                   <span className="text-muted-foreground">Total jobs:</span>
-                  <span className="font-mono font-bold" data-testid="review-total-jobs">{isTestingAgentMode ? taAgentNames.length * totalJobs * numRuns : fanoutJobCount}</span>
+                  <span className="font-mono font-bold" data-testid="review-total-jobs">{fanoutJobCount}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="text-muted-foreground">Group:</span>
                   <Badge variant="secondary" className="font-mono text-[10px]" data-testid="review-group-name">{groupName || '—'}</Badge>
                 </div>
-                {isTestingAgentMode ? (
-                  <div className="flex items-center gap-1.5 flex-wrap" data-testid="review-agents">
-                    <span className="text-muted-foreground">
-                      Agent{reviewAgentNames.length === 1 ? '' : 's'} ({reviewAgentNames.length}):
-                    </span>
-                    {reviewAgentNames.slice(0, 4).map((name) => (
-                      <Badge key={name} variant="outline" className="font-mono text-[10px] bg-violet-500/10 text-violet-600 border-violet-500/20" data-testid={`review-agent-name-${name}`}>
-                        {name}
+                <div className="flex items-center gap-1.5 flex-wrap" data-testid="review-agents">
+                  <span className="text-muted-foreground">Agents ({selectedAgentIds.length}):</span>
+                  {selectedAgentIds.slice(0, 4).map((id) => {
+                    const a = evalAgents.find((x) => x.id === id);
+                    return (
+                      <Badge key={id} variant="outline" className="font-mono text-[10px] bg-violet-500/10 text-violet-600 border-violet-500/20" data-testid={`review-agent-name-${id}`}>
+                        {a?.name || id}
                       </Badge>
-                    ))}
-                    {reviewAgentNames.length > 4 && (
-                      <span className="text-[10px] text-muted-foreground">+{reviewAgentNames.length - 4} more</span>
-                    )}
-                    {reviewAgentNames.length === 0 && (
-                      <span className="text-[10px] text-muted-foreground">— (select an agent)</span>
-                    )}
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-1.5 flex-wrap" data-testid="review-agents">
-                    <span className="text-muted-foreground">Agents ({selectedAgentIds.length}):</span>
-                    {selectedAgentIds.slice(0, 4).map((id) => {
-                      const a = evalAgents.find((x) => x.id === id);
-                      return (
-                        <Badge key={id} variant="outline" className="font-mono text-[10px] bg-violet-500/10 text-violet-600 border-violet-500/20">
-                          {a?.name || id}
-                        </Badge>
-                      );
-                    })}
-                    {selectedAgentIds.length > 4 && (
-                      <span className="text-[10px] text-muted-foreground">+{selectedAgentIds.length - 4} more</span>
-                    )}
-                  </div>
-                )}
+                    );
+                  })}
+                  {selectedAgentIds.length > 4 && (
+                    <span className="text-[10px] text-muted-foreground">+{selectedAgentIds.length - 4} more</span>
+                  )}
+                  {selectedAgentIds.length === 0 && (
+                    <span className="text-[10px] text-muted-foreground">— (select an agent)</span>
+                  )}
+                </div>
               </div>
 
               {/* Active verifier (browser / judge) that will be sent. */}
@@ -1776,14 +1724,12 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                 disabled={
                   submitting || totalJobs === 0 ||
                   agentVerified === false ||
-                  (isTestingAgentMode
-                    ? taAgentNames.length === 0
-                    : selectedAgentIds.length === 0)
+                  selectedAgentIds.length === 0
                   // NOTE: eph readiness gate temporarily disabled (see Next btn).
                 }
                 title={
                   agentVerified === false ? 'Agent name failed verification — fix it or clear the eph check' :
-                  (isTestingAgentMode ? taAgentNames.length === 0 : selectedAgentIds.length === 0) ? 'Select at least one agent' :
+                  selectedAgentIds.length === 0 ? 'Select at least one agent' :
                   undefined
                 }
                 data-testid="submit-eval-button"
