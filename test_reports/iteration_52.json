@@ -1,0 +1,24 @@
+{
+  "summary": "Iteration 52 — Focused BUILD-BENCH regression check on RunEvalModal Step 2 (scratch_bench_phased). PASSED end-to-end. Build multiselect contains ONLY builder agents (356 = 396 total − 40 testing-tagged); ZERO testing-agent leakage on every probe ('tester'=0, 'deep_testing'=0, 'auto_frontend_testing'=0, 'e1_tester'=0). Builders confirmed present: full_stack_app_builder=41 hits, ai_products_agents=12 hits, orchestrator-related=320 hits (cmdk filter matches both id and description). After selecting 1 builder agent and 1 problem, eval-fanout-count correctly renders '1 agent × 1 problem = 1 job'. No real eval jobs submitted (stopped before Submit).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "RunEvalModal.js builderAgents memo = evalAgents.filter(a => !(a.tags||[]).includes('testing')) is wired correctly: catalog of 396 agents → 356 builders in dropdown (delta of 40 matches the 40 testing-tagged agents).",
+    "AgentMultiSelect Search input (data-testid 'eval-agents-multiselect-input') filters reactively via cmdk; both id and description are searched. Builder-only invariant holds across all probed testing-name patterns.",
+    "Step 1 → Step 2 transition for scratch_bench_phased correctly mounts BUILD trigger ('eval-agents-multiselect-trigger') and does NOT mount the testing trigger ('eval-testing-agents-multiselect-trigger') — modes are mutually exclusive as designed."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only)", "frontend": "100% on build-bench regression: build trigger present, TA trigger absent, 356 builder options, 0/4 testing-agent search probes leak, fanout-count correct"},
+  "test_credentials": "localStorage acm_session_token='pw_emergent_gate_post' on https://replay-browser-tests.internal.preview.emergentagent.com",
+  "seed_data_creation": "None. Submit NOT clicked (no real jobs created).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Build-bench regression verified clean in iter52 with a fresh page-load flow (no modal reuse). Repro steps: (1) goto /, set localStorage acm_session_token, goto /evals, wait networkidle. (2) click data-testid=new-eval-btn. (3) open dataset-type-filter, pick 'Scratch Bench (Phased)'. (4) click first row data-testid^=dataset-item-. (5) click eval-next-step. (6) click eval-agents-multiselect-trigger, then type into eval-agents-multiselect-input. Important: use page.fill(SEARCH, q) on data-testid='eval-agents-multiselect-input' (NOT a generic placeholder selector) — the cmdk input is reactive only via the proper testid. (7) Verify count of [data-testid^='eval-agents-multiselect-option-']. (8) After selecting 1 option, click trigger again to close (NEVER press Escape — modal closes). (9) Read eval-fanout-count text. Both testing_agent_bench flow (iter50/51) and build-bench flow (iter52) are now verified.",
+  "rca of the issue": "N/A — no regression observed. Initial confusion (apparent '712 leak') was caused by a wrong selector probing the dataset search input on Step 1 instead of the agent multiselect input; switching to data-testid='eval-agents-multiselect-input' produced correct filter behavior and confirmed zero testing-agent leakage."
+}
