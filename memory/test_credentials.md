@@ -50,12 +50,17 @@ async def seed():
 asyncio.run(seed())
 ```
 
-## Admin role (added 2026-06-30 for Eval Credits)
-ALL preview users in the `users` collection now have `role: 'admin'` so the
-admin-only "Eval credits" indicator is visible to whoever logs in (the backend
-does not populate `role` in this preview yet — the backend team will). `/auth/me`
-returns the full user doc, so `role` flows through automatically.
-NOTE: `/api/credits` is NOT implemented in this repo's backend — the backend team
-provides it. With role=admin but no `/api/credits`, the indicator shows "unavailable"
-(graceful). To grant admin to everyone again if user docs are reset:
-`db.users.update_many({}, {'$set': {'role': 'admin'}})`
+## Admin allowlist + roles + credits (added 2026-06-30 — ported from PR #6)
+The backend now enforces an **admin-managed allowlist**: login requires an
+`@emergent*` domain AND an ACTIVE row in the `allowlist` collection. Roles:
+`admin` (manage allowlist) | `member`. `/auth/me` and `/auth/session` return `role`.
+- `SEED_ADMIN_EMAILS` (default `shresth@emergent.sh`) is seeded as admin on startup.
+- For PREVIEW, all pre-existing users + `test_pw_user@emergent.com` were seeded into
+  the allowlist as **admin** so nobody is locked out and the dashboard is testable.
+- Admin API: `GET/POST/PATCH/DELETE /api/admin/users` (admin-gated). `/api/credits`
+  is admin-gated and now returns REAL data from the harness.
+Re-seed everyone as admin if the allowlist is reset:
+```
+for e in <emails>: db.allowlist.update_one({'email':e},{'$set':{'role':'admin','active':True}}, upsert=True)
+```
+Test session user (token `pw_emergent_gate_post`) = `TEST_pw_user@emergent.com`, role admin.

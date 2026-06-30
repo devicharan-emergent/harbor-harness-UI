@@ -17,6 +17,7 @@ import DatasetViewsPage from "@/pages/DatasetViewsPage";
 import GroupDetailPage from "@/pages/GroupDetailPage";
 import JudgeConfigPage from "@/pages/JudgeConfigPage";
 import AgentPromptManagementPage from "@/pages/AgentPromptManagementPage";
+import AdminUsers from "@/pages/AdminUsers";
 import SchedulesList from "@/pages/SchedulesList";
 import ScheduleEditor from "@/pages/ScheduleEditor";
 import ScheduleDetail from "@/pages/ScheduleDetail";
@@ -62,6 +63,7 @@ const router = createBrowserRouter([
           { path: "/dataset-views", element: <DatasetViewsPage /> },
           { path: "/judge-config", element: <JudgeConfigPage /> },
           { path: "/agent-prompt-management", element: <AgentPromptManagementPage /> },
+          { path: "/admin", element: <AdminUsers /> },
           { path: "/schedules", element: <SchedulesList /> },
           { path: "/schedules/new", element: <ScheduleEditor /> },
           { path: "/schedules/:id", element: <ScheduleDetail /> },

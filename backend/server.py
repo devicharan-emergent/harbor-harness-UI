@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Query, Request, Response, Cookie
+from fastapi import FastAPI, APIRouter, HTTPException, Query, Request, Response, Cookie, Depends
 import httpx
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -73,12 +73,15 @@ async def _get_session_user(request: Request) -> Optional[Dict[str, Any]]:
     user_doc = await db.users.find_one(
         {"user_id": session_doc["user_id"]}, {"_id": 0}
     )
-    # Enforce the allow-list on every resolve so sessions seeded before the
-    # gate landed — or sessions for users whose email later fell out of the
-    # allow-list — fail closed instead of silently working.
-    if user_doc and not _is_allowed_email(user_doc.get("email")):
+    # Enforce the allow-list on every resolve so sessions for users whose email
+    # was removed from the allow-list (or never added) fail closed instead of
+    # silently working — and so a revoked user is kicked on their next request.
+    if user_doc and not await _is_allowed_email(user_doc.get("email")):
         await db.user_sessions.delete_many({"user_id": session_doc["user_id"]})
         return None
+    if user_doc:
+        # Surface the current role so the frontend can show/hide the admin UI.
+        user_doc["role"] = await _role_for(user_doc.get("email"))
     return user_doc
 
 
@@ -106,25 +109,83 @@ def _pinned_user_id_for(email: str) -> Optional[str]:
     return None
 
 
-# ── Email allow-list ────────────────────────────────────────────────────
-# Only emails whose domain begins with the literal "emergent" are allowed
-# to authenticate. Covers @emergent.sh, @emergent.com, @emergentagent.com,
-# any future @emergent-* TLD, etc. No env override, no test-account
-# exemption — every login (including dev seeding) must use a real
-# @emergent* address.
-def _is_allowed_email(email: Optional[str]) -> bool:
+# ── Email allow-list (admin-managed) ─────────────────────────────────────
+# Access requires BOTH:
+#   1. an @emergent* email domain (hard prerequisite — an external address can
+#      never be granted access, even by an admin mistake), AND
+#   2. an ACTIVE entry in the `allowlist` collection, managed by admins via the
+#      /api/admin/users endpoints below.
+# Roles: "admin" (can manage the list) | "member" (can use the app). Seeded
+# admins come from SEED_ADMIN_EMAILS.
+ALLOWLIST_ROLES = ("admin", "member")
+SEED_ADMIN_EMAILS = [
+    e.strip().lower()
+    for e in os.environ.get("SEED_ADMIN_EMAILS", "shresth@emergent.sh").split(",")
+    if e.strip()
+]
+
+
+def _norm_email(email: Optional[str]) -> str:
+    return (email or "").strip().lower()
+
+
+def _email_domain_ok(email: Optional[str]) -> bool:
+    """Hard domain prerequisite: domain must begin with the literal "emergent"
+    (@emergent.sh, @emergent.com, @emergentagent.com, @emergent-*.io, …)."""
     if not email or "@" not in email:
         return False
     domain = email.rsplit("@", 1)[1].strip().lower()
     return domain.startswith("emergent")
 
 
+async def _allowlist_entry(email: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Active allowlist row for this email, or None."""
+    e = _norm_email(email)
+    if not e:
+        return None
+    return await db.allowlist.find_one({"email": e, "active": True}, {"_id": 0})
+
+
+async def _is_allowed_email(email: Optional[str]) -> bool:
+    """Gate = @emergent domain AND an active allowlist entry."""
+    if not _email_domain_ok(email):
+        return False
+    return await _allowlist_entry(email) is not None
+
+
+async def _role_for(email: Optional[str]) -> Optional[str]:
+    entry = await _allowlist_entry(email)
+    return entry.get("role") if entry else None
+
+
+async def _seed_admins() -> None:
+    """Idempotently ensure the bootstrap admin emails exist + are active admins,
+    so the very first operator can log in and add everyone else from the UI."""
+    await db.allowlist.create_index("email", unique=True)
+    now = datetime.now(timezone.utc)
+    for email in SEED_ADMIN_EMAILS:
+        await db.allowlist.update_one(
+            {"email": email},
+            {
+                "$set": {"role": "admin", "active": True, "updated_at": now},
+                "$setOnInsert": {"email": email, "added_by": "system", "created_at": now},
+            },
+            upsert=True,
+        )
+    if SEED_ADMIN_EMAILS:
+        logging.info("Allowlist seeded admins: %s", ", ".join(SEED_ADMIN_EMAILS))
+
+
+async def _active_admin_count() -> int:
+    return await db.allowlist.count_documents({"role": "admin", "active": True})
+
+
 async def _enforce_email_allowlist_or_die(email: Optional[str]) -> None:
     """Reject + log if the email is not on the allow-list. Used at /auth/session
     (block fresh logins) AND at every session resolve (kill existing sessions
-    seeded before the gate landed, or sessions for users whose email changed).
+    for users whose email changed or fell off the list).
     """
-    if not _is_allowed_email(email):
+    if not await _is_allowed_email(email):
         # Best-effort cleanup so the blocked email can't keep using a stale
         # cookie. Idempotent — safe if the row doesn't exist.
         if email:
@@ -134,12 +195,13 @@ async def _enforce_email_allowlist_or_die(email: Optional[str]) -> None:
                     await db.user_sessions.delete_many({"user_id": user_doc["user_id"]})
             except Exception:
                 pass
+        if _email_domain_ok(email):
+            message = "Your @emergent email isn't on the allow-list yet. Ask an admin to grant you access."
+        else:
+            message = "Access restricted to allow-listed Emergent team members. Sign in with an @emergent.* email address."
         raise HTTPException(
             status_code=403,
-            detail={
-                "error": "email_not_allowed",
-                "message": "Access restricted to Emergent team members. Sign in with an @emergent.* email address.",
-            },
+            detail={"error": "email_not_allowed", "message": message},
         )
 
 
@@ -221,6 +283,7 @@ async def auth_session(body: AuthSessionRequest, response: Response):
         "name": data.get("name", ""),
         "picture": data.get("picture", ""),
         "session_token": session_token,
+        "role": await _role_for(email),
     }
 
 
@@ -246,6 +309,148 @@ async def auth_logout(request: Request, response: Response):
         await db.user_sessions.delete_one({"session_token": token})
     response.delete_cookie("session_token", path="/", samesite="none", secure=True)
     return {"ok": True}
+
+
+# ── Admin: allow-list management ─────────────────────────────────────────
+# Admin-only CRUD over the `allowlist` collection. Used by the frontend admin
+# dashboard to grant/revoke who can log in and run evals. Every handler is
+# gated by require_admin (resolves the session user + checks role == admin).
+async def require_admin(request: Request) -> Dict[str, Any]:
+    user = await _get_session_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if user.get("role") != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail={"error": "not_admin", "message": "Admin access required."},
+        )
+    return user
+
+
+class AllowlistAddRequest(BaseModel):
+    email: str
+    role: str = "member"
+
+
+class AllowlistUpdateRequest(BaseModel):
+    role: Optional[str] = None
+    active: Optional[bool] = None
+
+
+async def _allowlist_view(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """Shape an allowlist row for the UI, enriched with login info if the
+    person has actually signed in (users row exists)."""
+    u = await db.users.find_one({"email": entry["email"]}, {"_id": 0, "name": 1, "picture": 1})
+    return {
+        "email": entry["email"],
+        "role": entry.get("role", "member"),
+        "active": entry.get("active", True),
+        "added_by": entry.get("added_by"),
+        "created_at": entry.get("created_at"),
+        "updated_at": entry.get("updated_at"),
+        "name": (u or {}).get("name"),
+        "picture": (u or {}).get("picture"),
+        "has_logged_in": u is not None,
+    }
+
+
+@api_router.get("/admin/users")
+async def admin_list_users(_admin: Dict[str, Any] = Depends(require_admin)):
+    """List every allow-list entry (admins + members, active + revoked)."""
+    rows = await db.allowlist.find({}, {"_id": 0}).sort("email", 1).to_list(length=1000)
+    return [await _allowlist_view(r) for r in rows]
+
+
+@api_router.post("/admin/users", status_code=201)
+async def admin_add_user(
+    body: AllowlistAddRequest, admin: Dict[str, Any] = Depends(require_admin)
+):
+    """Grant access to an @emergent email (idempotent re-activate if revoked)."""
+    email = _norm_email(body.email)
+    role = (body.role or "member").lower()
+    if role not in ALLOWLIST_ROLES:
+        raise HTTPException(status_code=400, detail=f"role must be one of {ALLOWLIST_ROLES}")
+    if not _email_domain_ok(email):
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "invalid_email", "message": "Only @emergent* email addresses can be added."},
+        )
+    now = datetime.now(timezone.utc)
+    await db.allowlist.update_one(
+        {"email": email},
+        {
+            "$set": {"role": role, "active": True, "updated_at": now},
+            "$setOnInsert": {"email": email, "added_by": admin.get("email"), "created_at": now},
+        },
+        upsert=True,
+    )
+    entry = await db.allowlist.find_one({"email": email}, {"_id": 0})
+    return await _allowlist_view(entry)
+
+
+@api_router.patch("/admin/users/{email}")
+async def admin_update_user(
+    email: str, body: AllowlistUpdateRequest, admin: Dict[str, Any] = Depends(require_admin)
+):
+    """Change a user's role or active flag. Guards against removing the last
+    active admin (which would lock everyone out of administration)."""
+    email = _norm_email(email)
+    entry = await db.allowlist.find_one({"email": email}, {"_id": 0})
+    if not entry:
+        raise HTTPException(status_code=404, detail="No such allow-list entry")
+    updates: Dict[str, Any] = {}
+    if body.role is not None:
+        role = body.role.lower()
+        if role not in ALLOWLIST_ROLES:
+            raise HTTPException(status_code=400, detail=f"role must be one of {ALLOWLIST_ROLES}")
+        updates["role"] = role
+    if body.active is not None:
+        updates["active"] = bool(body.active)
+    if not updates:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    # Last-admin guard: block a change that would drop active admins to zero.
+    was_active_admin = entry.get("role") == "admin" and entry.get("active", True)
+    still_active_admin = (
+        updates.get("role", entry.get("role")) == "admin"
+        and updates.get("active", entry.get("active", True))
+    )
+    if was_active_admin and not still_active_admin and await _active_admin_count() <= 1:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "last_admin", "message": "Cannot demote/deactivate the last admin."},
+        )
+    updates["updated_at"] = datetime.now(timezone.utc)
+    await db.allowlist.update_one({"email": email}, {"$set": updates})
+    # If access was revoked, kill the user's live sessions immediately.
+    if updates.get("active") is False:
+        u = await db.users.find_one({"email": email}, {"_id": 0, "user_id": 1})
+        if u:
+            await db.user_sessions.delete_many({"user_id": u["user_id"]})
+    entry = await db.allowlist.find_one({"email": email}, {"_id": 0})
+    return await _allowlist_view(entry)
+
+
+@api_router.delete("/admin/users/{email}")
+async def admin_remove_user(email: str, admin: Dict[str, Any] = Depends(require_admin)):
+    """Revoke access (soft delete: active=false) and kill live sessions.
+    Blocks removing the last active admin."""
+    email = _norm_email(email)
+    entry = await db.allowlist.find_one({"email": email}, {"_id": 0})
+    if not entry:
+        raise HTTPException(status_code=404, detail="No such allow-list entry")
+    if entry.get("role") == "admin" and entry.get("active", True) and await _active_admin_count() <= 1:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "last_admin", "message": "Cannot remove the last admin."},
+        )
+    await db.allowlist.update_one(
+        {"email": email},
+        {"$set": {"active": False, "updated_at": datetime.now(timezone.utc)}},
+    )
+    u = await db.users.find_one({"email": email}, {"_id": 0, "user_id": 1})
+    if u:
+        await db.user_sessions.delete_many({"user_id": u["user_id"]})
+    return {"ok": True, "email": email, "active": False}
 
 
 # ── Pydantic models ─────────────────────────────────────────────────────
@@ -429,6 +634,26 @@ async def restore_version(agent_id: str, version: int):
 
 EVAL_API_BASE = os.environ.get("EVAL_API_BASE", "http://harness-eval.int-worker.dev.emergentagent.com")
 BUILDER_PROXY_BASE = os.environ.get("BUILDER_API_BASE", "https://cortex-eph-builder-1035522277200.us-central1.run.app/api/v1/builder")
+
+
+@api_router.get("/credits")
+async def get_credits(_user: Dict[str, Any] = Depends(require_admin)):
+    """Show the cortex eval user's remaining ECU balance (read-only).
+    Proxies the harness's GET /api/v1/credits. Degrades gracefully to
+    {"available": false, ...} so the dashboard can render "unavailable"
+    instead of erroring while that harness endpoint is being rolled out.
+    Admin-gated: the balance is operational info, not for every member.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as hclient:
+            resp = await hclient.get(f"{EVAL_API_BASE}/api/v1/credits")
+        if resp.status_code >= 400:
+            return {"available": False, "reason": f"harness returned {resp.status_code}"}
+        data = resp.json()
+        data.setdefault("available", True)
+        return data
+    except Exception as e:
+        return {"available": False, "reason": f"harness unreachable: {e.__class__.__name__}"}
 
 
 @api_router.get("/eval/cortex/agents/exists")
@@ -2625,7 +2850,11 @@ async def startup():
     """Initialize services and seed database."""
     # Initialize agent service
     init_agent_service(db)
-    
+
+    # Seed the access allow-list with the bootstrap admin(s) so the first
+    # operator can log in and manage everyone else from the admin dashboard.
+    await _seed_admins()
+
     # Seed database with sample agents if empty
     count = await db.agents.count_documents({})
     if count == 0:

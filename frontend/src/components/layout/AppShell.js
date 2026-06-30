@@ -2,12 +2,13 @@ import { useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
-import { Menu, Cpu, Home, GitCompare, ActivitySquare, Database, CalendarClock, Scale, FileCode2, BookMarked } from 'lucide-react';
+import { Menu, Cpu, Home, GitCompare, ActivitySquare, Database, CalendarClock, Scale, FileCode2, BookMarked, ShieldCheck } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
 import { ApiHealthIndicator } from '@/components/evals/ApiHealthIndicator';
 import { DataSourceIndicator } from './DataSourceIndicator';
 import { EvalCredits } from './EvalCredits';
 import { UserMenu } from './UserMenu';
+import { useAuth } from '@/contexts/AuthContext';
 
 const navItems = [
   { label: 'Agents', href: '/', icon: Home },
@@ -20,9 +21,13 @@ const navItems = [
   { label: 'Compare', href: '/compare', icon: GitCompare },
 ];
 
+const adminNavItem = { label: 'Admin', href: '/admin', icon: ShieldCheck };
+
 export default function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
+  const { user } = useAuth();
+  const items = user?.role === 'admin' ? [...navItems, adminNavItem] : navItems;
 
   const NavContent = () => (
     <div className="flex flex-col h-full p-3 overflow-y-auto">
@@ -44,7 +49,7 @@ export default function AppShell() {
       
       {/* Navigation */}
       <nav className="flex-1 space-y-1 min-h-0">
-        {navItems.map(item => {
+        {items.map(item => {
           const Icon = item.icon;
           const isActive = location.pathname === item.href;
           return (
