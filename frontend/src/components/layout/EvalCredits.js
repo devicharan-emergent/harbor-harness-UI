@@ -8,12 +8,12 @@ const LOW_BALANCE = 2000;
 const fmt = (n) =>
   Number.isFinite(n) ? Math.round(n).toLocaleString('en-US') : '—';
 
-// Compact, read-only "Eval credits" indicator for admins. Calls GET /api/credits
-// via the shared authAxios instance and degrades gracefully — it never throws,
-// toasts, or blocks the page, and renders nothing for non-admins.
+// Compact, read-only "Eval credits" indicator shown to any signed-in user.
+// Calls GET /api/credits via the shared authAxios instance and degrades
+// gracefully — it never throws, toasts, or blocks the page. Non-admins get a
+// 403 from the backend and simply see "unavailable".
 export function EvalCredits() {
   const { user } = useAuth();
-  const isAdmin = user?.role === 'admin';
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -35,10 +35,10 @@ export function EvalCredits() {
   }, []);
 
   useEffect(() => {
-    if (isAdmin) fetchCredits();
-  }, [isAdmin, fetchCredits]);
+    if (user) fetchCredits();
+  }, [user, fetchCredits]);
 
-  if (!isAdmin) return null;
+  if (!user) return null;
 
   const available = data?.available === true;
   const ecu = available ? data.ecu : null;
