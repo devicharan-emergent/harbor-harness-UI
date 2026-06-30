@@ -262,14 +262,6 @@ function VerifierReview({ label, config, testId }) {
           {model || '—'}
         </Badge>
       </div>
-      {config.reasoning_effort && (
-        <div className="flex items-center gap-1.5">
-          <span className="text-muted-foreground">Reasoning effort:</span>
-          <Badge variant="secondary" className="font-mono text-[10px]" data-testid={`${testId}-reasoning`}>
-            {config.reasoning_effort}
-          </Badge>
-        </div>
-      )}
       <div className="flex items-start gap-1.5">
         <span className="text-muted-foreground">Prompt:</span>
         {prompt ? (
@@ -1007,7 +999,6 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
             if (judgeConfig && !judgeConfig.is_default) {
               if (judgeConfig.prompt) batchBody.judge_prompt = judgeConfig.prompt;
               if (judgeConfig.model) batchBody.judge_model = judgeConfig.model;
-              if (judgeConfig.reasoning_effort) batchBody.judge_reasoning_effort = judgeConfig.reasoning_effort;
             }
             const result = await submitTestingAgentEval(batchBody);
             totalJobsSubmitted += Array.isArray(result?.jobs)
@@ -1556,10 +1547,6 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                           Prompt: {judgeConfig?.prompt
                             ? `${judgeConfig.prompt.length} chars · {golden} + {candidate} tokens`
                             : 'using harness default'}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-muted-foreground">Reasoning effort:</span>
-                          <code className="font-mono">{judgeConfig?.reasoning_effort || '(default)'}</code>
                         </div>
                       </div>
                     </div>

@@ -1,83 +1,41 @@
-# Agent Config Manager (ACM) — PRD
+# Eval UI (Agent Config Manager / ACM) — PRD
 
 ## Problem Statement
-ACM is a React + FastAPI + MongoDB BFF over an upstream eval harness. It provides
-dataset management, eval job triggering, job/run monitoring, phase/status tracking,
-and replay-verifier capabilities. Auth via Emergent-managed Google Auth (restricted
-to `@emergent*` email domains).
+ACM is a React + FastAPI + MongoDB app acting as a frontend and BFF proxy for an upstream evaluation harness. It manages datasets, triggers eval jobs (incl. multi-agent fan-out), monitors live job progress, and lets users configure/replay verifier (judge) settings.
 
 ## Architecture
 ```
-/app/
-├── backend/server.py        # FastAPI BFF proxy router (>2500 lines — needs split)
-├── backend/tests/           # pytest backend validation
-├── frontend/src/pages/      # DatasetsPage, GroupDetailPage, EvalRuns, JobDetail
-├── frontend/src/components/evals/  # RunEvalModal, modals
-├── frontend/src/services/evalApi.js
-└── frontend/src/lib/        # jobShape.js, utils.js
+/app/backend/server.py        # FastAPI BFF proxy router (~2680 lines, NEEDS REFACTOR)
+/app/backend/tests/           # Pytest backend validation
+/app/frontend/src/components/evals/  # RunEvalModal, JudgeConfigDialog, AgentMultiSelect, LiveEvalResults
+/app/frontend/src/pages/             # DatasetsPage, GroupDetailPage, EvalRuns, JobDetail
+/app/frontend/src/lib/               # jobShape.js, utils.js
+/app/frontend/src/services/          # evalApi.js
 ```
 
-## Implemented (chronological)
-- **(2026-06-30) Eval modal + verifier-config enhancements** (all testing_agent verified, iter 46-49):
-  - Multi-agent New Eval (scratch + testing-agent) via shared AgentMultiSelect (inline, wheel-scrollable inside the dialog); testing-agent fans out one batch per agent; pre-populated from dataset agent_name.
-  - Testing-agent Configure: Model + LLM Judge moved under collapsed "Extra Options"; ModelNamePicker has a "(default)" option to omit model_name.
-  - Active verifier (Browser/Judge) prompt+model surfaced in Review for both benches.
-  - Judge `reasoning_effort` (low/med/high, default=omit): editable in verifier-config dialog, persisted (db.judge_config), shown in Step 2 + Review, forwarded on submit as `judge_reasoning_effort`.
-  - Quick Links: "View Emergent Job", "Replay Eval", "Browser LLM Logs". Redash links moved to Evals group card + GroupDetail header; open-group icon moved to far right of group card.
-- `testing_agent_bench` dataset name formatting fixed in EvalRuns.
-- "Watch Replay" link blindly uses backend `replay_url` (no FE URL construction).
-- JobDetail "Phase Results (raw)" split into per-phase collapsible blocks.
-- `/api/eval/stats` proxy computes the `replaying` status count.
-- RunEvalModal Agent Name reverted from Combobox to plain Input.
-- RunEvalModal "All Types" dataset truncation fixed via per-type parallel fan-out.
-- **(2026-06-29) Live Results on eval-detail + multi-agent eval submit**:
-  - Multi-agent New Eval: searchable multi-select sourced from harness
-    `/api/v1/agents` (396 agents) → submitted as `agent_names[]`; BFF
-    `_expand_agent_fanout` cross-products agent×problem (stamps agent_name per
-    eval row), enforces 100-job cap with exact message. Results grouped by
-    agent in EvalRuns (per-agent sub-headers). Inline submit-error banner.
-  - Live Results card (JobDetail, placed below Progress): polls
-    `/eval/jobs/{id}/live-results` + `/llm-calls` every 4s while
-    generating/running, merges rows by key (no flicker), shows status chips +
-    pass/total + grouped LLM-call feed; click a call → lazy
-    `/llm-calls/{call_id}` viewer (request transcript + raw response).
-    Stops/unmounts on terminal → final phase_results view renders. 3 new BFF
-    proxies added. Verified testing_agent iteration_45 (5/5 BE + 5/5 FE).
-- **(2026-06-29) Evals UI batch (testing_agent iteration_43, 5/5 pass)**:
-  - RunEvalModal Step 2: removed Model picker + Comment textarea; moved the
-    3 run-behaviour toggles (Headed browser / Force rebuild / Phase breakpoint)
-    into a collapsed-by-default "Extra Options" collapsible.
-  - JobDetail Quick Links: relabeled Cortex → "View Emergent Job"; added
-    "Replay Eval" deep link (`eval-ui-replay.internal.preview.emergentagent.com/?job_id=<cortex>&env=prod&autoload=1`);
-    removed the two Redash comparison links.
-  - Moved the Redash Data/Tool-Usage comparison links onto the Evals group
-    name card (icon links, dashboards 730/731, group preselected).
-  - Added "View Emergent Job" (app.emergent.sh) link to job rows in EvalRuns
-    (expanded) and GroupDetailPage; all open in new tab with stopPropagation.
-- **(2026-06-29) DatasetsPage pagination + view bugs fixed** — (1) Dataset
-  views now fetch exactly the view's members by instance (`fetchViewDatasets`
-  via `getDatasetInstance`) instead of fetching the first 200 and client-
-  filtering, so all members show regardless of upstream ordering; (2) row
-  selection is now a `Map<key, fullObject>` that persists across pages (was
-  wiped by a page/type-change effect) — bulk delete/export operate on the
-  full cross-page selection. "All Types" + view modes paginate client-side.
-  Verified by testing_agent (iteration_42, 5/5 pass).
-- **(2026-06-29) DatasetsPage "All Types" truncation fixed** — `fetchDatasets`
-  now fans out `listDatasetsByType` per type (limit 200) and merges; pagination
-  hidden for "All Types"/active-view. Verified: 153 datasets, multiple types shown.
-- **(2026-06-29) Backend venv repair** — site-packages had zeroed/corrupted files
-  (null bytes, invalid ELF). Force-reinstalled all requirements via system pip;
-  backend healthy again.
+## Key API Endpoints
+- GET/PUT `/api/eval/verifier-config`, POST `/api/eval/verifier-config/reset`
+- GET `/api/v1/agents`
+- GET `/api/v1/evals/{id}/live-results`, `/api/v1/evals/{id}/llm-calls`
+
+## DB Schema
+- `dataset_views`: {view_id, name, description, items:[{dataset_type, instance_id}]}
+- `judge_config`: {_id:<bench_type>, prompt, model, updated_at}
+
+## Integrations
+- Emergent-managed Google Auth.
+
+## Completed
+- Multi-agent eval fan-out (≤100 jobs), live results polling, verifier config surfacing in Review step.
+- DatasetsPage pagination + "All Types" fan-out fetch fixes.
+- Extra Options collapsible, Redash links on group cards, AgentMultiSelect chips, ModelNamePicker `(default)`.
+- **2026-06-30: Fully reverted `reasoning_effort` feature** (backend + JudgeConfigDialog + RunEvalModal). Verified via curl; frontend compiles clean.
 
 ## Backlog
-- Blocked (upstream): CSV re-import with prior name throws `23505 datasets_name_key`
-  due to soft-deleted rows persisting upstream. Not fixable from BFF side.
+- **P1**: Refactor `server.py` (>2600 lines) into `routes/*` + `models.py`.
+- **P2**: Decide whether "3 verifier config prompts (low/med/high versions)" is still desired.
+- **Blocked (upstream)**: Re-importing CSV with previously-used name throws `23505 datasets_name_key` (harness soft-delete limitation).
 
-## Key Notes
-- Upstream `/api/v1/datasets` caps at ~100 rows alphabetically — always bypass via
-  per-type `listDatasetsByType` fan-out.
-- Never construct replay/dashboard URLs in FE; pass backend `replay_url` as-is.
-- Production vs Preview: cannot fix prod directly; user must redeploy.
-
-## Credentials
-See `/app/memory/test_credentials.md` (seeded Mongo session, `@emergent*` gate).
+## Notes
+- Fix code in PREVIEW env; user redeploys to production (`https://ui-preview-debug.internal.emergent.host`) themselves.
+- Respond in English.
