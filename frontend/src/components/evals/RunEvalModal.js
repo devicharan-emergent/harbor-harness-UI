@@ -1482,6 +1482,25 @@ export function RunEvalModal({ open, onClose, initialEph = '', initialAgentName 
                     className="font-mono text-sm"
                     data-testid="eval-testing-agent-name-override"
                   />
+                  {reviewAgentNames.length > 0 && (
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5" data-testid="ta-agents-list">
+                      <span className="text-[10px] text-muted-foreground">
+                        {agentNameOverride.trim()
+                          ? 'Override applies to all:'
+                          : `From selected datasets (${reviewAgentNames.length}):`}
+                      </span>
+                      {reviewAgentNames.map((name) => (
+                        <Badge
+                          key={name}
+                          variant="outline"
+                          className="font-mono text-[10px] bg-violet-500/10 text-violet-600 border-violet-500/20"
+                          data-testid={`ta-agent-chip-${name}`}
+                        >
+                          {name}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
