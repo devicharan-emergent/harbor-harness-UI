@@ -18,6 +18,7 @@ const STATUS_META = {
   fail: { Icon: XCircle, cls: 'text-rose-500', badge: 'bg-rose-500/10 text-rose-600 border-rose-500/20', label: 'fail' },
   error: { Icon: AlertTriangle, cls: 'text-muted-foreground', badge: 'bg-muted text-muted-foreground border-border', label: 'error' },
   skip: { Icon: MinusCircle, cls: 'text-muted-foreground', badge: 'bg-muted text-muted-foreground border-border', label: 'skip' },
+  cancelled: { Icon: MinusCircle, cls: 'text-amber-500', badge: 'bg-amber-500/10 text-amber-600 border-amber-500/20', label: 'cancelled' },
 };
 
 function StatusChip({ status, testId }) {
@@ -124,8 +125,10 @@ export function LiveEvalResults({ jobId, active }) {
   }, [jobId]);
 
   useEffect(() => {
-    if (!active) return undefined;
+    // Always fetch once so terminal jobs (including cancelled) render their
+    // test cases from live-results; only keep polling while the job is active.
     poll();
+    if (!active) return undefined;
     const t = setInterval(poll, POLL_MS);
     return () => clearInterval(t);
   }, [active, poll]);
@@ -137,6 +140,18 @@ export function LiveEvalResults({ jobId, active }) {
       ((a.replay_index ?? 0) - (b.replay_index ?? 0)),
     );
   }, [results]);
+
+  // Group by phase_index (ascending); rows within a phase stay ordered by
+  // test_index thanks to sortedResults.
+  const phaseGroups = useMemo(() => {
+    const m = new Map();
+    for (const r of sortedResults) {
+      if (!m.has(r.phase_index)) m.set(r.phase_index, []);
+      m.get(r.phase_index).push(r);
+    }
+    return Array.from(m.entries()).sort((a, b) => a[0] - b[0]);
+  }, [sortedResults]);
+  const multiPhase = phaseGroups.length > 1;
 
   // Calls grouped by (phase_index, test_index)
   const callsByTest = useMemo(() => {
@@ -156,15 +171,21 @@ export function LiveEvalResults({ jobId, active }) {
   const failCount = sortedResults.filter(r => r.status === 'fail').length;
   const isEmpty = total === 0 && calls.length === 0;
 
+  // Terminal job with nothing to show → render nothing (don't leave an empty
+  // card). Running jobs keep the waiting/loading affordances below.
+  if (loadedOnce && isEmpty && !active) return null;
+
   return (
     <Card data-testid="live-eval-results-card" className="border-blue-500/30">
       <CardHeader className="pb-2">
         <CardTitle className="text-sm flex items-center gap-2">
           <ActivitySquare className="w-4 h-4 text-blue-500" />
-          Live Results
-          <span className="ml-1 flex items-center gap-1 text-[10px] font-normal text-blue-500">
-            <Loader2 className="w-3 h-3 animate-spin" /> live
-          </span>
+          Test Cases
+          {active && (
+            <span className="ml-1 flex items-center gap-1 text-[10px] font-normal text-blue-500">
+              <Loader2 className="w-3 h-3 animate-spin" /> live
+            </span>
+          )}
           {total > 0 && (
             <span className="ml-auto text-xs font-normal text-muted-foreground" data-testid="live-results-header">
               {doneCount}/{total} done
@@ -174,66 +195,78 @@ export function LiveEvalResults({ jobId, active }) {
           )}
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-2">
+      <CardContent className="space-y-3">
         {!loadedOnce && (
           <div className="flex items-center gap-2 text-xs text-muted-foreground py-4 justify-center">
             <Loader2 className="w-4 h-4 animate-spin" /> Loading…
           </div>
         )}
-        {loadedOnce && isEmpty && (
+        {loadedOnce && isEmpty && active && (
           <div className="text-xs text-muted-foreground py-4 text-center" data-testid="live-results-waiting">
             Waiting for tests to start… (the browser phase hasn&apos;t begun yet)
           </div>
         )}
-        {sortedResults.map((r) => {
-          const tkey = `${r.phase_index}-${r.test_index}`;
-          const testCalls = callsByTest.get(tkey) || [];
-          return (
-            <Collapsible key={resultKey(r)} className="rounded-md border" data-testid={`live-test-row-${r.phase_index}-${r.test_index}-${r.replay_index ?? 0}`}>
-              <CollapsibleTrigger className="group flex w-full items-center gap-2 px-3 py-2 text-left">
-                <StatusChip status={r.status} testId={`live-test-status-${r.phase_index}-${r.test_index}-${r.replay_index ?? 0}`} />
-                <span className="text-xs font-medium truncate flex-1">
-                  {r.test_name || `test ${r.test_index}`}
-                  {r.replay_index ? <span className="text-muted-foreground"> · replay {r.replay_index}</span> : null}
-                </span>
-                {(r.pass_cases != null && r.total_cases != null) && (
-                  <span className="text-[10px] font-mono text-muted-foreground">{r.pass_cases}/{r.total_cases} cases</span>
-                )}
-                {testCalls.length > 0 && (
-                  <Badge variant="outline" className="text-[9px] font-mono">{testCalls.length} call{testCalls.length === 1 ? '' : 's'}</Badge>
-                )}
-                <ChevronDown className="w-3.5 h-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
-              </CollapsibleTrigger>
-              <CollapsibleContent className="px-3 pb-2">
-                {testCalls.length === 0 ? (
-                  <p className="text-[10px] text-muted-foreground py-1">No LLM calls recorded yet.</p>
-                ) : (
-                  <div className="space-y-1 pt-1">
-                    {testCalls.map((c) => (
-                      <button
-                        key={c.id}
-                        type="button"
-                        onClick={() => setOpenCall(c)}
-                        className="flex w-full items-center gap-2 rounded px-2 py-1 text-[11px] hover:bg-accent text-left"
-                        data-testid={`live-llm-call-${c.id}`}
-                      >
-                        <span className="font-mono text-muted-foreground w-8 flex-shrink-0">#{c.call_seq}</span>
-                        <span className="font-mono truncate flex-1">{c.model}</span>
-                        <Badge variant="outline" className={`text-[9px] ${c.status === 'ok' || c.status === 'pass' ? 'text-emerald-600' : c.status === 'running' ? 'text-blue-600' : 'text-rose-600'}`}>{c.status}</Badge>
-                        <span className="font-mono text-muted-foreground flex-shrink-0">
-                          {(c.prompt_tokens ?? 0).toLocaleString()}→{(c.completion_tokens ?? 0).toLocaleString()} tok
-                        </span>
-                        {c.latency_ms != null && (
-                          <span className="font-mono text-muted-foreground flex-shrink-0">{(c.latency_ms / 1000).toFixed(1)}s</span>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </CollapsibleContent>
-            </Collapsible>
-          );
-        })}
+        {phaseGroups.map(([phaseIndex, rows]) => (
+          <div key={phaseIndex} className="space-y-2" data-testid={`live-phase-group-${phaseIndex}`}>
+            {multiPhase && (
+              <div className="text-[11px] font-semibold text-muted-foreground px-1" data-testid={`live-phase-header-${phaseIndex}`}>
+                Phase {phaseIndex + 1}
+              </div>
+            )}
+            {rows.map((r) => {
+              const tkey = `${r.phase_index}-${r.test_index}`;
+              const testCalls = callsByTest.get(tkey) || [];
+              return (
+                <Collapsible key={resultKey(r)} className="rounded-md border" data-testid={`live-test-row-${r.phase_index}-${r.test_index}-${r.replay_index ?? 0}`}>
+                  <CollapsibleTrigger className="group flex w-full items-center gap-2 px-3 py-2 text-left">
+                    <StatusChip status={r.status} testId={`live-test-status-${r.phase_index}-${r.test_index}-${r.replay_index ?? 0}`} />
+                    <span className="text-xs font-medium truncate flex-1" title={r.test_name || ''}>
+                      {(r.test_name || `test ${r.test_index}`).split('\n')[0]}
+                      {r.replay_index ? <span className="text-muted-foreground"> · replay {r.replay_index}</span> : null}
+                    </span>
+                    {(r.pass_cases != null && r.total_cases != null) && (
+                      <span className="text-[10px] font-mono text-muted-foreground" data-testid={`live-test-cases-${r.phase_index}-${r.test_index}`}>{r.pass_cases}/{r.total_cases} cases</span>
+                    )}
+                    {testCalls.length > 0 && (
+                      <Badge variant="outline" className="text-[9px] font-mono">{testCalls.length} call{testCalls.length === 1 ? '' : 's'}</Badge>
+                    )}
+                    <ChevronDown className="w-3.5 h-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="px-3 pb-2">
+                    {(r.test_name && r.test_name.includes('\n')) && (
+                      <pre className="text-[10px] whitespace-pre-wrap break-words font-mono text-muted-foreground bg-muted/30 rounded p-2 mt-1 mb-2 max-h-48 overflow-y-auto">{r.test_name}</pre>
+                    )}
+                    {testCalls.length === 0 ? (
+                      <p className="text-[10px] text-muted-foreground py-1">No LLM calls recorded yet.</p>
+                    ) : (
+                      <div className="space-y-1 pt-1">
+                        {testCalls.map((c) => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => setOpenCall(c)}
+                            className="flex w-full items-center gap-2 rounded px-2 py-1 text-[11px] hover:bg-accent text-left"
+                            data-testid={`live-llm-call-${c.id}`}
+                          >
+                            <span className="font-mono text-muted-foreground w-8 flex-shrink-0">#{c.call_seq}</span>
+                            <span className="font-mono truncate flex-1">{c.model}</span>
+                            <Badge variant="outline" className={`text-[9px] ${c.status === 'ok' || c.status === 'pass' ? 'text-emerald-600' : c.status === 'running' ? 'text-blue-600' : 'text-rose-600'}`}>{c.status}</Badge>
+                            <span className="font-mono text-muted-foreground flex-shrink-0">
+                              {(c.prompt_tokens ?? 0).toLocaleString()}→{(c.completion_tokens ?? 0).toLocaleString()} tok
+                            </span>
+                            {c.latency_ms != null && (
+                              <span className="font-mono text-muted-foreground flex-shrink-0">{(c.latency_ms / 1000).toFixed(1)}s</span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </CollapsibleContent>
+                </Collapsible>
+              );
+            })}
+          </div>
+        ))}
       </CardContent>
       <CallDetailDialog jobId={jobId} call={openCall} onClose={() => setOpenCall(null)} />
     </Card>

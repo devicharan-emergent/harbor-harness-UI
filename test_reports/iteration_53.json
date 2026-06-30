@@ -1,0 +1,25 @@
+{
+  "summary": "Frontend-only verification of ACM Eval Job detail page — new 'Test Cases' card (LiveEvalResults) and 'Replay browser tests' eligibility gating. All 6 review-request bullets verified against the live preview using the seeded session token. All flows behaved as specified by the request and the implementation.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "LiveEvalResults.jsx is well-scoped (~275 lines). poll() runs once on mount and only intervals when active — this satisfies the 'render for cancelled/completed jobs from a single fetch' requirement. Empty-terminal returns null (no perpetual spinner). Behaviour matches spec exactly.",
+    "Replay eligibility in JobDetail.js (`!!job.progress?.metadata?.preview_url && datasetType === 'scratch_bench_phased'`) correctly decouples the button from job.status. Verified that an empty/completed job without preview_url hides the button, and a cancelled job with preview_url shows it.",
+    "Minor (informational, not blocking): the 'live' pulse currently relies on the parent prop `active = ['generating','running'].includes(job.status)`. So a cancelled job correctly hides the pulse even though poll() still fetches once. Behaviour is correct.",
+    "Job 485cf087 is currently in `Running` state (not Completed as stated in the request prompt) — this does not affect the verification; the Test Cases card still renders 8 rows correctly with mixed statuses and the live pulse is shown (consistent with active=running)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped per request)", "frontend": "100%"},
+  "test_credentials": "localStorage.acm_session_token = 'pw_emergent_gate_post' (from /app/memory/test_credentials.md). Session is valid.",
+  "seed_data_creation": "None — used existing job IDs supplied by main agent.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Verified job IDs and observed behaviour:\n- b55e8206-8efd-4455-a551-3263c4cb0cc6 (Cancelled, 2 live-results): Test Cases card rendered; rows live-test-row-0-0-0 (pass, '4/4 cases', 3 calls) and live-test-row-0-1-0 (running). live-results-header='1/2 done · 1 passed'. No 'live' pulse (job inactive). Replay button DOES show (preview URL present even though cancelled — new gating works).\n- 485cf087-7b2c-4a76-9f61-508f0be6806b (currently Running, 8 results in phase 0): Test Cases card rendered; rows ordered 0-0 .. 0-7 with statuses pass/pass/pass/pass/fail/fail/pass/running; cases shown 4/4, 8/8, 3/3, 5/5, 0/2, 1/2, 5/5; live-results-header='7/8 done · 5 passed · 2 failed'. 'live' pulse visible (active). Replay button present.\n- 0a7903ea-09c8-4c27-a8f0-5569cc43960d (Completed, 0 results): Test Cases card NOT rendered (component returns null, no perpetual Loading…). Replay button absent (no preview URL).\n- Phase headers (live-phase-header-*) are hidden in all three cases since each job has a single phase (multiPhase=false). Could not exercise a multi-phase scratch_bench_phased job in this run — best-effort acknowledged in request.\n- Replay was NEVER clicked (per request instruction).",
+  "rca_of_the_issue": "No issues found. All review-request acceptance criteria pass."
+}

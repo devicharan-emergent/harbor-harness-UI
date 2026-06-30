@@ -624,12 +624,11 @@ export default function JobDetail() {
             </CardContent>
           </Card>
 
-          {/* Live results — polls while the eval is generating/running and
-              merges rows in place (placed below Progress). Final scored view
-              (phase_results) renders below once the job is terminal. */}
-          {['generating', 'running'].includes(job.status) && (
-            <LiveEvalResults jobId={id} active={['generating', 'running'].includes(job.status)} />
-          )}
+          {/* Test Cases — renders from /live-results whenever results exist
+              (including cancelled & terminal jobs), not just the final
+              phase/metrics payload. Polls while the job is generating/running;
+              the component hides itself when there are no results. */}
+          <LiveEvalResults jobId={id} active={['generating', 'running'].includes(job.status)} />
 
           {/* Scores */}
           {hasScores && (
