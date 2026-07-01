@@ -8,7 +8,7 @@ import { Separator } from '@/components/ui/separator';
 import { Loader2, ArrowLeft, ExternalLink, RefreshCw, Layers, Clock, Cpu, ActivitySquare, CheckCircle, XCircle, Ban, Copy, Timer, Play, BarChart3, Wrench } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
-import { getEvalRunGroup, listAllGroupJobs, getEvalAggregate, listEvalJobs, replayEvalJobs } from '@/services/evalApi';
+import { getEvalRunGroup, listAllGroupJobs, getEvalAggregate, listEvalJobs, replayEvalJobs, cancelEvalJob } from '@/services/evalApi';
 import { getJobAgentName, getJobModelName, getJobTemplateName } from '@/lib/jobShape';
 import { parseApiError } from '@/lib/errorUtils';
 import { useCreatedBy } from '@/contexts/AuthContext';
@@ -315,6 +315,7 @@ export default function GroupDetailPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [replaying, setReplaying] = useState(false);
+  const [cancellingGroup, setCancellingGroup] = useState(false);
 
   const fetchAll = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true); else setLoading(true);
@@ -440,6 +441,35 @@ export default function GroupDetailPage() {
     [jobs],
   );
 
+  // Jobs still in a cancellable (active) state — the harness only accepts
+  // DELETE on non-terminal jobs.
+  const cancellableJobs = useMemo(
+    () => jobs.filter(j => ['queued', 'generating', 'running', 'replaying'].includes(j.status)),
+    [jobs],
+  );
+
+  // Cancel every active job in the group. There is no upstream bulk-cancel
+  // endpoint, so we fan out DELETE /eval/jobs/{id} (Promise.allSettled) and
+  // summarise the outcome.
+  const handleCancelGroup = useCallback(async () => {
+    const ids = cancellableJobs.map(j => j.id);
+    if (ids.length === 0) return;
+    if (!window.confirm(`Cancel all ${ids.length} active job${ids.length === 1 ? '' : 's'} in this group?`)) return;
+    setCancellingGroup(true);
+    try {
+      const results = await Promise.allSettled(ids.map(id => cancelEvalJob(id)));
+      const ok = results.filter(r => r.status === 'fulfilled').length;
+      const failed = results.length - ok;
+      if (ok > 0) toast.success(`Cancelled ${ok} job${ok === 1 ? '' : 's'}`);
+      if (failed > 0) toast.error(`${failed} job${failed === 1 ? '' : 's'} could not be cancelled`);
+      fetchAll(true);
+    } catch (err) {
+      toast.error(parseApiError(err, 'Failed to cancel group'));
+    } finally {
+      setCancellingGroup(false);
+    }
+  }, [cancellableJobs, fetchAll]);
+
   const copyId = () => {
     navigator.clipboard.writeText(groupRunId).then(
       () => toast.success('Group ID copied'),
@@ -528,18 +558,35 @@ export default function GroupDetailPage() {
             </div>
           </div>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => fetchAll(true)}
-          disabled={refreshing}
-          data-testid="group-detail-refresh"
-        >
-          {refreshing
-            ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-            : <RefreshCw className="w-3.5 h-3.5 mr-1.5" />}
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {cancellableJobs.length > 0 && (
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={handleCancelGroup}
+              disabled={cancellingGroup}
+              data-testid="group-detail-cancel-all"
+              title={`Cancel all ${cancellableJobs.length} active jobs in this group`}
+            >
+              {cancellingGroup
+                ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                : <Ban className="w-3.5 h-3.5 mr-1.5" />}
+              Cancel group ({cancellableJobs.length})
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => fetchAll(true)}
+            disabled={refreshing}
+            data-testid="group-detail-refresh"
+          >
+            {refreshing
+              ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+              : <RefreshCw className="w-3.5 h-3.5 mr-1.5" />}
+            Refresh
+          </Button>
+        </div>
       </div>
 
       <Separator />
