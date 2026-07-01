@@ -124,6 +124,38 @@ function formatDuration(secs) {
   return s > 0 ? `${m}m ${s}s` : `${m}m`;
 }
 
+// Percentile (linear interpolation) over a sorted numeric array.
+function percentile(sorted, p) {
+  if (!sorted.length) return null;
+  if (sorted.length === 1) return sorted[0];
+  const idx = (p / 100) * (sorted.length - 1);
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  if (lo === hi) return sorted[lo];
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
+}
+
+// The harness aggregate returns counts but no durations. Derive avg/p75/p90
+// wall-clock durations (seconds) from the group's individual jobs, which
+// carry created_at + finished_at.
+function computeDurationStats(jobs) {
+  const durations = (jobs || [])
+    .map(j => {
+      if (!j.created_at || !j.finished_at) return null;
+      const secs = (new Date(j.finished_at) - new Date(j.created_at)) / 1000;
+      return Number.isFinite(secs) && secs > 0 ? secs : null;
+    })
+    .filter(d => d != null)
+    .sort((a, b) => a - b);
+  if (!durations.length) return {};
+  const avg = durations.reduce((s, d) => s + d, 0) / durations.length;
+  return {
+    avg_duration_secs: avg,
+    p75_duration_secs: percentile(durations, 75),
+    p90_duration_secs: percentile(durations, 90),
+  };
+}
+
 function GroupAggregateSummary({ aggregate }) {
   if (!aggregate || !aggregate.problems || aggregate.problems.length === 0) return null;
 
@@ -383,8 +415,13 @@ export default function EvalRuns() {
           }),
         ]);
         setGroupDetailJobs(prev => ({ ...prev, [groupId]: jobsData.jobs || [] }));
+        // Merge harness aggregate (counts) with client-computed durations
+        // (avg/p75/p90) derived from the group's individual jobs.
+        const durationStats = computeDurationStats(jobsData.jobs || []);
         if (aggData) {
-          setGroupAggregates(prev => ({ ...prev, [groupId]: aggData }));
+          setGroupAggregates(prev => ({ ...prev, [groupId]: { ...aggData, ...durationStats } }));
+        } else if (Object.keys(durationStats).length) {
+          setGroupAggregates(prev => ({ ...prev, [groupId]: { problems: [], ...durationStats } }));
         }
       } catch (err) {
         console.error(`Failed to fetch group ${groupId}:`, err);
