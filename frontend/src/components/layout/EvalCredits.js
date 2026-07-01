@@ -42,8 +42,11 @@ export function EvalCredits() {
 
   const available = data?.available === true;
   const ecu = available ? data.ecu : null;
-  const low = available && Number.isFinite(ecu) && ecu < LOW_BALANCE;
-  const negative = available && Number.isFinite(ecu) && ecu <= 0;
+  // Headline shows the true total (spendable + monthly/daily), which can go
+  // negative. `ecu` (spendable-only) is surfaced in the tooltip.
+  const total = available ? data.total : null;
+  const low = available && Number.isFinite(total) && total < LOW_BALANCE;
+  const negative = available && Number.isFinite(total) && total <= 0;
   const valueColor = negative
     ? 'text-rose-600 dark:text-rose-400'
     : low
@@ -83,7 +86,7 @@ export function EvalCredits() {
                 </span>
               ) : available ? (
                 <span className="flex items-baseline gap-1" data-testid="eval-credits-value">
-                  <span className={`text-base font-semibold leading-none tabular-nums ${valueColor}`}>{fmt(ecu)}</span>
+                  <span className={`text-base font-semibold leading-none tabular-nums ${valueColor}`}>{fmt(total)}</span>
                   <span className="text-[10px] font-medium text-muted-foreground tracking-wide">ECU</span>
                   {low && <span className="ml-1 w-1.5 h-1.5 rounded-full bg-amber-500 inline-block" aria-hidden />}
                 </span>
@@ -98,9 +101,9 @@ export function EvalCredits() {
         <TooltipContent side="top" className="text-xs">
           {available ? (
             <>
-              <p>Spendable balance: <span className="font-mono">{fmt(ecu)} ECU</span></p>
+              <p>Total incl. monthly/daily: <span className="font-mono">{fmt(total)} ECU</span></p>
               <p className="text-[10px] text-muted-foreground mt-1">
-                Total incl. monthly/daily: <span className="font-mono">{fmt(data.total)} ECU</span>
+                Spendable balance: <span className="font-mono">{fmt(ecu)} ECU</span>
               </p>
               {low && (
                 <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1">Low balance</p>
