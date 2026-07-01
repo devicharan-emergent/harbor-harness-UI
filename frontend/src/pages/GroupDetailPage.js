@@ -8,7 +8,7 @@ import { Separator } from '@/components/ui/separator';
 import { Loader2, ArrowLeft, ExternalLink, RefreshCw, Layers, Clock, Cpu, ActivitySquare, CheckCircle, XCircle, Ban, Copy, Timer, Play, BarChart3, Wrench } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
-import { getEvalRunGroup, listGroupJobs, getEvalAggregate, listEvalJobs, replayEvalJobs } from '@/services/evalApi';
+import { getEvalRunGroup, listAllGroupJobs, getEvalAggregate, listEvalJobs, replayEvalJobs } from '@/services/evalApi';
 import { getJobAgentName, getJobModelName, getJobTemplateName } from '@/lib/jobShape';
 import { parseApiError } from '@/lib/errorUtils';
 import { useCreatedBy } from '@/contexts/AuthContext';
@@ -324,7 +324,7 @@ export default function GroupDetailPage() {
           console.warn('group meta fetch failed:', err);
           return null;
         }),
-        listGroupJobs(groupRunId, { limit: 100 }).catch(err => {
+        listAllGroupJobs(groupRunId).then(jobs => ({ jobs })).catch(err => {
           console.warn('group jobs fetch failed:', err);
           return { jobs: [] };
         }),

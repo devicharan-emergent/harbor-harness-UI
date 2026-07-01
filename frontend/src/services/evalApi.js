@@ -551,6 +551,22 @@ export const listGroupJobs = async (groupId, params = {}) => {
   return response.data;
 };
 
+/**
+ * List ALL jobs for a group by paginating with offset. The harness returns
+ * `{ jobs, limit, offset }` with no total count, so we walk pages until a
+ * short/empty page (fewer rows than pageSize). Guarded by maxPages.
+ */
+export const listAllGroupJobs = async (groupId, { pageSize = 100, maxPages = 50 } = {}) => {
+  const all = [];
+  for (let page = 0; page < maxPages; page += 1) {
+    const data = await listGroupJobs(groupId, { limit: pageSize, offset: page * pageSize });
+    const rows = Array.isArray(data?.jobs) ? data.jobs : [];
+    all.push(...rows);
+    if (rows.length < pageSize) break;
+  }
+  return all;
+};
+
 // ============ Health ============
 
 /**

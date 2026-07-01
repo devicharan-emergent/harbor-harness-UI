@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { getEvalStats, listEvalJobs, listGroupJobs, getEvalAggregate, cancelEvalJob, listEvalRunGroups, patchEvalRunGroup } from '@/services/evalApi';
+import { getEvalStats, listEvalJobs, listAllGroupJobs, getEvalAggregate, cancelEvalJob, listEvalRunGroups, patchEvalRunGroup } from '@/services/evalApi';
 import { getJobAgentName, getJobModelName, isTestingAgentJob, getTestingAgentInstanceName, getTestingAgentProdJobId } from '@/lib/jobShape';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -407,17 +407,17 @@ export default function EvalRuns() {
     if (!isOpen && groupId !== '_ungrouped' && !groupDetailJobs[groupId]) {
       setLoadingGroup(prev => ({ ...prev, [groupId]: true }));
       try {
-        const [jobsData, aggData] = await Promise.all([
-          listGroupJobs(groupId, { limit: 100 }),
+        const [allJobs, aggData] = await Promise.all([
+          listAllGroupJobs(groupId),
           getEvalAggregate(groupId).catch(err => {
             console.error(`Failed to fetch aggregate for ${groupId}:`, err);
             return null;
           }),
         ]);
-        setGroupDetailJobs(prev => ({ ...prev, [groupId]: jobsData.jobs || [] }));
+        setGroupDetailJobs(prev => ({ ...prev, [groupId]: allJobs }));
         // Merge harness aggregate (counts) with client-computed durations
         // (avg/p75/p90) derived from the group's individual jobs.
-        const durationStats = computeDurationStats(jobsData.jobs || []);
+        const durationStats = computeDurationStats(allJobs);
         if (aggData) {
           setGroupAggregates(prev => ({ ...prev, [groupId]: { ...aggData, ...durationStats } }));
         } else if (Object.keys(durationStats).length) {
