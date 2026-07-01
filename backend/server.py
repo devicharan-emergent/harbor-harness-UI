@@ -1815,13 +1815,14 @@ async def proxy_list_eval_jobs(
 
 @api_router.get("/eval/jobs/aggregate")
 async def proxy_eval_aggregate(
-    group_id: str = Query(..., description="Group ID to aggregate"),
+    group_id: str = Query(..., description="Group run ID to aggregate"),
     created_by: Optional[str] = None,
 ):
-    """Proxy: Get aggregate metrics (time per problem, test pass rates) for a group"""
+    """Proxy: Get aggregate metrics (job counts, test pass rates) for a group.
+    Harness endpoint expects `group_run_id`."""
     try:
         async with httpx.AsyncClient(timeout=30.0) as hclient:
-            params = {"group_id": group_id}
+            params = {"group_run_id": group_id}
             if created_by:
                 params["created_by"] = created_by
             response = await hclient.get(
@@ -1829,7 +1830,14 @@ async def proxy_eval_aggregate(
                 params=params,
             )
             response.raise_for_status()
-            return response.json()
+            data = response.json()
+            # Derive an overall pass rate from the totals the harness returns
+            # (it provides counts but not the ratio) so the UI can render it.
+            passed = data.get("test_cases_passed")
+            total = data.get("test_cases_total")
+            if isinstance(total, (int, float)) and total > 0:
+                data["test_pass_rate"] = passed / total
+            return data
     except httpx.HTTPError as e:
         raise HTTPException(status_code=500, detail=f"Eval API error: {str(e)}")
 
