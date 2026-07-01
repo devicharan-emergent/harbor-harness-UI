@@ -2277,7 +2277,7 @@ async def proxy_group_eval_jobs(
             if created_by:
                 params["created_by"] = created_by
             response = await hclient.get(
-                f"{EVAL_API_BASE}/api/v1/groups/{group_id}/evals",
+                f"{EVAL_API_BASE}/api/v1/group-runs/{group_id}/evals",
                 params=params,
             )
             response.raise_for_status()
