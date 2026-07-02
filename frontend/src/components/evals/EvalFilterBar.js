@@ -80,11 +80,12 @@ export function EvalFilterBar({ value, onChange, currentUserEmail }) {
           {currentUserEmail && (
             <Button
               type="button"
-              variant="ghost"
+              variant={value.createdBy === currentUserEmail ? 'default' : 'ghost'}
               size="sm"
-              onClick={() => update({ createdBy: currentUserEmail })}
+              onClick={() => update({ createdBy: value.createdBy === currentUserEmail ? '' : currentUserEmail })}
               className="absolute right-1 h-6 px-2 text-[11px] font-medium"
-              title={`Fill my email (${currentUserEmail})`}
+              aria-pressed={value.createdBy === currentUserEmail}
+              title={value.createdBy === currentUserEmail ? 'Clear my email' : `Fill my email (${currentUserEmail})`}
               data-testid="filter-created-by-me"
             >
               Me
