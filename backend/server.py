@@ -1798,8 +1798,16 @@ async def proxy_list_eval_jobs(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     created_by: Optional[str] = None,
+    include_shared: Optional[bool] = None,
+    search: Optional[str] = None,
+    agent_name: Optional[str] = None,
+    problem: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
 ):
-    """Proxy: List eval jobs"""
+    """Proxy: List eval jobs. Forwards search + filter params verbatim to the
+    harness (GET /api/v1/evals), which does server-side auto-detection of
+    job_id/batch_id vs group name for `search`, plus AND-combined filters."""
     try:
         async with httpx.AsyncClient(timeout=30.0) as hclient:
             params = {"limit": limit, "offset": offset}
@@ -1807,6 +1815,18 @@ async def proxy_list_eval_jobs(
                 params["status"] = status
             if created_by:
                 params["created_by"] = created_by
+            if include_shared is not None:
+                params["include_shared"] = str(include_shared).lower()
+            if search:
+                params["search"] = search
+            if agent_name:
+                params["agent_name"] = agent_name
+            if problem:
+                params["problem"] = problem
+            if date_from:
+                params["date_from"] = date_from
+            if date_to:
+                params["date_to"] = date_to
             response = await hclient.get(f"{EVAL_API_BASE}/api/v1/evals", params=params)
             response.raise_for_status()
             return response.json()

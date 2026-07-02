@@ -17,7 +17,7 @@ import { Progress } from '@/components/ui/progress';
 import { toast } from 'sonner';
 import { parseApiError } from '@/lib/errorUtils';
 import { RunEvalModal } from '@/components/evals/RunEvalModal';
-import { EvalFilterBar, EMPTY_FILTERS, buildJobFilter } from '@/components/evals/EvalFilterBar';
+import { EvalFilterBar, EMPTY_FILTERS } from '@/components/evals/EvalFilterBar';
 
 const STATUS_CONFIG = {
   queued: { color: 'bg-amber-500', icon: Clock, label: 'Queued' },
@@ -259,6 +259,14 @@ export default function EvalRuns() {
   }, []);
   const [expandedGroups, setExpandedGroups] = useState({});
   const [filters, setFilters] = useState(EMPTY_FILTERS);
+  // Debounced copy of `filters` — text inputs (search/agent/problem) shouldn't
+  // fire a request on every keystroke. 300ms after the last edit we mirror the
+  // value here; fetchJobs keys off this, not the raw `filters`.
+  const [debouncedFilters, setDebouncedFilters] = useState(EMPTY_FILTERS);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedFilters(filters), 300);
+    return () => clearTimeout(t);
+  }, [filters]);
 
   // Expanded group detail jobs (from group API)
   const [groupDetailJobs, setGroupDetailJobs] = useState({});
@@ -300,87 +308,48 @@ export default function EvalRuns() {
     }
   }, []);
 
-  // True when any advanced filter is set. Batch-name search + agent + prompt
-  // + date-range all behave as "narrow across the whole dataset"; with normal
-  // server pagination the filter can only see the current page which looks
-  // broken when matches live on later pages. So we auto-fetch-all here.
-  const hasActiveFilter = useMemo(() => (
-    Boolean(
-      (filters.batch || '').trim() ||
-      (filters.agent || '').trim() ||
-      (filters.prompt || '').trim() ||
-      filters.dateFrom ||
-      filters.dateTo ||
-      filters.mineOnly,
-    )
-  ), [filters]);
-
   const fetchJobs = useCallback(async () => {
     setLoading(true);
     try {
-      // When "Mine only" is on we pass `created_by` to the server so the
-      // filter works across pagination (server-side narrowing) instead of
-      // only on whatever happens to be in the current page.
-      const mineParam = (filters.mineOnly && currentUserCreatedBy) ? { created_by: currentUserCreatedBy } : {};
-      if (hasActiveFilter) {
-        // Exhaustive fetch (capped) so client-side filters see everything.
-        const all = [];
-        const MAX_JOBS = 2000; // safety cap — stops well before OOM
-        for (let offset = 0; offset < MAX_JOBS; offset += pageSize) {
-          const params = { limit: pageSize, offset, ...mineParam };
-          if (selectedStatus !== 'all') params.status = selectedStatus;
-          // eslint-disable-next-line no-await-in-loop
-          const chunk = await listEvalJobs(params);
-          const jobsChunk = chunk.jobs || [];
-          all.push(...jobsChunk);
-          if (jobsChunk.length < pageSize) break;
-        }
-        setJobs(all);
-      } else {
-        const params = { limit: pageSize, offset: page * pageSize, ...mineParam };
-        if (selectedStatus !== 'all') params.status = selectedStatus;
-        const data = await listEvalJobs(params);
-        setJobs(data.jobs || []);
+      // Server-side search + filters (GET /api/eval/jobs → harness
+      // /api/v1/evals). All params are optional and AND-combined; we only
+      // send the ones that have a value.
+      const params = { limit: pageSize, offset: page * pageSize };
+      if (selectedStatus !== 'all') params.status = selectedStatus;
+      const search = (debouncedFilters.batch || '').trim();
+      if (search) params.search = search; // verbatim — server auto-detects id vs name
+      if (debouncedFilters.mineOnly && currentUserCreatedBy) {
+        params.created_by = currentUserCreatedBy;
+        params.include_shared = false; // strict "just mine"
       }
+      const agent = (debouncedFilters.agent || '').trim();
+      if (agent) params.agent_name = agent;
+      const problem = (debouncedFilters.prompt || '').trim();
+      if (problem) params.problem = problem;
+      if (debouncedFilters.dateFrom) params.date_from = debouncedFilters.dateFrom;
+      if (debouncedFilters.dateTo) params.date_to = debouncedFilters.dateTo;
+
+      const data = await listEvalJobs(params);
+      setJobs(data.jobs || []);
     } catch (err) {
       console.error('Failed to fetch jobs:', err);
       setJobs([]);
     } finally {
       setLoading(false);
     }
-  }, [selectedStatus, page, hasActiveFilter, filters.mineOnly, currentUserCreatedBy]);
+  }, [selectedStatus, page, debouncedFilters, currentUserCreatedBy]);
 
   useEffect(() => { fetchStats(); fetchGroupsMeta(); }, []);
   useEffect(() => { fetchJobs(); }, [fetchJobs]);
-  // When a filter toggles on, reset pagination so `page` never ends up stale.
-  useEffect(() => { if (hasActiveFilter) setPage(0); }, [hasActiveFilter]);
+  // Whenever search/filters change, jump back to the first page so the user
+  // isn't stranded on a now-out-of-range offset.
+  useEffect(() => { setPage(0); }, [debouncedFilters, selectedStatus]);
 
-  // Group jobs by group_run_id (falling back to legacy group_id for compatibility)
-  // Filter first — groups with zero matching jobs disappear entirely.
-  // The predicate also gets a `{group_run_id: group_name}` resolver so the
-  // search input matches against the friendly editable group name in
-  // addition to the raw immutable `group_run_id`.
-  const groupNameByRunId = useMemo(() => {
-    const map = {};
-    for (const [gid, meta] of Object.entries(groupMeta || {})) {
-      if (meta?.group_name) map[gid] = meta.group_name;
-    }
-    return map;
-  }, [groupMeta]);
-
-  const filterPredicate = useMemo(
-    () => buildJobFilter(filters, currentUserCreatedBy, groupNameByRunId),
-    [filters, currentUserCreatedBy, groupNameByRunId],
-  );
-
-  const filteredJobs = useMemo(
-    () => jobs.filter(filterPredicate),
-    [jobs, filterPredicate],
-  );
-
+  // Group jobs by group_run_id (falling back to legacy group_id). Filtering
+  // is done server-side now, so we group whatever the server returned.
   const groups = useMemo(() => {
     const map = {};
-    for (const job of filteredJobs) {
+    for (const job of jobs) {
       const gid =
         job.group_run_id ||
         job.group_id ||
@@ -397,7 +366,7 @@ export default function EvalRuns() {
     }
     // Sort groups by latest created descending
     return Object.values(map).sort((a, b) => new Date(b.latestCreated) - new Date(a.latestCreated));
-  }, [filteredJobs]);
+  }, [jobs]);
 
   const toggleGroup = async (groupId) => {
     const isOpen = expandedGroups[groupId];
@@ -433,12 +402,11 @@ export default function EvalRuns() {
 
   const getGroupJobs = (group) => {
     if (group.groupId === '_ungrouped') return group.jobs;
-    // When expanded we fetch the full per-group job list (may include jobs
-    // not in the current page). Apply the same filter so expanded content
-    // respects what the user is narrowing on.
+    // When expanded we fetch the full per-group job list (paginated). Filtering
+    // is server-side, so show the whole group once it's matched.
     const detail = groupDetailJobs[group.groupId];
     if (!detail) return group.jobs;
-    return detail.filter(filterPredicate);
+    return detail;
   };
 
   // Unique agents in a group — uses the same fallback chain as JobDetail
@@ -917,8 +885,8 @@ export default function EvalRuns() {
         </div>
       )}
 
-      {/* Pagination — hidden while filters are active (we fetch-all then). */}
-      {!loading && !hasActiveFilter && jobs.length >= pageSize && (
+      {/* Pagination — server-side now, so it applies even with filters. */}
+      {!loading && jobs.length >= pageSize && (
         <div className="flex items-center justify-between">
           <p className="text-xs text-muted-foreground">Page {page + 1}</p>
           <div className="flex items-center gap-2">
