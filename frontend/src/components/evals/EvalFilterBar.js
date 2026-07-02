@@ -6,17 +6,17 @@ import { Search, SlidersHorizontal, X, Calendar } from 'lucide-react';
 
 // Shape of the `value` prop:
 //   { batch: string, agent: string, prompt: string,
-//     dateFrom: string (YYYY-MM-DD), dateTo: string (YYYY-MM-DD),
-//     mineOnly: boolean }
+//     createdBy: string,
+//     dateFrom: string (YYYY-MM-DD), dateTo: string (YYYY-MM-DD) }
 // All fields are sent to the BFF (GET /api/eval/jobs) as server-side query
 // params — `batch`→`search`, `agent`→`agent_name`, `prompt`→`problem`,
-// dates→`date_from`/`date_to`, `mineOnly`→`created_by=<me>&include_shared=false`.
+// `createdBy`→`created_by`, dates→`date_from`/`date_to`.
 // Filtering is AND-combined server-side (the harness has no OR mode yet).
 
 export const EMPTY_FILTERS = {
   batch: '', agent: '', prompt: '',
+  createdBy: '',
   dateFrom: '', dateTo: '',
-  mineOnly: false,
 };
 
 function Chip({ label, value, onClear, testid }) {
@@ -36,7 +36,7 @@ function Chip({ label, value, onClear, testid }) {
   );
 }
 
-export function EvalFilterBar({ value, onChange }) {
+export function EvalFilterBar({ value, onChange, currentUserEmail }) {
   const [expanded, setExpanded] = useState(false);
   const update = (patch) => onChange({ ...value, ...patch });
   const reset = () => onChange(EMPTY_FILTERS);
@@ -50,8 +50,8 @@ export function EvalFilterBar({ value, onChange }) {
   }, [value]);
 
   const activeCount = useMemo(
-    () => advancedCount + (value.batch?.trim() ? 1 : 0) + (value.mineOnly ? 1 : 0),
-    [advancedCount, value.batch, value.mineOnly],
+    () => advancedCount + (value.batch?.trim() ? 1 : 0) + (value.createdBy?.trim() ? 1 : 0),
+    [advancedCount, value.batch, value.createdBy],
   );
 
   return (
@@ -69,18 +69,28 @@ export function EvalFilterBar({ value, onChange }) {
           />
         </div>
 
-        <Button
-          type="button"
-          variant={value.mineOnly ? 'default' : 'outline'}
-          size="sm"
-          onClick={() => update({ mineOnly: !value.mineOnly })}
-          className="h-8 gap-1.5"
-          aria-pressed={Boolean(value.mineOnly)}
-          data-testid="filter-mine-only-toggle"
-          title="Show only eval runs created by me"
-        >
-          <span className="text-xs">Mine only</span>
-        </Button>
+        <div className="relative flex items-center min-w-[220px]">
+          <Input
+            value={value.createdBy}
+            onChange={(e) => update({ createdBy: e.target.value })}
+            placeholder="Created by (email)"
+            className="h-8 text-xs w-[220px] pr-12"
+            data-testid="filter-created-by-input"
+          />
+          {currentUserEmail && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => update({ createdBy: currentUserEmail })}
+              className="absolute right-1 h-6 px-2 text-[11px] font-medium"
+              title={`Fill my email (${currentUserEmail})`}
+              data-testid="filter-created-by-me"
+            >
+              Me
+            </Button>
+          )}
+        </div>
 
         <Button
           type="button"
@@ -165,6 +175,9 @@ export function EvalFilterBar({ value, onChange }) {
         <div className="flex items-center gap-1.5 flex-wrap pt-0.5" data-testid="filter-active-chips">
           {value.batch?.trim() && (
             <Chip label="Batch" value={value.batch} onClear={() => update({ batch: '' })} testid="chip-batch" />
+          )}
+          {value.createdBy?.trim() && (
+            <Chip label="Created by" value={value.createdBy} onClear={() => update({ createdBy: '' })} testid="chip-created-by" />
           )}
           {value.agent?.trim() && (
             <Chip label="Agent" value={value.agent} onClear={() => update({ agent: '' })} testid="chip-agent" />

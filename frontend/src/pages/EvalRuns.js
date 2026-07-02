@@ -318,10 +318,8 @@ export default function EvalRuns() {
       if (selectedStatus !== 'all') params.status = selectedStatus;
       const search = (debouncedFilters.batch || '').trim();
       if (search) params.search = search; // verbatim — server auto-detects id vs name
-      if (debouncedFilters.mineOnly && currentUserCreatedBy) {
-        params.created_by = currentUserCreatedBy;
-        params.include_shared = false; // strict "just mine"
-      }
+      const createdBy = (debouncedFilters.createdBy || '').trim();
+      if (createdBy) params.created_by = createdBy;
       const agent = (debouncedFilters.agent || '').trim();
       if (agent) params.agent_name = agent;
       const problem = (debouncedFilters.prompt || '').trim();
@@ -570,7 +568,7 @@ export default function EvalRuns() {
       </div>
 
       {/* Advanced filters (batch / agent / prompt / date range) */}
-      <EvalFilterBar value={filters} onChange={setFilters} />
+      <EvalFilterBar value={filters} onChange={setFilters} currentUserEmail={currentUserCreatedBy} />
 
       {/* Groups */}
       {loading ? (
